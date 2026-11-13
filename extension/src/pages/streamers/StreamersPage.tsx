@@ -1,0 +1,106 @@
+import { useState } from "react";
+import { Trash2, Users } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Switch } from "@/components/ui/Switch";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ApiStateView } from "@/components/ApiStateView";
+import { Avatar, LiveBadge, PlatformBadge } from "@/components/streamers/PlatformBadge";
+import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
+import { useAction } from "@/hooks/useAction";
+import type { Page, Streamer } from "@/types/api";
+
+function StreamerCard({ s, onChanged }: { s: Streamer; onChanged: () => void }) {
+  const client = useApiClient();
+  const [confirming, setConfirming] = useState(false);
+  const toggle = useAction(async (next: boolean) => {
+    await client.patch(`/api/v1/streamers/${s.id}`, { monitoring_enabled: next });
+    onChanged();
+  });
+  const remove = useAction(async () => {
+    await client.delete(`/api/v1/streamers/${s.id}`);
+    onChanged();
+  });
+
+  return (
+    <Card className="flex flex-col p-4">
+      <div className="flex items-start gap-3">
+        <Avatar src={s.profile_image_url} name={s.display_name} size={44} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-fg">{s.display_name}</div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            <PlatformBadge platform={s.platform} />
+            <LiveBadge isLive={s.is_live} />
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 min-h-8 text-xs text-fg-muted">
+        <div className="truncate">{s.current_category ?? "No category"}</div>
+        {s.current_title && <div className="truncate text-fg-subtle">{s.current_title}</div>}
+      </div>
+      {(toggle.error || remove.error) && <p className="mt-2 text-xs text-danger">{toggle.error ?? remove.error}</p>}
+      <div className="mt-4 flex items-center justify-between border-t border-ink-700 pt-3">
+        <label className="flex items-center gap-2 text-xs text-fg-muted">
+          <Switch
+            checked={s.monitoring_enabled}
+            disabled={toggle.pending}
+            onChange={(v) => void toggle.run(v)}
+            label={`Monitor ${s.display_name}`}
+          />
+          Monitor
+        </label>
+        {confirming ? (
+          <div className="flex gap-1.5">
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" variant="danger" loading={remove.pending} onClick={() => void remove.run()}>
+              Remove
+            </Button>
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={`Remove ${s.display_name}`}
+            onClick={() => setConfirming(true)}
+            icon={<Trash2 className="size-3.5" />}
+          />
+        )}
+      </div>
+    </Card>
+  );
+}
+
+export function StreamersPage({ onDiscover }: { onDiscover: () => void }) {
+  const query = useApiQuery<Page<Streamer>>("/api/v1/streamers?limit=100");
+  return (
+    <>
+      <PageHeader title="My Streamers" description="Channels on your watchlist. Toggle monitoring per streamer." />
+      <ApiStateView query={query} feature="your watchlist">
+        {(page) =>
+          page.items.length === 0 ? (
+            <EmptyState
+              icon={<Users className="size-5" />}
+              title="Your watchlist is empty"
+              action={
+                <Button variant="primary" size="sm" onClick={onDiscover}>
+                  Discover streamers
+                </Button>
+              }
+            >
+              Add Twitch or Kick channels to start monitoring them.
+            </EmptyState>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {page.items.map((s) => (
+                <StreamerCard key={s.id} s={s} onChanged={query.reload} />
+              ))}
+            </div>
+          )
+        }
+      </ApiStateView>
+    </>
+  );
+}

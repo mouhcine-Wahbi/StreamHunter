@@ -1,0 +1,26 @@
+# Node / extension
+node_modules/
+extension/dist/
+*.tsbuildinfo
+
+# Python / backend
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
+*.sqlite3
+backend/media/
+
+# Secrets: never commit real environment files
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

@@ -30,7 +30,10 @@ it into a clip. Nothing is ever published without your approval.
 | Live chat activity per session, highlight notifications | ✅ |
 | Review workflow (approve / reject / reopen), Twitch clip creation (auto-capture or on request), Kick manual clip step | ✅ (Twitch needs credentials) |
 | Publish only after explicit confirmation | ✅ |
-| Media export (MP4, vertical crops, subtitles) | ⏳ Phase 7 (needs an authorized media source) |
+| Twitch VOD links at each highlight's timestamp | ✅ (needs credentials) |
+| Post-stream analysis of your own recordings: audio peaks, scene changes, combined scoring, merging | ✅ (needs FFmpeg) |
+| MP4 export: 9:16 / 1:1 / 16:9, loudness-normalized | ✅ (needs FFmpeg + your recording) |
+| Subtitles, live tab-audio capture | ⏳ not started |
 
 ## Technology
 
@@ -42,6 +45,7 @@ it into a clip. Nothing is ever published without your approval.
 * Node.js 20+ and npm 10+
 * Google Chrome 116+ (or another Chromium browser)
 * Python 3.12+ (backend)
+* FFmpeg with ffprobe (optional; needed only for recording analysis and MP4 export)
 
 ## Install & build the extension
 
@@ -167,6 +171,20 @@ Verify your credentials against the live APIs (optionally set `SH_TWITCH_LOGIN` 
 ```bash
 set -a; . ./.env; set +a; .venv/bin/python -m pytest -m integration -v
 ```
+
+## Recordings, analysis and export
+
+StreamHunter never downloads streams. To analyse a broadcast after it ends, or to export MP4s,
+attach a recording you own, for example a VOD you downloaded from your own dashboard:
+
+1. **Live Monitoring → (ended session) → Recording & analysis → Upload recording.** Tick the
+   rights confirmation. If the file doesn't start at the beginning of the stream, enter the stream
+   second where it starts.
+2. Click **Analyze**. Highlights gain measured audio and visual signals, strong loud moments chat
+   missed are added, and overlapping highlights are merged.
+3. In the **Clip Library**, choose an aspect ratio and click **Export MP4**, then **Download MP4**.
+
+For very large files, copy them into the media folder shown in the panel and register them through the API (`POST /api/v1/media/register`).
 
 ## Known limitations
 

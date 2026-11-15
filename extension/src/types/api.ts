@@ -44,6 +44,8 @@ export interface MonitoringSession {
   streamer_id: number;
   streamer_display_name: string | null;
   broadcast_started_at: string | null;
+  vod_id?: string | null;
+  vod_url?: string | null;
   platform: Platform;
   started_at: string;
   ended_at: string | null;
@@ -79,6 +81,8 @@ export interface HighlightCandidate {
   streamer_display_name?: string;
   streamer_username?: string | null;
   clip?: ClipSummary | null;
+  origin?: "chat" | "vod" | "merged";
+  vod_url_at?: string | null;
   platform: Platform;
   timestamp: string;
   start_offset_sec: number | null;
@@ -110,4 +114,40 @@ export interface Clip {
   published_at: string | null;
   published_url: string | null;
   created_at: string;
+}
+
+export interface MediaSource {
+  id: number;
+  session_id: number | null;
+  kind: "upload" | "registered";
+  original_name: string;
+  size_bytes: number;
+  duration_sec: number | null;
+  has_audio: boolean;
+  has_video: boolean;
+  width: number | null;
+  height: number | null;
+  offset_in_stream_sec: number;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface MediaJob {
+  id: number;
+  kind: "analyze" | "export";
+  media_source_id: number;
+  clip_id: number | null;
+  status: "queued" | "running" | "succeeded" | "failed";
+  result: Record<string, unknown>;
+  error_message: string | null;
+}
+
+export interface MediaCapabilities {
+  ffmpeg_available: boolean;
+  max_upload_mb: number;
+  media_folder: string;
+  supported_extensions: string[];
+  subtitles: string;
+  live_tab_audio: string;
 }

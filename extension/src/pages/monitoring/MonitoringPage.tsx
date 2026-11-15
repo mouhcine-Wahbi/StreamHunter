@@ -9,6 +9,7 @@ import { ApiStateView } from "@/components/ApiStateView";
 import { MonitoringCard } from "@/components/monitoring/MonitoringCard";
 import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
 import { SessionActivity } from "@/components/monitoring/SessionActivity";
+import { SessionMedia } from "@/components/monitoring/SessionMedia";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import type { useMonitoring } from "@/hooks/useMonitoring";
@@ -107,6 +108,12 @@ export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof u
                           <SessionActivity sessionId={s.id} />
                         ) : (
                           s.error_message && <p className="w-full text-xs text-danger">{s.error_message}</p>
+                        )}
+                        {s.status !== "active" && (
+                          <details className="w-full">
+                            <summary className="cursor-pointer text-xs text-fg-muted hover:text-fg">Recording &amp; analysis</summary>
+                            <SessionMedia session={s} onVodFound={reload} />
+                          </details>
                         )}
                       </li>
                     ))}

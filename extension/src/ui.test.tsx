@@ -434,7 +434,7 @@ describe("review & clip workflow (Phase 6)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save clip link" }));
     expect(await screen.findByRole("link", { name: /Platform clip/ })).toHaveAttribute("href", "https://kick.com/kickstar/clips/clip_1");
 
-    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    await userEvent.click(screen.getByRole("button", { name: "Export MP4" }));
     expect(await screen.findByText(/no authorized media source/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Mark as published" }));
@@ -455,5 +455,108 @@ describe("review & clip workflow (Phase 6)", () => {
     expect(toggle).toHaveAttribute("aria-checked", "true");
     await userEvent.click(toggle);
     await waitFor(async () => expect((await getSettings()).clips.autoCreatePlatformClips).toBe(false));
+  });
+});
+
+describe("recordings, VOD and export (Phase 7)", () => {
+  const session = {
+    id: 1, streamer_id: 3, streamer_display_name: "Alpha", platform: "twitch", started_at: "2026-11-15T10:00:00Z",
+    ended_at: "2026-11-15T12:00:00Z", status: "ended", last_checked_at: null, last_event_at: null, error_message: null,
+    broadcast_started_at: "2026-11-15T10:00:00Z", vod_id: null, vod_url: null,
+  };
+  const caps = { ffmpeg_available: true, max_upload_mb: 4096, media_folder: "/srv/media/library/1", supported_extensions: [".mp4"], subtitles: "not_implemented", live_tab_audio: "not_implemented" };
+
+  it("finds the VOD, uploads a recording with rights confirmation, and shows analysis results", async () => {
+    let s: Record<string, unknown> = { ...session };
+    let media: unknown[] = [];
+    let jobPolls = 0;
+    const uploads: FormData[] = [];
+    mockFetch((url, init) => {
+      if (url.endsWith("/api/v1/monitoring/1/vod")) {
+        s = { ...s, vod_id: "v1", vod_url: "https://www.twitch.tv/videos/v1" };
+        return json(s);
+      }
+      if (url.includes("/api/v1/monitoring?")) return json({ items: [s], total: 1, limit: 50, offset: 0 });
+      if (url.includes("/api/v1/streams/live")) return json({ items: [], total: 0, limit: 50, offset: 0 });
+      if (url.endsWith("/api/v1/media/capabilities")) return json(caps);
+      if (url.endsWith("/api/v1/media/upload")) {
+        uploads.push(init!.body as FormData);
+        media = [{ id: 7, session_id: 1, kind: "upload", original_name: "vod.mp4", size_bytes: 10, duration_sec: 5400, has_audio: true, has_video: true, width: 1920, height: 1080, offset_in_stream_sec: 0, status: "ready", error_message: null, created_at: "x" }];
+        return json(media[0], 201);
+      }
+      if (url.includes("/api/v1/media?session_id=1")) return json({ items: media, total: media.length, limit: 50, offset: 0 });
+      if (url.endsWith("/api/v1/media/7/analyze")) return json({ id: 3, kind: "analyze", media_source_id: 7, clip_id: null, status: "queued", result: {}, error_message: null }, 202);
+      if (url.endsWith("/api/v1/media/jobs/3")) {
+        jobPolls++;
+        return json({ id: 3, kind: "analyze", media_source_id: 7, clip_id: null, status: "succeeded", error_message: null,
+          result: { audio_peaks: 4, scene_changes: 12, candidates_enriched: 3, candidates_created: 1, candidates_merged: 1 } });
+      }
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/monitoring";
+    render(<App />);
+    await userEvent.click(await screen.findByText("Recording & analysis"));
+    await userEvent.click(await screen.findByRole("button", { name: "Find Twitch VOD" }));
+    expect(await screen.findByRole("link", { name: /Twitch VOD/ })).toHaveAttribute("href", "https://www.twitch.tv/videos/v1");
+
+    const upload = screen.getByRole("button", { name: "Upload recording" });
+    expect(upload).toBeDisabled(); // rights must be confirmed first
+    await userEvent.upload(screen.getByLabelText("Recording file"), new File(["x"], "vod.mp4", { type: "video/mp4" }));
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.click(upload);
+    expect(await screen.findByText("vod.mp4")).toBeInTheDocument();
+    expect(uploads[0]!.get("rights_confirmed")).toBe("true");
+    expect(uploads[0]!.get("session_id")).toBe("1");
+
+    await userEvent.click(screen.getByRole("button", { name: "Analyze" }));
+    expect(await screen.findByText(/4 audio peaks · 12 scene changes · 3 highlights enriched · 1 new highlights · 1 merged/, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(jobPolls).toBeGreaterThan(0);
+  });
+
+  it("shows VOD deep links, recording-only highlights and measured signals", async () => {
+    mockFetch((url) =>
+      url.includes("/api/v1/highlights")
+        ? json({ items: [{ id: 1, session_id: 1, streamer_id: 3, streamer_display_name: "Alpha", streamer_username: "alpha", platform: "twitch",
+            timestamp: "2026-11-15T11:02:05Z", start_offset_sec: 3725, end_offset_sec: 3760, score: 77, confidence: 0.5, category: "unknown",
+            reasons: ["Audio 12 dB louder than usual for 4 s"], origin: "vod", vod_url_at: "https://www.twitch.tv/videos/v1?t=1h2m5s",
+            signal_breakdown: { chat: null, audio: 80, visual: 40, context: null }, status: "pending_review", clip: null }], total: 1, limit: 50, offset: 0 })
+        : json({ detail: "Not Found" }, 404),
+    );
+    installWorker();
+    window.location.hash = "/highlights";
+    render(<App />);
+    expect(await screen.findByText("from recording")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open in VOD/ })).toHaveAttribute("href", "https://www.twitch.tv/videos/v1?t=1h2m5s");
+    expect(screen.getByText(/signals: · audio 80 · visual 40/)).toBeInTheDocument();
+  });
+
+  it("exports and downloads the MP4", { timeout: 15000 }, async () => {
+    let c: Record<string, unknown> = { id: 4, candidate_id: 1, platform: "kick", platform_clip_id: null, platform_clip_url: null, local_file_path: null,
+      title: null, duration_seconds: 30, aspect_ratio: "9:16", status: "unsupported", error_message: null, source: "editor", edit_url: null,
+      requested_at: null, request_lag_seconds: null, published_at: null, published_url: null, created_at: "2026-11-15T12:00:00Z" };
+    let polls = 0;
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL: () => undefined }));
+    mockFetch((url, init) => {
+      if (url.endsWith("/api/v1/clips/4/export") && init?.method === "POST") {
+        c = { ...c, status: "exporting" };
+        return json(c, 202);
+      }
+      if (url.endsWith("/api/v1/clips/4/file")) return new Response(new Blob(["mp4"]), { status: 200, headers: { "Content-Type": "video/mp4" } });
+      if (url.includes("/api/v1/clips")) {
+        // Stays "exporting" for a few refreshes, like a real FFmpeg job.
+        if (c.status === "exporting" && ++polls >= 3) c = { ...c, status: "ready", local_file_path: "clip_4_9x16.mp4" };
+        return json({ items: [c], total: 1, limit: 50, offset: 0 });
+      }
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/clips";
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Export MP4" }));
+    expect(await screen.findByText(/Exporting 9:16 MP4/)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Download MP4" }, { timeout: 9000 }));
+    await waitFor(() => expect(clickSpy).toHaveBeenCalled());
   });
 });

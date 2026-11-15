@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Clapperboard, ExternalLink, FileVideo, Pencil, Send } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -47,16 +47,34 @@ export function ClipCard({ c, onChanged }: { c: Clip; onChanged: () => void }) {
     onChanged();
   });
   const doExport = useAction(async () => {
+    setExportMsg(null);
     try {
       await client.post(`/api/v1/clips/${c.id}/export`);
+      onChanged();
     } catch (e) {
       setExportMsg(e instanceof Error ? e.message : "Export unavailable");
     }
   });
+  const download = useAction(async () => {
+    const blob = await client.blob(`/api/v1/clips/${c.id}/file`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = c.local_file_path ?? `clip_${c.id}.mp4`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  });
+  // While exporting, keep refreshing until the job finishes (the status may stay
+  // "exporting" across several refreshes, so this must be an interval, not a one-shot).
+  useEffect(() => {
+    if (c.status !== "exporting") return;
+    const t = setInterval(onChanged, 2000);
+    return () => clearInterval(t);
+  }, [c.status, onChanged]);
   const clipReq = useClipRequest(onChanged);
 
   const canPublish = c.status === "created" || c.status === "ready" || c.status === "unsupported";
-  const error = patch.error ?? publish.error ?? clipReq.error;
+  const error = patch.error ?? publish.error ?? clipReq.error ?? download.error;
 
   function saveTitle(e: FormEvent) {
     e.preventDefault();
@@ -122,11 +140,20 @@ export function ClipCard({ c, onChanged }: { c: Clip; onChanged: () => void }) {
             <ExternalLink className="size-3" /> Edit on Twitch
           </a>
         )}
-        {c.local_file_path ? (
-          <Badge tone="live" icon={<FileVideo className="size-3" />}>Exported file</Badge>
+        {c.status === "exporting" ? (
+          <Badge tone="accent">Exporting {c.aspect_ratio ?? ""} MP4…</Badge>
+        ) : c.local_file_path ? (
+          <>
+            <Button size="sm" variant="primary" loading={download.pending} icon={<FileVideo className="size-3.5" />} onClick={() => void download.run()}>
+              Download MP4
+            </Button>
+            <Button size="sm" variant="ghost" loading={doExport.pending} onClick={() => void doExport.run()}>
+              Re-export
+            </Button>
+          </>
         ) : (
           <Button size="sm" variant="ghost" loading={doExport.pending} icon={<FileVideo className="size-3.5" />} onClick={() => void doExport.run()}>
-            Export
+            Export MP4
           </Button>
         )}
         {c.platform === "twitch" && (c.status === "approved" || c.status === "failed") && (

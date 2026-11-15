@@ -41,6 +41,7 @@ class FakeTwitch:
     clip_ready_after: int = 1
     clips_requested: list[dict] = field(default_factory=list)
     clip_polls: dict[str, int] = field(default_factory=dict)
+    videos: list[dict] = field(default_factory=list)
 
     def handler(self, req: httpx.Request) -> httpx.Response:
         self.requests.append(req)
@@ -94,6 +95,9 @@ class FakeTwitch:
                 ids = q.get("user_id", [])
                 assert len(ids) <= 100, "Helix allows at most 100 user_id values"
                 return _json({"data": [s for uid, s in self.live.items() if uid in ids], "pagination": {}})
+            if path == "/helix/videos":
+                uid = q.get("user_id", [""])[0]
+                return _json({"data": [v for v in self.videos if v.get("user_id") == uid], "pagination": {}})
             if path == "/helix/clips":
                 cid = q["id"][0]
                 self.clip_polls[cid] = self.clip_polls.get(cid, 0) + 1

@@ -22,6 +22,7 @@ from app.schemas.activity import (
 )
 from app.schemas.common import ERROR_RESPONSES, Page
 from app.services.activity_service import session_out
+from app.services.vod_service import lookup_vod
 
 router = APIRouter(prefix="/api/v1/monitoring", tags=["monitoring"], responses=ERROR_RESPONSES)
 
@@ -147,6 +148,14 @@ async def list_sessions(
 @router.get("/{session_id}", response_model=MonitoringSessionOut, summary="One monitoring session")
 async def get_session(session_id: int, svc: ActivityServiceDep) -> MonitoringSessionOut:
     return session_out(await svc.get_session(session_id))
+
+
+@router.post("/{session_id}/vod", response_model=MonitoringSessionOut, summary="Look up the platform VOD now (Twitch)")
+async def find_vod(session_id: int, request: Request, svc: ActivityServiceDep, db: DbDep) -> MonitoringSessionOut:
+    session = await svc.get_session(session_id)
+    await lookup_vod(session, request.app.state.registry)
+    await db.flush()
+    return session_out(session)
 
 
 @router.get("/{session_id}/activity", summary="Live chat activity for a session (aggregates only, no messages)")

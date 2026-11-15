@@ -13,13 +13,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.routes import auth, clips, health, highlights, monitoring, platform_auth, platforms, streamers, streams, webhooks
+from app.api.routes import auth, clips, health, highlights, media, monitoring, platform_auth, platforms, streamers, streams, webhooks
 from app.api.routes import settings as settings_routes
 from app.config import Settings, get_settings
 from app.db.session import create_engine, create_sessionmaker
 from app.errors import install_error_handlers
 from app.integrations.registry import PlatformRegistry
 from app.logging_config import configure_logging
+from app.clipping.jobs import MediaJobRunner
+from app.clipping.media_access import MediaLibrary
 from app.clipping.worker import ClipWorker
 from app.monitoring.chat_manager import ChatManager
 from app.monitoring.engine import MonitoringEngine
@@ -50,6 +52,7 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
             await app.state.scheduler.stop()
         await app.state.chat.stop()
         await app.state.clip_worker.stop()
+        await app.state.media_jobs.stop()
         await app.state.registry.aclose()
         await app.state.engine.dispose()
         log.info("shutdown")
@@ -76,6 +79,8 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
     app.state.monitoring.chat = app.state.chat
     app.state.clip_worker = ClipWorker(app.state.sessionmaker, app.state.registry, app.state.token_cipher)
     app.state.chat.clip_worker = app.state.clip_worker
+    app.state.media_library = MediaLibrary(settings.media_root, ffmpeg=settings.ffmpeg_path, ffprobe=settings.ffprobe_path)
+    app.state.media_jobs = MediaJobRunner(app.state.sessionmaker, app.state.media_library, settings)
     app.state.kick_verifier = None  # created on first webhook (needs Kick credentials)
 
     app.add_middleware(
@@ -103,6 +108,7 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
         settings_routes.router,
         platforms.router,
         webhooks.router,
+        media.router,
     ):
         app.include_router(router)
     return app

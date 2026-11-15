@@ -146,7 +146,33 @@ relative to the stream's baseline and can't create a candidate on their own.
 | Live stack check | ✅ | Built extension + uvicorn: Twitch approve → create refused with "Connect your Twitch account…". Kick approve → manual instructions → pasted clip link → export refused honestly → publish after confirmation |
 
 **Found and fixed:** the aspect-ratio selector stretched across the whole clip card; it is now fixed width.
-## Phase 7 — VOD & advanced AI ⏳
+## Phase 7 — VOD & advanced AI 🟡 (core delivered; subtitles and live audio not started)
+
+| Item | Status | Notes |
+|---|---|---|
+| Twitch VOD discovery + timestamped VOD links on highlights | ✅ | Get Videos (archive), matched to the broadcast start; rechecked every 30 min |
+| Kick VOD | 🚫 | No official API |
+| Authorized media sources: upload (streamed, size limit) or register (per-user folder), rights confirmation | ✅ | Never downloads from platforms |
+| Audio analysis (loudness peaks vs the rolling baseline) | ✅ | Real FFmpeg in tests |
+| Visual analysis (scene-change density) | ✅ | |
+| Context-aware scoring: chat + audio + visual, renormalized | ✅ | `chat_only_score` kept for transparency |
+| Audio-only candidates, candidate merging | ✅ | |
+| MP4 export: trim, 9:16 / 1:1 / 16:9, loudness normalization, download | ✅ | |
+| Recordings panel per session, analysis status, export progress, download, VOD links | ✅ | |
+| Subtitles (speech-to-text) | ⏳ | Needs a local speech model (e.g. faster-whisper, a large download). Reported as `not_implemented` |
+| Live tab-audio capture (`chrome.tabCapture` + offscreen document) | ⏳ | Needs extra permissions and a user gesture each time; not started |
+| Laughter / excitement classification, gameplay or visual event recognition | ⏳ | Would need ML models; loudness and scene cuts are the honest baseline |
+| Tests | ✅ | Backend 109 (incl. 9 real-FFmpeg media tests); extension 71 |
+| Live stack check | ✅ | Built extension + uvicorn: uploaded an MP4 via the file picker → FFmpeg analysis (1 audio peak, 2 scene cuts, 2 highlights enriched) → approve → export → downloaded 1080×1920 H.264/AAC, 25.0 s |
+
+**Found and fixed during this phase:**
+* Windows outside the recording got a visual score of 0 (lowering their score) instead of "not measured".
+* An unreadable upload returned 500 and leaked the server path; it now returns 400 `invalid_media` with the file name only.
+* The Clip Library stopped polling an export that took longer than one refresh; it now polls until the export is done.
+
+**Tuning point:** with measured audio, a chat-flagged moment over quiet audio gets a lower combined
+score (the specified weights: chat 25 %, audio 30 %, visual 20 %) and may drop below the minimum.
+The chat-only score stays visible. Re-weighting needs real-stream data.
 
 ## Known platform limitations (by design, not bugs)
 

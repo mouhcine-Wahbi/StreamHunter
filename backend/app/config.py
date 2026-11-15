@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     min_poll_seconds: int = Field(default=60, ge=10)
     retention_sweep_seconds: int = Field(default=3600, ge=60)
 
+    # --- Media (Phase 7): only user-provided, rights-confirmed recordings are processed ---
+    media_root: str = "./media"  # per-user folders: <media_root>/library/<user_id>/, exports in /exports/<user_id>/
+    max_upload_mb: int = Field(default=4096, ge=1)
+    ffmpeg_path: str = "ffmpeg"
+    ffprobe_path: str = "ffprobe"
+    media_job_timeout_seconds: int = Field(default=3600, ge=10)
+    max_concurrent_media_jobs: int = Field(default=1, ge=1, le=8)
+
     # --- Platforms (credentials only ever live here, never in the extension) ---
     twitch_client_id: str | None = None
     twitch_client_secret: SecretStr | None = None

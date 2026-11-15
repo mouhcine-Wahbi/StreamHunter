@@ -220,6 +220,26 @@ Rules carried over from the design:
 
 ---
 
+## 5b. Post-stream analysis and export (Phase 7)
+
+```text
+user-provided recording (upload / register, rights confirmed)
+      │ ffprobe
+      ▼
+media_sources ──analyze job──► loudness per second (astats) + scene changes (select/showinfo)
+      │                              │
+      │                              ├─ enrich covered highlights: score = renormalized(chat, audio, visual)
+      │                              ├─ audio-only peaks (≥ 6 dB over the 2-min rolling median, ≥ 2 s) → origin "vod"
+      │                              └─ merge overlapping pending highlights
+      └──export job──► trim [start,end] − offset_in_stream → crop/pad 9:16 | 1:1 | 16:9 → loudnorm → MP4
+Twitch Get Videos (archive) ──► session.vod_url ──► highlight.vod_url_at (?t=…, approximate)
+```
+
+`offset_in_stream_sec` maps file time to stream time (0 for a full VOD). Audio "excitement" is
+loudness relative to the recording's own baseline; it can't tell laughter from shouting, so
+audio-only highlights are categorized `unknown`. Subtitles (speech-to-text) and live tab-audio
+capture are not implemented.
+
 ## 6. Clip state machine
 
 ```text

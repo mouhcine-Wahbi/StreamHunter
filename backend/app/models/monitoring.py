@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CreatedAtMixin, TimestampMixin
@@ -31,6 +31,10 @@ class MonitoringSession(Base):
     # Platform-reported start of the broadcast this session covers. Lets a paused session be
     # resumed only for the *same* broadcast, and is the base for stream offsets (approximate).
     broadcast_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    # Official recording on the platform (Twitch Get Videos), found after the broadcast.
+    vod_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    vod_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vod_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
     streamer: Mapped[Streamer] = relationship(lazy="joined")
 
@@ -100,8 +104,11 @@ class HighlightCandidate(TimestampMixin, Base):
     reasons: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     signal_breakdown: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending_review")
+    # Where the highlight came from: chat (live), vod (post-stream media analysis), merged.
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, default="chat", server_default="chat")
 
     streamer: Mapped[Streamer] = relationship(lazy="joined")
+    session: Mapped[MonitoringSession] = relationship(lazy="joined")
 
 
 class Clip(TimestampMixin, Base):
@@ -132,3 +139,47 @@ class Clip(TimestampMixin, Base):
     request_lag_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     published_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class MediaSource(TimestampMixin, Base):
+    """A recording the user provided and confirmed they have the rights to process.
+
+    StreamHunter never downloads media from Twitch/Kick itself.
+    """
+
+    __tablename__ = "media_sources"
+    __table_args__ = (Index("ix_media_sources_user_session", "user_id", "session_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("monitoring_sessions.id", ondelete="SET NULL"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # upload | registered
+    relative_path: Mapped[str] = mapped_column(Text, nullable=False)  # inside the user's library folder
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duration_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    has_audio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    has_video: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Stream offset (seconds since broadcast start) at file time 0. 0 for a full VOD.
+    offset_in_stream_sec: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    rights_confirmed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ready")  # ready | error
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class MediaJob(TimestampMixin, Base):
+    __tablename__ = "media_jobs"
+    __table_args__ = (Index("ix_media_jobs_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # analyze | export
+    media_source_id: Mapped[int] = mapped_column(ForeignKey("media_sources.id", ondelete="CASCADE"), nullable=False)
+    clip_id: Mapped[int | None] = mapped_column(ForeignKey("clips.id", ondelete="CASCADE"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")  # queued | running | succeeded | failed
+    result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)

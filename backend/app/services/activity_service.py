@@ -12,6 +12,7 @@ from app.errors import NotFoundError
 from app.models import Clip, HighlightCandidate, MonitoringSession, StreamEvent, User
 from app.schemas.activity import ClipOut, ClipSummary, HighlightOut, MonitoringSessionOut, StreamEventOut
 from app.schemas.common import Page
+from app.services.vod_service import vod_link_at
 
 
 async def _page(db: AsyncSession, q: Select, limit: int, offset: int) -> tuple[list, int]:  # type: ignore[type-arg]
@@ -30,6 +31,8 @@ def highlight_out(h: HighlightCandidate, clip: Clip | None = None) -> HighlightO
     out = HighlightOut.model_validate(h)
     out.streamer_display_name = h.streamer.display_name
     out.streamer_username = h.streamer.username
+    if h.session is not None:
+        out.vod_url_at = vod_link_at(h.session.vod_url, h.start_offset_sec)
     if clip is not None:
         out.clip = ClipSummary.model_validate(clip)
     return out

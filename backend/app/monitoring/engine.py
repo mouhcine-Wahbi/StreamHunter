@@ -27,6 +27,7 @@ from app.integrations.registry import PlatformRegistry
 from app.models import MonitoringLease, MonitoringSession, StreamEvent, Streamer, User, UserStreamer
 from app.monitoring.reconciler import ReconcileStats, reconcile
 from app.services.stream_status_service import StreamStatusService
+from app.services.vod_service import refresh_vods
 
 log = logging.getLogger("streamhunter.monitoring")
 
@@ -124,6 +125,13 @@ class MonitoringEngine:
                 await self.chat.sync()  # start/stop chat collectors to match sessions
             except Exception:
                 log.exception("chat_sync_failed")
+        if only_users is None:
+            try:
+                async with self.maker() as db:
+                    await refresh_vods(db, self.registry)
+                    await db.commit()
+            except Exception:
+                log.exception("vod_refresh_failed")
         return summary
 
     async def _cycle(self, db: AsyncSession, only_users: set[int] | None) -> CycleSummary:

@@ -57,7 +57,8 @@ export class ApiClient {
 
   async request<T>(method: Method, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" };
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const isForm = typeof FormData !== "undefined" && body instanceof FormData;
+    if (body !== undefined && !isForm) headers["Content-Type"] = "application/json";
     const token = await this.getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -68,7 +69,7 @@ export class ApiClient {
       res = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
         signal: controller.signal,
         credentials: "omit",
       });
@@ -107,6 +108,26 @@ export class ApiClient {
   }
   delete<T>(path: string) {
     return this.request<T>("DELETE", path);
+  }
+
+  /** Multipart upload (the browser sets the boundary header). No timeout: files can be large. */
+  upload<T>(path: string, form: FormData): Promise<T> {
+    return new ApiClient({ baseUrl: this.baseUrl, getToken: this.getToken, fetchImpl: this.fetchImpl, timeoutMs: 6 * 60 * 60_000 }).request<T>(
+      "POST",
+      path,
+      form,
+    );
+  }
+
+  /** Authenticated binary download. */
+  async blob(path: string): Promise<Blob> {
+    const token = await this.getToken();
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "omit",
+    });
+    if (!res.ok) throw new ApiError("http", `Download failed (HTTP ${res.status})`, res.status);
+    return res.blob();
   }
 
   health(): Promise<HealthResponse> {

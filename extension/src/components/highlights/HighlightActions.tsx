@@ -75,6 +75,11 @@ export function HighlightActions({ h, onChanged }: { h: HighlightCandidate; onCh
             <ExternalLink className="size-3" /> Open clip
           </a>
         )}
+        {h.vod_url_at && /^https:\/\/(www\.)?twitch\.tv\//.test(h.vod_url_at) && (
+          <a href={h.vod_url_at} target="_blank" rel="noreferrer noopener" className="inline-flex h-8 items-center gap-1 px-2 text-xs text-fg-muted hover:text-fg">
+            <ExternalLink className="size-3" /> Open in VOD
+          </a>
+        )}
         {url && (
           <a href={url} target="_blank" rel="noreferrer noopener" className="inline-flex h-8 items-center gap-1 px-2 text-xs text-fg-muted hover:text-fg">
             <ExternalLink className="size-3" /> Open stream

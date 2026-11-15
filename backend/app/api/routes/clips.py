@@ -5,9 +5,14 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import FileResponse
 
 from app.api.dependencies import ActivityServiceDep, CurrentUser, DbDep, PageDep
+from app.clipping.jobs import export_window, latest_media_for_session
 from app.clipping.worker import ClipWorker
+from app.domain.status import transition
+from app.errors import NotFoundError
+from app.models import MediaJob
 from app.domain.enums import ClipStatus, Platform
 from app.schemas.activity import ClipCreateRequest, ClipOut, ClipPatch, PublishRequest
 from app.schemas.common import ERROR_RESPONSES, Page
@@ -57,10 +62,37 @@ async def retry(clip_id: int, body: ClipCreateRequest, request: Request, svc: Cl
     return await _request(clip_id, body, request, svc, db)
 
 
-@router.post("/{clip_id}/export", response_model=ClipOut, summary="Export the media file (needs an authorized media source)")
-async def export(clip_id: int, svc: ClipServiceDep) -> ClipOut:
-    await svc.export(clip_id)
-    raise AssertionError("unreachable")
+@router.post("/{clip_id}/export", response_model=ClipOut, status_code=202,
+             summary="Export an MP4 from the recording attached to the highlight's session")
+async def export(clip_id: int, request: Request, svc: ClipServiceDep, db: DbDep, user: CurrentUser) -> ClipOut:
+    clip = await svc.clip(clip_id)
+    cand = await svc.candidate(clip.candidate_id)
+    media = await latest_media_for_session(db, user.id, cand.session_id)
+    if media is None:
+        await svc.export(clip_id)  # raises the explicit "no authorized media source" error
+    request.app.state.media_library.require_tools()
+    export_window(cand, media)  # fail fast if the recording doesn't cover the moment
+    previous = clip.status
+    clip.status = transition(clip.status, ClipStatus.EXPORTING).value
+    clip.error_message = None
+    job = MediaJob(user_id=user.id, kind="export", media_source_id=media.id, clip_id=clip.id, status="queued",
+                   result={"previous_status": previous})
+    db.add(job)
+    await db.commit()
+    request.app.state.media_jobs.submit(job.id)
+    await db.refresh(clip)
+    return ClipOut.model_validate(clip)
+
+
+@router.get("/{clip_id}/file", summary="Download the exported MP4", response_class=FileResponse)
+async def download(clip_id: int, request: Request, svc: ClipServiceDep, user: CurrentUser) -> FileResponse:
+    clip = await svc.clip(clip_id)
+    if not clip.local_file_path:
+        raise NotFoundError("This clip has no exported file")
+    path = request.app.state.media_library.resolve_export(user.id, clip.local_file_path)
+    if not path.is_file():
+        raise NotFoundError("The exported file is missing on the backend")
+    return FileResponse(path, media_type="video/mp4", filename=clip.local_file_path)
 
 
 @router.patch("/{clip_id}", response_model=ClipOut, summary="Title, aspect ratio, or manual clip URL")

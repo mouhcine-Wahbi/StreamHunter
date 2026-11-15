@@ -74,6 +74,17 @@ Implemented in Phase 6:
 * Manually entered clip URLs must be https on the platform's own domains. The extension only renders
   https links.
 
+Implemented in Phase 7:
+
+* Media is processed only after the user confirms they have the rights to it (required in the API and the UI).
+  StreamHunter never downloads from Twitch or Kick.
+* Every file lives in a per-user folder. Registered paths must be relative, contain no `..`, resolve
+  inside that folder, and have an allow-listed media extension. Upload file names are sanitized,
+  uploads are streamed with a size limit, and partial or invalid files are deleted.
+* FFmpeg/ffprobe run as argument lists (no shell) with timeouts and bounded concurrency. Exports are written
+  under a temporary name and then moved into place. Error messages show file names only, never server paths.
+* Exported files are downloadable only by their owner.
+
 Planned:
 
 * HTTPS required in production; CORS restricted to the extension origin.

@@ -69,3 +69,29 @@ async def get_clip(helix: HelixClient, clip_id: str) -> HelixClip | None:
     body = await helix._get("/clips", [("id", clip_id)])  # app token is enough to read clips
     items = HelixClient._parse(HelixClip, body)
     return items[0] if items else None
+
+
+class HelixVideo(_M):
+    id: str
+    url: str
+    created_at: str
+    type: str | None = None
+    duration: str | None = None
+
+
+async def find_archive_vod(helix: HelixClient, user_id: str, broadcast_started_at) -> HelixVideo | None:  # type: ignore[no-untyped-def]
+    """The past-broadcast VOD whose creation time matches the broadcast start (±15 min).
+
+    Twitch creates the archive when the stream starts, if the channel stores past broadcasts.
+    """
+    from datetime import datetime, timedelta
+
+    body = await helix._get("/videos", [("user_id", user_id), ("type", "archive"), ("first", 5)])
+    for v in HelixClient._parse(HelixVideo, body):
+        try:
+            created = datetime.fromisoformat(v.created_at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if broadcast_started_at is None or abs(created - broadcast_started_at) <= timedelta(minutes=15):
+            return v
+    return None

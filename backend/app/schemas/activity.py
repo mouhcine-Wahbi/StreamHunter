@@ -25,6 +25,8 @@ class MonitoringSessionOut(Schema):
     last_event_at: datetime | None
     error_message: str | None
     broadcast_started_at: datetime | None = None
+    vod_id: str | None = None
+    vod_url: str | None = None
 
 
 class StreamEventOut(Schema):
@@ -55,9 +57,11 @@ class HighlightOut(Schema):
     reasons: list[str]
     signal_breakdown: dict[str, Any]
     status: ClipStatus
+    origin: str = "chat"
     created_at: datetime
     updated_at: datetime
     clip: ClipSummary | None = None
+    vod_url_at: str | None = None  # the platform VOD at this moment (approximate)
 
 
 class ClipOut(Schema):

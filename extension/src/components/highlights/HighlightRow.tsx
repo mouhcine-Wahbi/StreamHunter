@@ -52,6 +52,7 @@ export function HighlightRow({ h, compact = false, onChanged }: { h: HighlightCa
           <span className="truncate text-sm font-medium text-fg">{h.streamer_display_name ?? `Streamer #${h.streamer_id}`}</span>
           <PlatformBadge platform={h.platform} />
           <Badge tone={meta.tone}>{meta.label}</Badge>
+          {h.origin === "vod" && <Badge tone="accent">from recording</Badge>}
           {h.clip && (
             <Badge tone={CANDIDATE_STATUS_META[h.clip.status].tone}>clip: {CANDIDATE_STATUS_META[h.clip.status].label.toLowerCase()}</Badge>
           )}
@@ -62,8 +63,10 @@ export function HighlightRow({ h, compact = false, onChanged }: { h: HighlightCa
         </div>
         {!compact && (
           <div className="mt-1 text-[11px] text-fg-subtle tabular">
-            Confidence {Math.round(h.confidence * 100)}% · signals: chat
-            {h.signal_breakdown?.chat != null && ` ${Math.round(h.signal_breakdown.chat)}`}
+            Confidence {Math.round(h.confidence * 100)}% · signals:
+            {h.signal_breakdown?.chat != null && ` chat ${Math.round(h.signal_breakdown.chat)}`}
+            {h.signal_breakdown?.audio != null && ` · audio ${Math.round(h.signal_breakdown.audio)}`}
+            {h.signal_breakdown?.visual != null && ` · visual ${Math.round(h.signal_breakdown.visual)}`}
             {h.signal_breakdown && h.signal_breakdown.audio == null && " · audio and video not analysed yet"}
             {h.start_offset_sec !== null && " · offsets approximate"}
           </div>

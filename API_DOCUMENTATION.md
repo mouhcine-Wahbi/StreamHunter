@@ -111,12 +111,27 @@ pauses when the lease lapses, and resumes after a pause for the same broadcast.
 | `POST /api/v1/clips/{id}/create` | `{accept_current_moment?: false}`. Twitch only: needs a connected account with `clips:edit` (503 `requires_authorization`) and a live channel (409 `stream_offline`). For moments older than 90 s it answers 409 `moment_passed` unless `accept_current_moment` is true, because Twitch clips what is on air *now*. The clip is requested immediately and confirmed via Get Clips (up to ~25 s) → `created` with its URL, or `failed` with a reason. Kick: 409 `requires_manual_action` |
 | `POST /api/v1/clips/{id}/retry` | Same as create, for `failed` clips |
 | `PATCH /api/v1/clips/{id}` | `{title?, aspect_ratio?, platform_clip_url?}`. The URL is for the manual workflow (must be https on kick.com / clips.twitch.tv) and turns `unsupported` into `created` |
-| `POST /api/v1/clips/{id}/export` | 409 `media_unavailable`: export needs an authorized media source, and none exists in the MVP |
+| `POST /api/v1/clips/{id}/export` | With a recording attached to the highlight's session: 202, clip → `exporting` → `ready` (MP4 trimmed to the highlight window, reframed to the clip's aspect ratio 9:16 / 1:1 / 16:9, loudness-normalized). Without one: 409 `media_unavailable`. A recording that doesn't cover the moment: 400 `outside_recording`. If the export fails, the clip returns to its previous status with `Export failed: …` |
+| `GET /api/v1/clips/{id}/file` | Download the exported MP4 (authenticated) |
 | `POST /api/v1/clips/{id}/publish` | `{confirm: true, published_url?}`. Records that **you** published it. StreamHunter never posts anywhere; without `confirm: true` the request is rejected (422) |
 
 **Auto-capture:** with `clips.autoCreatePlatformClips` on (the default), a Twitch highlight that meets
 your minimum score gets its official clip requested the moment it is detected (`source: "auto"`).
 The highlight itself stays `pending_review`.
+
+### Recordings & post-stream analysis (Phase 7)
+StreamHunter only processes recordings **you** provide and confirm you have the rights to.
+It never downloads media from Twitch or Kick.
+
+| | |
+|---|---|
+| `GET /api/v1/media/capabilities` | `{ffmpeg_available, max_upload_mb, media_folder, supported_extensions, audio_analysis, visual_analysis, export, subtitles: "not_implemented", live_tab_audio: "not_implemented", platform_vod_download: "unsupported"}` |
+| `POST /api/v1/media/upload` | multipart: `file`, `rights_confirmed=true` (required), `session_id?`, `offset_in_stream_sec` (stream second at file time 0; 0 for a full VOD). Streamed to disk with a size limit, then probed with ffprobe; 400 `invalid_media` if it isn't audio/video |
+| `POST /api/v1/media/register` | `{relative_path, rights_confirmed: true, session_id?, offset_in_stream_sec}` for large files already copied into `media_folder`. Paths outside that folder are refused |
+| `GET /api/v1/media?session_id=` · `PATCH /api/v1/media/{id}` · `DELETE /api/v1/media/{id}` | List / attach to a session or change the offset / forget (uploaded files are deleted; registered files are left alone) |
+| `POST /api/v1/media/{id}/analyze` | 202 → job. Loudness per second and scene changes. Existing highlights the recording covers get **measured** `audio` / `visual` signals and a recomputed score (`chat_only_score` is kept). Strong loudness peaks with no chat highlight become `origin: "vod"` highlights (category `unknown`). Overlapping pending highlights are merged (`origin: "merged"`) |
+| `GET /api/v1/media/jobs/{id}` | `{status: queued\|running\|succeeded\|failed, result, error_message}` |
+| `POST /api/v1/monitoring/{id}/vod` | Look up the Twitch VOD now (also done automatically every 30 min for recent sessions). Highlights then carry `vod_url_at` (`…/videos/<id>?t=1h2m5s`, approximate) |
 
 ### Settings
 | | |
@@ -135,4 +150,4 @@ configuration and your connection state, never hardcoded in the UI.
 
 ## Not yet available (planned)
 `/ws/monitoring`: not planned for the MVP. A Manifest V3 service worker can't hold a socket open, so events arrive with each heartbeat instead ·
-Media export (needs an authorized media source; Phase 7).
+Subtitles and live tab-audio capture (see IMPLEMENTATION_STATUS.md).

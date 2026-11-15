@@ -46,7 +46,7 @@ export function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[radial-gradient(1200px_600px_at_80%_-10%,#8b5cf614,transparent)]">
+    <div data-surface="workspace" className="flex h-screen overflow-hidden bg-[radial-gradient(1200px_600px_at_80%_-10%,#8b5cf614,transparent)]">
       <Sidebar route={route} onNavigate={navigate} status={monitoring.state.status} />
       <main className="flex-1 overflow-y-auto">
         <div key={route} className="mx-auto max-w-6xl px-8 py-8">

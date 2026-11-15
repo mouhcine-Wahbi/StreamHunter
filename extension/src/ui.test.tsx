@@ -139,3 +139,85 @@ describe("side panel", () => {
     expect(await screen.findByText("Nothing to review yet")).toBeInTheDocument();
   });
 });
+
+describe("account (Phase 2)", () => {
+  const user = { id: 1, email: "ed@example.com", username: "ed", created_at: "2026-11-15T00:00:00Z" };
+
+  it("signs in, stores only the StreamHunter session token, and signs out", async () => {
+    const fetch = mockFetch((url, init) => {
+      if (url.endsWith("/api/v1/auth/login")) return json({ access_token: "sess-123", expires_at: "2026-12-01T00:00:00Z", user });
+      if (url.endsWith("/api/v1/auth/logout")) return new Response(null, { status: 204 });
+      if (url.endsWith("/api/v1/auth/me")) {
+        const auth = (init?.headers as Record<string, string>)?.Authorization;
+        return auth === "Bearer sess-123" ? json(user) : json({ error: { code: "invalid_session", message: "x" } }, 401);
+      }
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/settings";
+    render(<App />);
+    await userEvent.type(await screen.findByLabelText("Email"), "ed@example.com");
+    await userEvent.type(screen.getByLabelText("Password"), "a long password");
+    await userEvent.click(within(screen.getByRole("form", { name: "StreamHunter account" })).getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByText("ed@example.com")).toBeInTheDocument();
+    expect(fakeChrome.internals.store["sh.authToken"]).toBe("sess-123");
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(fakeChrome.internals.store["sh.authToken"]).toBeUndefined());
+    expect(fetch.mock.calls.some(([u]) => String(u).endsWith("/api/v1/auth/logout"))).toBe(true);
+  });
+
+  it("shows field errors from registration", async () => {
+    mockFetch((url) =>
+      url.endsWith("/api/v1/auth/register")
+        ? json({ error: { code: "email_taken", message: "An account with this email already exists", details: null } }, 409)
+        : json({ detail: "Not Found" }, 404),
+    );
+    installWorker();
+    window.location.hash = "/settings";
+    render(<App />);
+    await userEvent.click(await screen.findByRole("radio", { name: "Create account" }));
+    await userEvent.type(screen.getByLabelText("Email"), "ed@example.com");
+    await userEvent.type(screen.getByLabelText("Username"), "ed");
+    await userEvent.type(screen.getByLabelText("Password"), "a long password");
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByText("An account with this email already exists")).toBeInTheDocument();
+  });
+
+  it("asks to sign in when the backend answers 401", async () => {
+    mockFetch(() => json({ error: { code: "not_authenticated", message: "Authentication required" } }, 401));
+    installWorker();
+    window.location.hash = "/streamers";
+    render(<App />);
+    expect(await screen.findByText("Sign-in required")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
+  });
+
+  it("treats 'already in watchlist' as added and shows platform-not-configured clearly", async () => {
+    mockFetch((url, init) => {
+      if (url.includes("/streamers/search?platform=twitch")) {
+        return json([{ platform: "twitch", platform_user_id: "1", username: "alpha", display_name: "Alpha", profile_image_url: null, is_live: false, current_title: null, current_category: null }]);
+      }
+      if (url.includes("/streamers/search?platform=kick")) {
+        return json({ error: { code: "platform_not_configured", message: "Kick is not configured on the backend (KICK_CLIENT_ID / KICK_CLIENT_SECRET)." } }, 503);
+      }
+      if (url.endsWith("/api/v1/streamers") && init?.method === "POST") {
+        return json({ error: { code: "already_in_watchlist", message: "already", details: { streamer_id: 1 } } }, 409);
+      }
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/discover";
+    render(<App />);
+    await userEvent.type(await screen.findByLabelText("Channel name"), "alpha");
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Add" }));
+    expect(await screen.findByRole("button", { name: "In watchlist" })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("radio", { name: "Kick" }));
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByText("Not available yet")).toBeInTheDocument();
+    expect(screen.getByText(/Kick is not configured on the backend/)).toBeInTheDocument();
+  });
+});

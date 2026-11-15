@@ -32,13 +32,23 @@
 * Navigation routes and outbound links are allow-listed (only `https:` clip URLs are rendered as links).
 * No remote code, no `eval`, and the default MV3 content security policy.
 
-## Backend specifics (Phase 2+)
+## Backend specifics
 
-* Passwords hashed with a modern KDF (argon2/bcrypt). Plaintext is never stored.
+Implemented in Phase 2:
+
+* Passwords hashed with Argon2id (rehashed transparently when parameters change). Plaintext is never stored.
+* Sessions are random 256-bit bearer tokens. Only their SHA-256 is stored, and they can be revoked (logout) and expire.
+* Login gives the same response and similar timing for unknown accounts and wrong passwords.
+* Register and login are rate-limited per client (in-process; use a shared store when running multiple instances).
+* Every resource query is filtered by owner. Another user's record answers 404, exactly like a missing one.
+* Logs are JSON with bearer tokens, OAuth codes, secrets and passwords redacted.
+* In production, the backend refuses to start without `TOKEN_ENCRYPTION_KEY` or with SQLite.
+
+Planned:
+
 * OAuth `state` is single-use and time-limited; Kick uses PKCE (S256).
 * Kick webhooks: RSA-SHA256 signature verification using Kick's published public
   key, timestamp freshness check, and deduplication by message ID.
-* Rate limiting on auth and search endpoints.
 * HTTPS required in production; CORS restricted to the extension origin.
 
 ## Reporting

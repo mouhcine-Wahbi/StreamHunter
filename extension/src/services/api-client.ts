@@ -15,6 +15,12 @@ export class ApiError extends Error {
   get isHttp(): boolean {
     return this.kind === "http";
   }
+
+  /** Machine-readable code from the backend's error envelope, e.g. "already_in_watchlist". */
+  get code(): string | null {
+    const err = (this.detail as { error?: { code?: unknown } } | null)?.error;
+    return typeof err?.code === "string" ? err.code : null;
+  }
 }
 
 export interface HealthResponse {

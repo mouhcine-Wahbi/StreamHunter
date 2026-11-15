@@ -4,6 +4,16 @@ import { ApiError } from "@/services/api-client";
 import type { QueryState } from "@/hooks/useApiQuery";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
+import { sendRequest } from "@/services/runtime";
+
+/** Opens Settings → Account: in place inside the workspace, otherwise in a workspace tab. */
+function openAccountSettings() {
+  if (document.querySelector('[data-surface="workspace"]')) {
+    location.hash = "/settings";
+    return;
+  }
+  void sendRequest({ type: "app/open", route: "/settings" }).then(() => window.close());
+}
 
 /**
  * Renders loading / error states of a backend query truthfully, and the
@@ -46,8 +56,25 @@ export function ApiStateView<T>({
     }
     if (error instanceof ApiError && error.kind === "http" && error.status === 401) {
       return (
-        <EmptyState compact={compact} tone="warn" icon={<KeyRound className="size-5" />} title="Sign-in required">
-          Sign in to your StreamHunter backend to load {feature}.
+        <EmptyState
+          compact={compact}
+          tone="warn"
+          icon={<KeyRound className="size-5" />}
+          title="Sign-in required"
+          action={
+            <Button size="sm" variant="primary" onClick={openAccountSettings}>
+              Sign in
+            </Button>
+          }
+        >
+          Sign in to your StreamHunter account to load {feature}.
+        </EmptyState>
+      );
+    }
+    if (error instanceof ApiError && error.kind === "http" && (error.status === 501 || error.status === 503)) {
+      return (
+        <EmptyState compact={compact} tone="warn" icon={<PlugZap className="size-5" />} title="Not available yet">
+          {error.message}
         </EmptyState>
       );
     }

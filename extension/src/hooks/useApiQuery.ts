@@ -1,11 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiClient, ApiError } from "@/services/api-client";
-import { getAuthToken } from "@/store/storage";
+import { getAuthToken, onStorageKeyChange, STORAGE_KEYS } from "@/store/storage";
 import { useSettings } from "./useSettings";
 
+/** Increments whenever the session token changes (sign in / sign out in any extension page). */
+function useAuthVersion(): number {
+  const [version, setVersion] = useState(0);
+  useEffect(() => onStorageKeyChange(STORAGE_KEYS.authToken, () => setVersion((v) => v + 1)), []);
+  return version;
+}
+
+/** A client for the configured backend. A new instance after sign-in/out makes queries refetch. */
 export function useApiClient(): ApiClient {
   const { settings } = useSettings();
-  return useMemo(() => new ApiClient({ baseUrl: settings.backendUrl, getToken: getAuthToken }), [settings.backendUrl]);
+  const authVersion = useAuthVersion();
+  return useMemo(
+    () => new ApiClient({ baseUrl: settings.backendUrl, getToken: getAuthToken }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings.backendUrl, authVersion],
+  );
 }
 
 export interface QueryState<T> {

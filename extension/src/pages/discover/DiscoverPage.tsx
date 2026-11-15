@@ -10,6 +10,7 @@ import { ApiStateView } from "@/components/ApiStateView";
 import { Avatar, LiveBadge, PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
 import { useAction } from "@/hooks/useAction";
+import { ApiError } from "@/services/api-client";
 import { PLATFORMS, type Platform, type StreamerSearchResult } from "@/types/api";
 
 const USERNAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{1,24}$/;
@@ -18,7 +19,12 @@ function ResultCard({ r }: { r: StreamerSearchResult }) {
   const client = useApiClient();
   const [added, setAdded] = useState(false);
   const add = useAction(async () => {
-    await client.post("/api/v1/streamers", { platform: r.platform, username: r.username });
+    try {
+      await client.post("/api/v1/streamers", { platform: r.platform, username: r.username });
+    } catch (e) {
+      // Already on the watchlist is a success from the user's point of view.
+      if (!(e instanceof ApiError && e.code === "already_in_watchlist")) throw e;
+    }
     setAdded(true);
   });
   return (

@@ -1,6 +1,6 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-13_
+_Last updated: 2026-11-15_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
@@ -40,7 +40,32 @@ Every data view (watchlist, search, sessions, highlights, clips, platform
 connections) already calls its real `/api/v1` endpoint. Until that endpoint exists,
 the view says so ("Backend not reachable" or "Not available on this backend").
 
-## Phase 2 — Backend foundation ⏳
+## Phase 2 — Backend foundation ✅
+
+| Item | Status | Notes |
+|---|---|---|
+| FastAPI app factory, consistent error envelope, JSON logging with secret redaction | ✅ | `backend/app/` |
+| SQLAlchemy 2 (async) models for all 10 tables + UTC-safe datetime type | ✅ | SQLite (aiosqlite); PostgreSQL via asyncpg URL |
+| Alembic initial migration | ✅ | Tested: upgrade matches the models exactly; downgrade is clean |
+| Health `/health`, `/api/v1/health` (with DB check) | ✅ | |
+| Accounts: register / login / logout / me | ✅ | Argon2id, opaque revocable sessions (only hashes stored), uniform login errors, rate limiting |
+| Watchlist API (search, list, add, get, patch, delete) | ✅ | Ownership-scoped, no duplicates, shared channel rows, per-user monitoring flag |
+| Streams, monitoring sessions/events, highlights, clips: read endpoints | ✅ | Real DB queries with filters and pagination. Writes come in Phases 4–6 |
+| Settings API (GET/PATCH, validated deep merge) | ✅ | The extension still stores settings locally; syncing comes in Phase 4 |
+| Platform adapter interface + registry + capability reporting | ✅ | `StreamingPlatform` ABC; Twitch/Kick report real config state |
+| Twitch/Kick API calls | ⏳ | Return 503 `platform_not_configured` or 501 `not_implemented`, never fake results |
+| Clip status state machine (publish requires confirmation) | ✅ | `app/domain/status.py`, ready for Phases 5–6 |
+| Token encryption utility (Fernet) | ✅ | Used once OAuth tokens are stored (Phase 3) |
+| Extension: account sign-in / register / sign-out, 401 → "Sign in" action | ✅ | Data views refetch after sign-in |
+| Backend tests | ✅ | 40 pytest tests |
+| Extension tests | ✅ | 53 Vitest tests |
+| Real stack check | ✅ | Built extension in Chromium + live uvicorn: sign-up, Overview counts, capabilities, Discover error. No console errors |
+
+**Known gaps at the end of Phase 2**
+* The monitoring heartbeat endpoint does not exist yet. Starting monitoring therefore shows
+  *Degraded: this backend does not provide the monitoring endpoint (404)*. Phase 4 adds it.
+* The data-retention cleanup job is not implemented yet (Phase 4). No chat data is collected yet, so nothing accumulates.
+
 ## Phase 3 — Twitch & Kick integration ⏳
 ## Phase 4 — Browser monitoring (backend lease) ⏳
 ## Phase 5 — Chat intelligence ⏳
@@ -57,5 +82,3 @@ the view says so ("Backend not reachable" or "Not available on this backend").
 | A Twitch clip is a link, not a downloadable file | `video_download: not_guaranteed` |
 | Monitoring only runs while Chrome is open | Lease expires and sessions pause |
 
-## Docs still to write
-`API_DOCUMENTATION.md` and `DATABASE_SCHEMA.md` arrive with the backend in Phase 2.

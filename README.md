@@ -7,8 +7,9 @@ Twitch and Kick streamers while your browser is open, reads chat to spot moments
 when the audience reacts, explains *why* each moment was flagged, and helps you turn
 it into a clip. Nothing is ever published without your approval.
 
-> **Status:** Phase 1 (extension foundation) is complete. The backend, platform
-> integrations and detection come next. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+> **Status:** Phase 2 is complete. The extension and the backend (accounts, watchlist,
+> settings, and platform capability reporting) both work. Twitch and Kick API calls come next,
+> in Phase 3. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ![Overview](docs/screenshots/app-overview.png)
 
@@ -19,20 +20,21 @@ it into a clip. Nothing is ever published without your approval.
 | MV3 extension: popup, full-page workspace, side panel | ✅ |
 | Settings (monitoring interval, sensitivity, score threshold, languages, clip defaults, notifications, time zone, retention) | ✅ |
 | Browser-based monitoring control with heartbeat, backoff and restart recovery | ✅ (extension side) |
-| Streamer search & watchlist (Twitch + Kick) | ⏳ Phase 3 |
+| Backend: accounts (Argon2, revocable sessions), watchlist API, settings API, capability reporting | ✅ |
+| Streamer search via Twitch / Kick APIs | ⏳ Phase 3 (the API currently returns an explicit "not configured" / "not implemented" error) |
 | Chat-based highlight detection with explainable scores | ⏳ Phase 5 |
 | Twitch clip creation; Kick manual workflow | ⏳ Phase 6 |
 
 ## Technology
 
 * **Extension:** Chrome Manifest V3, React 19, TypeScript (strict), Vite 7, Tailwind CSS 4, Lucide icons
-* **Backend (Phase 2+):** Python 3.12+, FastAPI, Pydantic, SQLAlchemy 2, Alembic, SQLite → PostgreSQL, HTTPX, Pytest
+* **Backend:** Python 3.12+, FastAPI, Pydantic, SQLAlchemy 2, Alembic, SQLite → PostgreSQL, HTTPX, Pytest
 
 ## Requirements
 
 * Node.js 20+ and npm 10+
 * Google Chrome 116+ (or another Chromium browser)
-* Python 3.12+ (for the backend, from Phase 2)
+* Python 3.12+ (backend)
 
 ## Install & build the extension
 
@@ -81,23 +83,60 @@ cover settings validation, storage persistence, the API client, the monitoring s
 machine (backoff, recovery, restore after restart), service worker wiring and
 messaging, and rendering of the popup, workspace and side panel.
 
-## Backend & platforms
+## Run the backend
 
-The backend arrives in Phase 2. The extension expects it at `http://localhost:8000`,
-which you can change in **Settings → Backend**. Until it runs, the extension shows
-*Backend offline* and never displays made-up data.
+From the repository root, create a virtual environment:
 
-Platform setup (Phase 3), summarised:
+```bash
+cd backend && python3 -m venv .venv
+```
 
-* **Twitch:** create an app at https://dev.twitch.tv/console/apps, set the redirect
-  URI to `http://localhost:8000/api/v1/auth/twitch/callback`, and put the client ID
-  and secret in `backend/.env`.
+Install the dependencies (including the test tools):
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+```
+
+Create your local configuration and the database:
+
+```bash
+cp ../.env.example .env
+```
+
+```bash
+.venv/bin/alembic upgrade head
+```
+
+Start the API:
+
+```bash
+.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+* Health: http://localhost:8000/health
+* Interactive API docs: http://localhost:8000/docs
+
+Then open the extension, go to **Settings → Account** and create an account. Your watchlist,
+highlights and clips belong to that account.
+
+Run the backend tests:
+
+```bash
+.venv/bin/python -m pytest
+```
+
+## Twitch & Kick setup (used from Phase 3)
+
+* **Twitch:** create an app at https://dev.twitch.tv/console/apps, set the redirect URI
+  to `http://localhost:8000/api/v1/auth/twitch/callback`, and put `TWITCH_CLIENT_ID` and
+  `TWITCH_CLIENT_SECRET` in `backend/.env`.
 * **Kick:** create an app in Kick's developer settings and set the redirect URI to
-  `http://localhost:8000/api/v1/auth/kick/callback`. Chat monitoring additionally
-  requires a **public HTTPS webhook URL** (for example a Cloudflare Tunnel), because
-  Kick delivers chat only through webhooks.
+  `http://localhost:8000/api/v1/auth/kick/callback`. Put `KICK_CLIENT_ID` and
+  `KICK_CLIENT_SECRET` in `backend/.env`. Chat monitoring also needs a **public HTTPS
+  webhook URL** (`KICK_WEBHOOK_PUBLIC_URL`, for example a Cloudflare Tunnel), because Kick delivers chat
+  only through webhooks.
 
-See [.env.example](.env.example) for all variables.
+Without these, **Settings → Platform connections** shows exactly what is missing.
 
 ## Known limitations
 
@@ -111,4 +150,6 @@ See [.env.example](.env.example) for all variables.
 * [PROJECT_PLAN.md](PROJECT_PLAN.md): phases, risks, decisions
 * [ARCHITECTURE.md](ARCHITECTURE.md): system design and verified platform capabilities
 * [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): what works, what is pending
+* [API_DOCUMENTATION.md](API_DOCUMENTATION.md): endpoints, errors, conventions (live docs at `/docs`)
+* [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md): tables, constraints, migrations
 * [SECURITY.md](SECURITY.md): security and privacy policy

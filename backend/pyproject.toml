@@ -1,0 +1,19 @@
+[project]
+name = "streamhunter-backend"
+version = "0.2.0"
+description = "StreamHunter API: Find the moment. Create the clip."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+  "integration: talks to real Twitch/Kick APIs; needs credentials (deselected by default)",
+]
+addopts = "-m 'not integration'"
+filterwarnings = ["error::sqlalchemy.exc.SAWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

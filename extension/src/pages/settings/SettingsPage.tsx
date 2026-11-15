@@ -12,6 +12,7 @@ import { normalizeBackendUrl } from "@/utils/settings";
 import { cn } from "@/utils/cn";
 import { NumberField, Section } from "./sections";
 import { PlatformConnections } from "./PlatformConnections";
+import { AccountSection } from "./AccountSection";
 
 function BackendUrlForm({ value, onSave }: { value: string; onSave: (url: string) => Promise<unknown> }) {
   const [draft, setDraft] = useState(value);
@@ -174,6 +175,10 @@ export function SettingsPage() {
       <div className="border-t border-ink-700">
         <Section id="backend" title="Backend" description="Where the extension sends requests. Use HTTPS for anything that is not your own machine.">
           <BackendUrlForm value={s.backendUrl} onSave={(backendUrl) => update({ backendUrl })} />
+        </Section>
+
+        <Section id="account" title="Account" description="Your StreamHunter account on this backend. Your watchlist, highlights and clips belong to it.">
+          <AccountSection />
         </Section>
 
         <Section

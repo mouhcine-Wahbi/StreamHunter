@@ -13,7 +13,7 @@ import { ALARMS, syncAlarms } from "./alarm-manager";
 import { renderBadge } from "./badge";
 import { handleMessage, isTrustedSender } from "./message-handler";
 import { createMonitoringManager } from "./monitoring-manager";
-import { NOTIFICATION_PREFIX } from "./notifications";
+import { HIGHLIGHT_PREFIX, NOTIFICATION_PREFIX } from "./notifications";
 import { syncSettingsToBackend } from "./settings-sync";
 
 const manager = createMonitoringManager();
@@ -42,8 +42,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.notifications?.onClicked.addListener((id) => {
-  if (!id.startsWith(NOTIFICATION_PREFIX)) return;
-  void chrome.tabs.create({ url: chrome.runtime.getURL("app.html#/monitoring") });
+  const route = id.startsWith(HIGHLIGHT_PREFIX) ? "/highlights" : id.startsWith(NOTIFICATION_PREFIX) ? "/monitoring" : null;
+  if (!route) return;
+  void chrome.tabs.create({ url: chrome.runtime.getURL(`app.html#${route}`) });
   void chrome.notifications.clear(id);
 });
 

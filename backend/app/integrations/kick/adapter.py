@@ -28,7 +28,7 @@ from app.integrations.kick.auth import KickOAuth
 from app.integrations.kick.client import KickApiClient
 from app.integrations.kick.schemas import KickChannel
 
-IMPLEMENTED: frozenset[str] = frozenset({"stream_lookup", "live_detection", "category_lookup"})
+IMPLEMENTED: frozenset[str] = frozenset({"stream_lookup", "live_detection", "category_lookup", "chat_monitoring"})
 
 
 class KickAdapter(StreamingPlatform):
@@ -54,6 +54,14 @@ class KickAdapter(StreamingPlatform):
     @property
     def oauth(self) -> OAuthProvider | None:
         return self._oauth
+
+    @property
+    def api(self) -> KickApiClient | None:
+        return self._api
+
+    @property
+    def webhook_configured(self) -> bool:
+        return self.configured and bool(self._webhook_url)
 
     def capabilities(self, connection: UserConnectionState) -> CapabilityReport:
         cfg = self.configured

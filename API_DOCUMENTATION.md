@@ -77,11 +77,12 @@ code + **PKCE S256** (scopes `user:read channel:read events:subscribe`). Client 
 | | |
 |---|---|
 | `POST /api/v1/monitoring/start` | `{client, interval_seconds (30–3600), since?}`: grants the lease and checks your watchlist immediately |
-| `POST /api/v1/monitoring/heartbeat` | Same body. Extends the lease (TTL = max(`MONITORING_LEASE_TTL_SECONDS`, 3 × interval + 60 s)) → `{lease_expires_at, interval_seconds, started, active_sessions, live_count, notifications[], server_time}`. `notifications` are `streamer_live` / `streamer_offline` events after `since` |
+| `POST /api/v1/monitoring/heartbeat` | Same body. Extends the lease (TTL = max(`MONITORING_LEASE_TTL_SECONDS`, 3 × interval + 60 s)) → `{lease_expires_at, interval_seconds, started, active_sessions, live_count, notifications[], server_time}`. `notifications` are `streamer_live` / `streamer_offline` / `highlight_detected` (with `highlight_id`, `score`) after `since` |
 | `POST /api/v1/monitoring/stop` | Releases the lease now; active sessions are paused → 204 |
 | `GET /api/v1/monitoring/status` | `{lease_active, lease_expires_at, last_heartbeat_at, active_sessions, paused_sessions, scheduler_running, last_cycle_at}` |
 | `GET /api/v1/monitoring?status=` | Session history (`active · paused · ended · error`) |
-| `GET /api/v1/monitoring/{id}` / `/{id}/events` | One session / its events (`stream_online`, `stream_offline`, detector events later). Aggregates only, no chat text |
+| `GET /api/v1/monitoring/{id}` / `/{id}/events` | One session / its events (`stream_online`, `stream_offline`, and the detector events behind each highlight). Aggregates only, no chat text |
+| `GET /api/v1/monitoring/{id}/activity` | Live chat state for an active session: `{chat_state: connecting\|connected\|unavailable\|not_monitored, chat_reason, messages_per_minute, unique_chatters_per_minute, baseline_messages_per_minute, warming_up, series[36], active_signals[]}`. In-memory aggregates only |
 
 How it works: while a lease is active, the backend scheduler polls the live status of that user's
 monitored streamers. It batches per platform, polls each streamer at most once per the shortest
@@ -89,7 +90,12 @@ interval among its users (never more often than `MIN_POLL_SECONDS`), and backs o
 platform (30 s → 15 min). When a streamer goes live a session opens. It ends when the stream ends,
 pauses when the lease lapses, and resumes after a pause for the same broadcast.
 
-### Highlights & clips (read; writes arrive in Phases 5–6)
+### Webhooks
+| | |
+|---|---|
+| `POST /api/v1/webhooks/kick` | Kick event delivery. Register `{KICK_WEBHOOK_PUBLIC_URL}/api/v1/webhooks/kick` in your Kick app. Requests must carry a valid `Kick-Event-Signature` (RSA-SHA256 over `id.timestamp.body`, verified with Kick's published key), a timestamp within ±5 min and an unseen message id; otherwise 401 `invalid_signature`. `chat.message.sent` feeds the analyzer. Verified deliveries always get 200 |
+
+### Highlights & clips (read; review and clip writes arrive in Phase 6)
 | | |
 |---|---|
 | `GET /api/v1/highlights` | Filters: `platform, streamer_id, category, min_score, status, date_from, date_to` |
@@ -112,6 +118,6 @@ Capability values: `supported`, `requires_configuration`, `requires_authorizatio
 configuration and your connection state, never hardcoded in the UI.
 
 ## Not yet available (planned)
-`/ws/monitoring` (Phase 5, together with live highlight events) ·
+`/ws/monitoring`: not planned for the MVP. A Manifest V3 service worker can't hold a socket open, so events arrive with each heartbeat instead ·
 `POST /api/v1/highlights/{id}/approve|reject`, `PATCH /api/v1/highlights/{id}` (Phase 5/6) ·
 `POST /api/v1/clips/{id}/create|export|retry`, `PATCH /api/v1/clips/{id}` (Phase 6).

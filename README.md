@@ -7,9 +7,10 @@ Twitch and Kick streamers while your browser is open, reads chat to spot moments
 when the audience reacts, explains *why* each moment was flagged, and helps you turn
 it into a clip. Nothing is ever published without your approval.
 
-> **Status:** Phase 4 is complete. Browser-based monitoring works end to end: lease, scheduled
-> polling, sessions, notifications and settings sync. Twitch/Kick calls are built and tested against
-> mocked APIs; confirming them live needs your developer credentials. Chat intelligence (Phase 5) comes next.
+> **Status:** Phase 5 is complete. Chat intelligence turns chat spikes, emote waves, clip requests
+> and multilingual reactions into explained highlight candidates. Twitch chat comes via EventSub and Kick chat
+> via signed webhooks. Everything is tested with simulated chat and mocked platform APIs; real chat
+> needs your credentials. Clip creation and review (Phase 6) come next.
 > See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ![Overview](docs/screenshots/app-overview.png)
@@ -25,7 +26,8 @@ it into a clip. Nothing is ever published without your approval.
 | Backend: accounts (Argon2, revocable sessions), watchlist API, settings API, capability reporting | ✅ |
 | Twitch search, Kick exact-name lookup, live status, title & category | ✅ (needs credentials) |
 | Connect Twitch / Kick accounts (OAuth; PKCE for Kick; tokens encrypted) | ✅ (needs credentials) |
-| Chat-based highlight detection with explainable scores | ⏳ Phase 5 |
+| Chat-based highlight detection with explainable scores (spikes, emotes, clip requests, reactions in 8 languages, sentiment) | ✅ |
+| Live chat activity per session, highlight notifications | ✅ |
 | Twitch clip creation; Kick manual workflow | ⏳ Phase 6 |
 
 ## Technology
@@ -139,6 +141,16 @@ Run the backend tests:
   webhook URL** (`KICK_WEBHOOK_PUBLIC_URL`, for example a Cloudflare Tunnel), because Kick delivers chat
   only through webhooks.
 
+* **Chat:** Twitch chat needs a connected Twitch account (Settings → Platform connections; it
+  asks for `user:read:chat`). Kick chat needs a public HTTPS URL that forwards to your backend.
+  For example, run a free Cloudflare Tunnel with this command:
+
+  ```bash
+  cloudflared tunnel --url http://localhost:8000
+  ```
+
+  Then set `KICK_WEBHOOK_PUBLIC_URL` to the tunnel URL and register
+  `<tunnel URL>/api/v1/webhooks/kick` as the webhook URL in your Kick app settings.
 * **Encryption key:** set `TOKEN_ENCRYPTION_KEY` in `backend/.env` (the command to generate one is in
   `.env.example`). Without it, accounts cannot be connected, because tokens are only stored encrypted.
 

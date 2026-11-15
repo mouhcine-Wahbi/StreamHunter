@@ -64,7 +64,7 @@ def test_unconfigured_adapters_require_configuration() -> None:
 def test_configured_capabilities() -> None:
     caps = TwitchAdapter(make_settings(**TW)).capabilities(UserConnectionState()).capabilities
     assert caps["stream_lookup"] == caps["live_detection"] == caps["category_lookup"] == C.SUPPORTED
-    assert caps["chat_monitoring"] == C.NOT_IMPLEMENTED  # Phase 5
+    assert caps["chat_monitoring"] == C.REQUIRES_AUTHORIZATION  # built; needs a connected account with user:read:chat
     kcaps = KickAdapter(make_settings(**KK)).capabilities(UserConnectionState()).capabilities
     assert kcaps["stream_lookup"] == C.SUPPORTED
     assert kcaps["chat_monitoring"] == C.REQUIRES_CONFIGURATION  # no webhook URL

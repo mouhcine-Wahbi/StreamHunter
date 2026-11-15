@@ -122,6 +122,9 @@ class FakeKick:
     requests: list[httpx.Request] = field(default_factory=list)
     last_token_form: dict[str, str] = field(default_factory=dict)
     malformed: bool = False
+    public_key_pem: str = ""
+    subscriptions: dict[str, dict] = field(default_factory=dict)
+    deleted_subscriptions: list[str] = field(default_factory=list)
 
     def handler(self, req: httpx.Request) -> httpx.Response:
         self.requests.append(req)
@@ -145,6 +148,18 @@ class FakeKick:
             q = parse_qs(url.query.decode())
             if self.malformed:
                 return _json({"data": [{"slug": "missing-id"}], "message": "OK"})
+            if path == "/public/v1/public-key":
+                return _json({"data": {"public_key": self.public_key_pem}, "message": "OK"})
+            if path == "/public/v1/events/subscriptions" and auth == "Bearer kick-app":
+                if req.method == "POST":
+                    body = json.loads(req.content)
+                    sid = f"sub-{len(self.subscriptions) + 1}"
+                    self.subscriptions[sid] = body
+                    return _json({"data": [{"name": e["name"], "version": e["version"], "subscription_id": sid, "error": None}
+                                           for e in body["events"]], "message": "OK"})
+                if req.method == "DELETE":
+                    self.deleted_subscriptions += q.get("id", [])
+                    return httpx.Response(204)
             if path == "/public/v1/channels" and auth == "Bearer kick-app":
                 if "slug" in q:
                     data = [self.channels[s] for s in q["slug"] if s in self.channels]

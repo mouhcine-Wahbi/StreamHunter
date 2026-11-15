@@ -13,13 +13,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.routes import activity, auth, health, monitoring, platform_auth, platforms, streamers, streams
+from app.api.routes import activity, auth, health, monitoring, platform_auth, platforms, streamers, streams, webhooks
 from app.api.routes import settings as settings_routes
 from app.config import Settings, get_settings
 from app.db.session import create_engine, create_sessionmaker
 from app.errors import install_error_handlers
 from app.integrations.registry import PlatformRegistry
 from app.logging_config import configure_logging
+from app.monitoring.chat_manager import ChatManager
 from app.monitoring.engine import MonitoringEngine
 from app.monitoring.scheduler import Scheduler
 from app.utils.crypto import TokenCipher
@@ -42,9 +43,11 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
                 retention_seconds=settings.retention_sweep_seconds,
             )
             app.state.scheduler.start()
+            app.state.chat.start()
         yield
         if getattr(app.state, "scheduler", None):
             await app.state.scheduler.stop()
+        await app.state.chat.stop()
         await app.state.registry.aclose()
         await app.state.engine.dispose()
         log.info("shutdown")
@@ -67,6 +70,9 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
     app.state.token_cipher = TokenCipher(
         settings.token_encryption_key.get_secret_value() if settings.token_encryption_key else None
     )
+    app.state.chat = ChatManager(app.state.sessionmaker, app.state.registry, app.state.token_cipher)
+    app.state.monitoring.chat = app.state.chat
+    app.state.kick_verifier = None  # created on first webhook (needs Kick credentials)
 
     app.add_middleware(
         CORSMiddleware,
@@ -92,6 +98,7 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
         activity.clips,
         settings_routes.router,
         platforms.router,
+        webhooks.router,
     ):
         app.include_router(router)
     return app

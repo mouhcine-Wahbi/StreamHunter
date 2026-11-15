@@ -56,6 +56,14 @@ export function HighlightRow({ h, compact = false }: { h: HighlightCandidate; co
           {CATEGORY_LABEL(h.category)} · {formatRelative(h.timestamp)}
           {h.start_offset_sec !== null && <> · ≈{formatOffset(h.start_offset_sec)} into stream</>}
         </div>
+        {!compact && (
+          <div className="mt-1 text-[11px] text-fg-subtle tabular">
+            Confidence {Math.round(h.confidence * 100)}% · signals: chat
+            {h.signal_breakdown?.chat != null && ` ${Math.round(h.signal_breakdown.chat)}`}
+            {h.signal_breakdown && h.signal_breakdown.audio == null && " · audio and video not analysed yet"}
+            {h.start_offset_sec !== null && " · offsets approximate"}
+          </div>
+        )}
         {!compact && h.reasons.length > 0 && (
           <ul className="mt-1.5 flex flex-wrap gap-1.5">
             {h.reasons.slice(0, 4).map((r) => (

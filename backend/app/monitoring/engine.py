@@ -15,6 +15,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -74,6 +75,7 @@ class MonitoringEngine:
         self.last_cycle: CycleSummary | None = None
         self.last_cycle_at: datetime | None = None
         self.backoff: dict[str, PlatformBackoff] = {}
+        self.chat: Any = None  # ChatManager, set by the app; synced after every cycle
 
     # --- lease ------------------------------------------------------------------------------
     def lease_ttl(self, interval_seconds: int) -> timedelta:
@@ -117,6 +119,11 @@ class MonitoringEngine:
                 raise
         if only_users is None:
             self.last_cycle, self.last_cycle_at = summary, utcnow()
+        if self.chat is not None:
+            try:
+                await self.chat.sync()  # start/stop chat collectors to match sessions
+            except Exception:
+                log.exception("chat_sync_failed")
         return summary
 
     async def _cycle(self, db: AsyncSession, only_users: set[int] | None) -> CycleSummary:

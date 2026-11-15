@@ -80,13 +80,15 @@ class HeartbeatRequest(Schema):
 
 
 class NotificationOut(Schema):
-    type: str  # streamer_live | streamer_offline
+    type: str  # streamer_live | streamer_offline | highlight_detected
     streamer_id: int
     streamer_display_name: str
     platform: Platform
     title: str | None
     category: str | None
     at: datetime
+    highlight_id: int | None = None
+    score: float | None = None
 
 
 class HeartbeatOut(Schema):

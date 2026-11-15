@@ -258,3 +258,21 @@ async def test_scheduler_loop_runs_and_survives_errors() -> None:
             break
     await sched.stop()
     assert Engine.calls >= 3  # kept running after the first cycle raised
+
+
+async def test_heartbeat_delivers_highlight_notifications(client, auth_headers, app, fake_twitch) -> None:
+    from app.models import HighlightCandidate
+
+    await _add(client, auth_headers)
+    fake_twitch.set_live("1002", True)
+    first = (await client.post("/api/v1/monitoring/start", json=HB, headers=auth_headers)).json()
+    [sess] = await _sessions(app)
+    async with app.state.sessionmaker() as db:
+        db.add(HighlightCandidate(user_id=sess.user_id, session_id=sess.id, streamer_id=sess.streamer_id, platform="twitch",
+                                  timestamp=datetime.now(UTC), score=81, confidence=0.9, category="funny_moment",
+                                  reasons=["'KEKW' used by 40 chatters (85% of chat)"], status="pending_review"))
+        await db.commit()
+    hb = (await client.post("/api/v1/monitoring/heartbeat", json={**HB, "since": first["server_time"]}, headers=auth_headers)).json()
+    [n] = [n for n in hb["notifications"] if n["type"] == "highlight_detected"]
+    assert n["score"] == 81 and n["category"] == "funny_moment" and n["title"].startswith("'KEKW'")
+    assert n["highlight_id"] is not None

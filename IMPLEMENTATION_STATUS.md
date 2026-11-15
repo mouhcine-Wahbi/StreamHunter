@@ -105,7 +105,29 @@ reach Twitch and Kick.
 
 **Not verifiable here:** real go-live/offline transitions need reachable platforms and credentials.
 They are covered by tests that drive a fake platform through every transition.
-## Phase 5 — Chat intelligence ⏳
+## Phase 5 — Chat intelligence ✅ (live chat pending credentials)
+
+| Item | Status | Notes |
+|---|---|---|
+| Rolling windows + per-stream baseline + per-user cap | ✅ | `detection/window.py` |
+| Detectors: chat spike, emote wave, repeated phrase, clip request, multilingual reactions, sentiment shift | ✅ | 8 language packs + custom phrases from Settings |
+| Bot, command and broadcaster filtering; spam resistance | ✅ | Tested: one spammer, bots and commands produce nothing |
+| Event aggregation, renormalized scoring, evidence-based categories, explanations | ✅ | Missing audio/video are excluded, not counted as zero |
+| Sensitivity per user (low / medium / high) on one shared analyzer | ✅ | |
+| Candidates with score, confidence, category, reasons, signal breakdown, approximate offsets | ✅ | Status `pending_review` |
+| Twitch chat via EventSub WebSocket (welcome, subscribe, keepalive, reconnect, revocation, backoff) | ✅ | Tested against a real local WebSocket server |
+| Kick chat via signed webhooks (RSA verify, freshness, replay, key rotation) + subscribe/unsubscribe | ✅ | Request/response field names unverified (see ARCHITECTURE §3) |
+| Chat state + reasons on sessions ("Chat unavailable: …") | ✅ | |
+| Live chat activity endpoint + UI sparkline | ✅ | Aggregates only |
+| Highlight desktop notifications (min score, opt-out) | ✅ | |
+| Tests | ✅ | Backend 92 (detection is deterministic across 15 hash seeds); extension 64 |
+| Live stack check | ✅ | Built extension + uvicorn: session opens, chat manager tries Kick, the UI shows "Chat unavailable: Kick chat subscription failed: Could not reach Kick" |
+| **Real chat from Twitch/Kick** | ⏳ | Needs credentials, a connected Twitch account (`user:read:chat`) or a Kick webhook tunnel, and network access |
+
+**Found and fixed during this phase:** a flaky category result caused by the order language packs
+were loaded in (now fixed, with a test that no phrase is ambiguous after normalization).
+Repeated common lines ("hi chat") were also creating false candidates; repeated phrases are now
+relative to the stream's baseline and can't create a candidate on their own.
 ## Phase 6 — Clip workflow ⏳
 ## Phase 7 — VOD & advanced AI ⏳
 

@@ -189,6 +189,29 @@ ChatMessage stream ─► RollingWindow (e.g. 10 s buckets, 5 min baseline)
                                    signal_breakdown, category, suggested window}
 ```
 
+**Implemented (Phase 5):** `backend/app/detection/` (platform independent) and
+`backend/app/monitoring/chat_manager.py` (collectors + persistence).
+
+* 5 s buckets, a 15 s analysis window, and a 5 min baseline per stream. Relative detection
+  needs at least 30 s of history ("warming up" before that).
+* Detectors: `chat_spike` (z-score and ratio vs the stream's own baseline), `emote_wave` and
+  `repeated_phrase` (both must be ≥ 2× their usual rate), `clip_request` ("clip it", multilingual),
+  `reaction` (8 language packs + custom phrases) and `sentiment_shift`. Repeated phrases and
+  sentiment shifts only *support* a moment; one of the first four must fire.
+* Every detection records the strictest sensitivity level it passes (low / medium / high). Each
+  user only gets candidates that pass their own sensitivity, while one shared analyzer serves
+  all users watching the same streamer.
+* Aggregator: a moment extends while events keep coming (≤ 10 s gaps, ≤ 90 s total), then
+  becomes one candidate (score floor 35); there is a 20 s cooldown after it.
+* Candidate window = moment ± the user's pre-roll / post-roll. Offsets are relative to the
+  platform's broadcast start, labelled approximate, and `null` when the start is unknown.
+* Chat collection: Twitch EventSub WebSocket (one connection per authorizing user;
+  keepalive, reconnect, revocation handled). Kick signed webhooks (RSA verified, ±5 min, replay
+  protected), subscribed and unsubscribed per channel with the app token. When chat can't be
+  collected, the reason is written to the session and shown in the UI.
+
+Rules carried over from the design:
+
 * Spikes are measured as a z-score / ratio against the stream's own rolling
   baseline, not a global threshold.
 * Each user's contribution per window is capped so one spammer ≠ an audience.

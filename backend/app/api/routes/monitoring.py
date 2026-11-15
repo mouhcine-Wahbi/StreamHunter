@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from app.api.dependencies import ActivityServiceDep, CurrentUser, DbDep, PageDep
 from app.db.types import utcnow
 from app.domain.enums import MonitoringSessionStatus
-from app.models import MonitoringLease, MonitoringSession, Streamer, UserStreamer
+from app.models import HighlightCandidate, MonitoringLease, MonitoringSession, Streamer, UserStreamer
 from app.monitoring.engine import MonitoringEngine
 from app.schemas.activity import (
     HeartbeatOut,
@@ -42,6 +42,15 @@ async def _beat(request: Request, body: HeartbeatRequest, user: CurrentUser, db:
 
     since = body.since or (utcnow() - timedelta(minutes=10))
     events = await engine.recent_events(db, user, since, tuple(_EVENT_TYPES))
+    highlights = (
+        await db.execute(
+            select(HighlightCandidate, Streamer)
+            .join(Streamer, Streamer.id == HighlightCandidate.streamer_id)
+            .where(HighlightCandidate.user_id == user.id, HighlightCandidate.created_at > since)
+            .order_by(HighlightCandidate.created_at)
+            .limit(20)
+        )
+    ).all()
     active = await db.scalar(
         select(func.count()).select_from(MonitoringSession).where(
             MonitoringSession.user_id == user.id, MonitoringSession.status == MonitoringSessionStatus.ACTIVE.value
@@ -68,6 +77,20 @@ async def _beat(request: Request, body: HeartbeatRequest, user: CurrentUser, db:
                 at=e.created_at,
             )
             for e, s in events
+        ]
+        + [
+            NotificationOut(
+                type="highlight_detected",
+                streamer_id=s.id,
+                streamer_display_name=s.display_name,
+                platform=s.platform,
+                title=h.reasons[0] if h.reasons else None,
+                category=h.category,
+                at=h.created_at,
+                highlight_id=h.id,
+                score=h.score,
+            )
+            for h, s in highlights
         ],
         server_time=utcnow(),
     )
@@ -124,6 +147,15 @@ async def list_sessions(
 @router.get("/{session_id}", response_model=MonitoringSessionOut, summary="One monitoring session")
 async def get_session(session_id: int, svc: ActivityServiceDep) -> MonitoringSessionOut:
     return session_out(await svc.get_session(session_id))
+
+
+@router.get("/{session_id}/activity", summary="Live chat activity for a session (aggregates only, no messages)")
+async def session_activity(session_id: int, request: Request, svc: ActivityServiceDep) -> dict[str, object]:
+    session = await svc.get_session(session_id)  # ownership check
+    data = request.app.state.chat.activity(session.streamer_id, utcnow())
+    if session.status != MonitoringSessionStatus.ACTIVE.value:
+        data["chat_state"] = "not_monitored"
+    return {"session_id": session.id, "streamer_id": session.streamer_id, **data}
 
 
 @router.get("/{session_id}/events", response_model=Page[StreamEventOut], summary="Events of a session")

@@ -78,6 +78,7 @@ export interface HighlightCandidate {
   confidence: number;
   category: string;
   reasons: string[];
+  signal_breakdown?: { chat?: number | null; audio?: number | null; visual?: number | null; context?: number | null };
   status: CandidateStatus;
 }
 

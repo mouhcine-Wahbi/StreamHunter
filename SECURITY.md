@@ -55,10 +55,18 @@ Implemented in Phase 3:
 * The extension only opens authorization URLs on `id.twitch.tv` / `id.kick.com`.
 * Platform error bodies are never echoed to clients; only status codes are logged.
 
+Implemented in Phase 5:
+
+* Kick webhooks are rejected unless the RSA-SHA256 signature verifies against Kick's published key
+  (refetched once on mismatch, for key rotation), the timestamp is within ±5 minutes, and the
+  message id is new. Bodies are capped at 64 KiB.
+* Chat messages are processed in memory only. The database stores aggregated detector metadata
+  (counts, shares, emote names, a ≤ 40-character repeated phrase) and never message logs or chatter identities.
+* Known bots, `!commands` and the broadcaster's own messages are ignored. Each chatter counts at
+  most twice per 5 s, so one person can't fake an audience reaction.
+
 Planned:
 
-* Kick webhooks: RSA-SHA256 signature verification using Kick's published public
-  key, timestamp freshness check, and deduplication by message ID.
 * HTTPS required in production; CORS restricted to the extension origin.
 
 ## Reporting

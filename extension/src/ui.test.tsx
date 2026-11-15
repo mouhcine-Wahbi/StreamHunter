@@ -286,3 +286,51 @@ describe("platform connections & status (Phase 3)", () => {
     expect(await screen.findByText(/Checked 3, 1 live\. kick: Kick is not configured/)).toBeInTheDocument();
   });
 });
+
+
+describe("chat intelligence UI (Phase 5)", () => {
+  it("shows chat state, activity and unavailable reasons per active session", async () => {
+    const sessions = {
+      items: [
+        { id: 1, streamer_id: 3, streamer_display_name: "Alpha", platform: "twitch", started_at: "2026-11-15T12:00:00Z", ended_at: null, status: "active", last_checked_at: null, last_event_at: null, error_message: null, broadcast_started_at: null },
+        { id: 2, streamer_id: 4, streamer_display_name: "Kickstar", platform: "kick", started_at: "2026-11-15T12:00:00Z", ended_at: null, status: "active", last_checked_at: null, last_event_at: null, error_message: null, broadcast_started_at: null },
+      ],
+      total: 2, limit: 50, offset: 0,
+    };
+    mockFetch((url) => {
+      if (url.endsWith("/api/v1/monitoring/1/activity"))
+        return json({ chat_state: "connected", chat_reason: null, messages_per_minute: 42, unique_chatters_per_minute: 17, baseline_messages_per_minute: 20.5, warming_up: false, series: [1, 2, 3], active_signals: ["chat_spike"] });
+      if (url.endsWith("/api/v1/monitoring/2/activity"))
+        return json({ chat_state: "unavailable", chat_reason: "Kick chat needs a public HTTPS webhook URL." });
+      if (url.includes("/api/v1/monitoring?")) return json(sessions);
+      if (url.includes("/api/v1/streams/live")) return json({ items: [], total: 0, limit: 50, offset: 0 });
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/monitoring";
+    render(<App />);
+    expect(await screen.findByText("Chat connected")).toBeInTheDocument();
+    expect(screen.getByText(/42\/min · 17 chatters · normal 20.5\/min/)).toBeInTheDocument();
+    expect(screen.getByText("chat spike")).toBeInTheDocument();
+    expect(await screen.findByText("Chat unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/public HTTPS webhook URL/)).toBeInTheDocument();
+  });
+
+  it("explains highlights with reasons, confidence and signals", async () => {
+    mockFetch((url) =>
+      url.includes("/api/v1/highlights")
+        ? json({ items: [{ id: 9, streamer_id: 3, streamer_display_name: "Alpha", platform: "twitch", timestamp: "2026-11-15T12:30:00Z",
+            start_offset_sec: 1790, end_offset_sec: 1840, score: 84, confidence: 0.93, category: "funny_moment",
+            reasons: ["'KEKW' used by 40 chatters (85% of chat)", "Chat activity 4.2× its normal level (52 chatters in 15 s)"],
+            signal_breakdown: { chat: 84, audio: null, visual: null, context: null }, status: "pending_review" }], total: 1, limit: 50, offset: 0 })
+        : json({ detail: "Not Found" }, 404),
+    );
+    installWorker();
+    window.location.hash = "/highlights";
+    render(<App />);
+    expect(await screen.findByText("'KEKW' used by 40 chatters (85% of chat)")).toBeInTheDocument();
+    expect(screen.getByText(/Confidence 93% · signals: chat 84 · audio and video not analysed yet · offsets approximate/)).toBeInTheDocument();
+    expect(screen.getByText(/Funny moment/)).toBeInTheDocument();
+    expect(screen.getByText(/≈0:29:50 into stream/)).toBeInTheDocument();
+  });
+});

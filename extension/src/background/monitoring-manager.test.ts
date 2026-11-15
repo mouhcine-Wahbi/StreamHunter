@@ -195,3 +195,32 @@ describe("settings sync", () => {
     expect(body).not.toHaveProperty("backendUrl");
   });
 });
+
+
+describe("highlight notifications", () => {
+  const hl = (score: number) => ({
+    type: "highlight_detected", streamer_id: 7, streamer_display_name: "Alpha", platform: "twitch",
+    title: "'KEKW' used by 40 chatters", category: "funny_moment", at: `2026-11-13T10:0${score % 9}:00Z`,
+    highlight_id: score, score,
+  });
+
+  it("notifies highlights at or above the minimum score (on by default)", async () => {
+    mockFetch((url) =>
+      /monitoring\/(heartbeat|start)$/.test(url) ? json({ ...HB, notifications: [hl(82), hl(41)] }) : json({ status: "ok" }),
+    );
+    await setup().manager.start();
+    expect(fakeChrome.internals.notifications).toHaveLength(1);
+    expect(fakeChrome.internals.notifications[0]).toMatchObject({
+      id: "sh-hl-82",
+      title: "Funny moment · Alpha (82)",
+      message: "'KEKW' used by 40 chatters",
+    });
+  });
+
+  it("can be turned off", async () => {
+    await updateSettings({ notifications: { onHighlight: false } });
+    mockFetch((url) => (/monitoring\/(heartbeat|start)$/.test(url) ? json({ ...HB, notifications: [hl(90)] }) : json({ status: "ok" })));
+    await setup().manager.start();
+    expect(fakeChrome.internals.notifications).toHaveLength(0);
+  });
+});

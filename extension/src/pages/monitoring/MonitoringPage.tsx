@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiStateView } from "@/components/ApiStateView";
 import { MonitoringCard } from "@/components/monitoring/MonitoringCard";
 import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
+import { SessionActivity } from "@/components/monitoring/SessionActivity";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import type { useMonitoring } from "@/hooks/useMonitoring";
@@ -102,7 +103,11 @@ export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof u
                           {formatDateTime(s.started_at)} · {s.ended_at ? "ended" : formatDuration(s.started_at)} · last event{" "}
                           {formatRelative(s.last_event_at)}
                         </span>
-                        {s.error_message && <p className="w-full text-xs text-danger">{s.error_message}</p>}
+                        {s.status === "active" ? (
+                          <SessionActivity sessionId={s.id} />
+                        ) : (
+                          s.error_message && <p className="w-full text-xs text-danger">{s.error_message}</p>
+                        )}
                       </li>
                     ))}
                   </ul>

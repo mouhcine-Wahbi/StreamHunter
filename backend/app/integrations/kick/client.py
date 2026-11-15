@@ -83,3 +83,60 @@ class KickApiClient:
         """GET /users without filters returns the token's own user."""
         users = self._parse(KickUser, await self.get("/users", [], token=user_token))
         return users[0] if users else None
+
+    # --- events (chat webhooks) -------------------------------------------------------------
+    async def _send_app(self, method: str, path: str, **kw: object) -> object:
+        for attempt in (1, 2):
+            token = await self.app_token.get()
+            try:
+                resp = await send(
+                    self._http,
+                    RequestSpec("kick", method, f"{API_URL}{path}", headers={"Authorization": f"Bearer {token}"}, **kw),  # type: ignore[arg-type]
+                    retries=0,
+                )
+                return json_body(resp, "kick") if resp.content else None
+            except PlatformAuthError:
+                if attempt == 2:
+                    raise
+                self.app_token.invalidate()
+        raise AssertionError("unreachable")
+
+    async def public_key_pem(self) -> str:
+        """Kick's webhook signing key. Accepts {"data": {"public_key": PEM}} or a bare PEM body."""
+        resp = await send(self._http, RequestSpec("kick", "GET", f"{API_URL}/public-key"))
+        text = resp.text.strip()
+        if text.startswith("-----BEGIN"):
+            return text
+        body = json_body(resp, "kick")
+        pem = (body.get("data") or {}).get("public_key") if isinstance(body, dict) else None
+        if not isinstance(pem, str) or "BEGIN PUBLIC KEY" not in pem:
+            raise UpstreamError("Kick returned an unexpected public key response")
+        return pem
+
+    async def subscribe_events(self, broadcaster_user_id: str, events: list[str]) -> list[str]:
+        """Subscribe this app to webhook events for a channel. Returns subscription ids."""
+        body = await self._send_app(
+            "POST",
+            "/events/subscriptions",
+            json={
+                "broadcaster_user_id": int(broadcaster_user_id) if broadcaster_user_id.isdigit() else broadcaster_user_id,
+                "events": [{"name": e, "version": 1} for e in events],
+                "method": "webhook",
+            },
+        )
+        items = (body or {}).get("data") if isinstance(body, dict) else None
+        ids: list[str] = []
+        for item in items or []:
+            if isinstance(item, dict):
+                if item.get("error"):
+                    raise UpstreamError(f"Kick refused the {item.get('name', 'event')} subscription: {item['error']}")
+                sid = item.get("subscription_id") or item.get("id")
+                if sid:
+                    ids.append(str(sid))
+        if not ids:
+            raise UpstreamError("Kick did not return a subscription id")
+        return ids
+
+    async def unsubscribe_events(self, subscription_ids: list[str]) -> None:
+        if subscription_ids:
+            await self._send_app("DELETE", "/events/subscriptions", params=[("id", s) for s in subscription_ids])

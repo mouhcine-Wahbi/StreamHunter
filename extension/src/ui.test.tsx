@@ -20,7 +20,9 @@ function installWorker() {
 describe("popup", () => {
   it("renders status and starts monitoring via the background worker", async () => {
     mockFetch((url) =>
-      url.endsWith("/heartbeat") ? json({ lease_expires_at: "2026-11-13T10:06:00Z" }) : json({ detail: "Not Found" }, 404),
+      /\/(heartbeat|start)$/.test(url)
+        ? json({ lease_expires_at: "2026-11-13T10:06:00Z", interval_seconds: 120, started: true, active_sessions: 0, live_count: 0, notifications: [], server_time: "2026-11-13T10:00:00Z" })
+        : json({ detail: "Not Found" }, 404),
     );
     installWorker();
     render(<Popup />);

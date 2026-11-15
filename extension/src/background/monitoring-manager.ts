@@ -3,9 +3,16 @@ import { getAuthToken, getMonitoringState, getSettings, patchMonitoringState } f
 import type { MonitoringState } from "@/types/monitoring";
 import { backoffDelayMs } from "@/utils/backoff";
 import { syncAlarms } from "./alarm-manager";
+import { notifyStreamEvents, type StreamNotification } from "./notifications";
 
-interface HeartbeatResponse {
-  lease_expires_at?: string | null;
+export interface HeartbeatResponse {
+  lease_expires_at: string;
+  interval_seconds: number;
+  started: boolean;
+  active_sessions: number;
+  live_count: number;
+  notifications: StreamNotification[];
+  server_time: string;
 }
 
 export interface MonitoringDeps {
@@ -23,8 +30,10 @@ const defaultDeps: MonitoringDeps = {
  * a suspended/restarted service worker continues where it left off.
  *
  * Contract with the backend (see ARCHITECTURE.md §2):
- *   POST /api/v1/monitoring/heartbeat → grants/extends a lease while the browser is alive.
- *   POST /api/v1/monitoring/stop      → releases the lease immediately.
+ *   POST /api/v1/monitoring/start     → grants a lease and checks the watchlist right away.
+ *   POST /api/v1/monitoring/heartbeat → extends the lease while the browser is alive; returns
+ *                                       "went live" notifications since the previous heartbeat.
+ *   POST /api/v1/monitoring/stop      → releases the lease immediately (sessions pause).
  */
 export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
   // Single-flight guard: alarms and UI clicks can overlap within one worker lifetime.
@@ -50,7 +59,7 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
     }
   }
 
-  async function runTick(force: boolean): Promise<MonitoringState> {
+  async function runTick(force: boolean, path = "/api/v1/monitoring/heartbeat"): Promise<MonitoringState> {
     const state = await getMonitoringState();
     if (!state.enabled) return state;
 
@@ -64,16 +73,21 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
     const at = now.toISOString();
 
     try {
-      const res = await client.post<HeartbeatResponse>("/api/v1/monitoring/heartbeat", {
+      const res = await client.post<HeartbeatResponse>(path, {
         client: "chrome-extension",
         interval_seconds: settings.monitoring.intervalMinutes * 60,
+        since: state.lastServerTime,
       });
+      await notifyStreamEvents(res.notifications ?? [], settings);
       return patchMonitoringState({
         status: "active",
         backendStatus: "online",
         lastCheckAt: at,
         lastSuccessAt: at,
-        leaseExpiresAt: res?.lease_expires_at ?? null,
+        leaseExpiresAt: res.lease_expires_at ?? null,
+        liveCount: res.live_count ?? null,
+        activeSessions: res.active_sessions ?? null,
+        lastServerTime: res.server_time ?? state.lastServerTime,
         lastError: null,
         consecutiveFailures: 0,
         nextAttemptAt: null,
@@ -94,9 +108,9 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
     }
   }
 
-  function tick(force = false): Promise<MonitoringState> {
+  function tick(force = false, path?: string): Promise<MonitoringState> {
     if (!inFlight) {
-      inFlight = runTick(force).finally(() => {
+      inFlight = runTick(force, path).finally(() => {
         inFlight = null;
       });
     }
@@ -115,7 +129,7 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
     });
     await syncAlarms(true, settings.monitoring.intervalMinutes);
     await checkBackend(); // records reachability + backend version for the UI
-    return tick(true);
+    return tick(true, "/api/v1/monitoring/start");
   }
 
   async function stop(): Promise<MonitoringState> {
@@ -126,6 +140,7 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
       status: "stopped",
       enabledAt: null,
       leaseExpiresAt: null,
+      activeSessions: null,
       consecutiveFailures: 0,
       nextAttemptAt: null,
       lastError: null,

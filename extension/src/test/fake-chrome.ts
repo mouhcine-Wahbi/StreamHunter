@@ -22,6 +22,7 @@ export function createFakeChrome() {
   const onAlarm = new Event<[chrome.alarms.Alarm]>();
   const onMessage = new Event<[unknown, chrome.runtime.MessageSender, (r: unknown) => void]>();
   const createdTabs: string[] = [];
+  const notifications: Record<string, unknown>[] = [];
   const clone = <T>(v: T): T => (v === undefined ? v : structuredClone(v));
 
   function set(items: Record<string, unknown>) {
@@ -115,6 +116,14 @@ export function createFakeChrome() {
       open: async () => undefined,
     },
     windows: { getCurrent: async () => ({ id: 1 }) },
+    notifications: {
+      create: async (id: string, opts: Record<string, unknown>) => {
+        notifications.push({ id, ...opts });
+        return id;
+      },
+      clear: async () => true,
+      onClicked: new Event<[string]>(),
+    },
     permissions: { request: async () => true },
   };
 
@@ -127,6 +136,7 @@ export function createFakeChrome() {
       },
       alarms,
       createdTabs,
+      notifications,
       fireAlarm: (name: string) => {
         const a = alarms.get(name);
         if (a) onAlarm.emit(a);

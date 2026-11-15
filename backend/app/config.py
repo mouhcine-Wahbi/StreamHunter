@@ -30,7 +30,14 @@ class Settings(BaseSettings):
     auth_rate_limit_per_minute: int = Field(default=10, ge=1)
 
     # --- Monitoring (Phase 4) ---
+    # Minimum lease length; the effective TTL is max(this, 3 × heartbeat interval + 60 s).
     monitoring_lease_ttl_seconds: int = Field(default=360, ge=60)
+    # Background loop that polls live status for users holding a lease. Off in tests.
+    scheduler_enabled: bool = True
+    scheduler_tick_seconds: int = Field(default=15, ge=1, le=300)
+    # Never poll a streamer more often than this, whatever the users' intervals are.
+    min_poll_seconds: int = Field(default=60, ge=10)
+    retention_sweep_seconds: int = Field(default=3600, ge=60)
 
     # --- Platforms (credentials only ever live here, never in the extension) ---
     twitch_client_id: str | None = None

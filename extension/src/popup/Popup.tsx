@@ -36,7 +36,7 @@ export function Popup() {
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-xl border border-ink-700 bg-ink-850 p-3">
             <div className="text-[11px] text-fg-subtle">Live now</div>
-            <div className="mt-1 text-xl font-semibold text-fg tabular">{live.data?.total ?? "—"}</div>
+            <div className="mt-1 text-xl font-semibold text-fg tabular">{live.data?.total ?? state.liveCount ?? "—"}</div>
           </div>
           <div className="rounded-xl border border-ink-700 bg-ink-850 p-3">
             <div className="text-[11px] text-fg-subtle">Last heartbeat</div>

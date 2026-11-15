@@ -21,6 +21,7 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(
         _env_file=None,  # never read a developer's real .env in tests
         app_env="test",
+        scheduler_enabled=False,
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
         auth_rate_limit_per_minute=1000,
     )

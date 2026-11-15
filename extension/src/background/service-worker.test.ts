@@ -5,7 +5,9 @@ import { handleMessage, isTrustedSender } from "./message-handler";
 import { createMonitoringManager } from "./monitoring-manager";
 
 const okBackend = (url: string) =>
-  url.endsWith("/heartbeat") ? json({ lease_expires_at: null }) : json({ status: "ok", version: "0.1.0" });
+  /\/(heartbeat|start)$/.test(url)
+    ? json({ lease_expires_at: "2026-11-13T10:06:00Z", interval_seconds: 120, started: true, active_sessions: 0, live_count: 0, notifications: [], server_time: "2026-11-13T10:00:00Z" })
+    : json({ status: "ok", version: "0.1.0" });
 
 async function loadWorker() {
   vi.resetModules();

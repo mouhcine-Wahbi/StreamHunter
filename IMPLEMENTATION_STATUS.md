@@ -86,7 +86,25 @@ the view says so ("Backend not reachable" or "Not available on this backend").
 mocked platform APIs with documented response shapes. The one remaining check, *"results are real
 when credentials are configured"*, can only be confirmed with real credentials on a machine that can
 reach Twitch and Kick.
-## Phase 4 — Browser monitoring (backend lease) ⏳
+## Phase 4 — Browser monitoring ✅
+
+| Item | Status | Notes |
+|---|---|---|
+| Lease: start / heartbeat / stop / status endpoints | ✅ | TTL = max(360 s, 3 × interval + 60 s); stop releases immediately |
+| Background scheduler (asyncio, in-process) | ✅ | Idle without leases; never crashes on a failed cycle |
+| Batched status polling paced by user interval, ≥ `MIN_POLL_SECONDS` | ✅ | One platform call per batch, shared between users |
+| Per-platform exponential backoff on outages (30 s → 15 min) | ✅ | Found during the live check: without it a down platform was retried every tick |
+| Session lifecycle: open on live, end on offline, pause on lease loss, resume same broadcast, new session on restarted broadcast, end when monitoring is disabled or the streamer is removed | ✅ | `monitoring/reconciler.py` |
+| Outage ≠ offline: unknown status never ends a session | ✅ | |
+| "Went live" desktop notifications (opt-in) via heartbeat `since` | ✅ | `notifications` permission added; clicking opens Live Monitoring |
+| Settings sync extension → backend (when signed in) | ✅ | The browser is the source of truth; `backendUrl` stays local |
+| Retention sweep (events, OAuth states, old auth sessions) | ✅ | Hourly |
+| Extension: Live now list, named sessions, live/active counts, recovery after worker restart | ✅ | |
+| Tests | ✅ | Backend 66; extension 60 |
+| Live stack check | ✅ | Built extension + uvicorn with scheduler: account, settings sync, start → lease active, worker stop → state and alarm kept, stop → lease released, scheduler polling with growing backoff (30 s, 60 s) while Twitch was unreachable |
+
+**Not verifiable here:** real go-live/offline transitions need reachable platforms and credentials.
+They are covered by tests that drive a fake platform through every transition.
 ## Phase 5 — Chat intelligence ⏳
 ## Phase 6 — Clip workflow ⏳
 ## Phase 7 — VOD & advanced AI ⏳

@@ -70,6 +70,12 @@ cannot run a permanent loop. The design:
    monitoring was enabled. Failed heartbeats back off exponentially
    (1, 2, 4 … capped at 15 min) and the UI shows `degraded`/`offline` truthfully.
 
+**Implemented (Phase 4):** `backend/app/monitoring/`. `engine.py` handles the lease, poll cycle and
+per-platform backoff, `reconciler.py` holds the session rules, `scheduler.py` is an asyncio loop in the
+API process, and `retention.py` is the sweep. The extension sends `since` (the backend clock at the
+previous heartbeat) so "went live" notifications are delivered once. A Redis/Celery worker can replace
+the in-process scheduler without changing the engine API.
+
 Monitoring states shown to the user: `stopped`, `starting`, `active`, `degraded`
 (backend reachable but errors), `offline` (backend unreachable), `paused`.
 

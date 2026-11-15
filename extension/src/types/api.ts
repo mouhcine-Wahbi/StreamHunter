@@ -42,6 +42,8 @@ export type MonitoringSessionStatus = "active" | "paused" | "ended" | "error";
 export interface MonitoringSession {
   id: number;
   streamer_id: number;
+  streamer_display_name: string | null;
+  broadcast_started_at: string | null;
   platform: Platform;
   started_at: string;
   ended_at: string | null;

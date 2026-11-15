@@ -18,9 +18,10 @@ function setup(now = new Date("2026-11-13T10:00:00Z")) {
   };
 }
 
+const HB = { lease_expires_at: "2026-11-13T10:06:00Z", interval_seconds: 120, started: true, active_sessions: 0, live_count: 0, notifications: [], server_time: "2026-11-13T10:00:00Z" };
 const heartbeatOk = (url: string) =>
-  url.endsWith("/api/v1/monitoring/heartbeat")
-    ? json({ lease_expires_at: "2026-11-13T10:06:00Z" })
+  /\/api\/v1\/monitoring\/(heartbeat|start)$/.test(url)
+    ? json(HB)
     : url.endsWith("/api/v1/monitoring/stop")
       ? json({ ok: true })
       : json({ status: "ok", version: "0.1.0" });
@@ -34,8 +35,9 @@ describe("monitoring manager", () => {
     const alarm = fakeChrome.internals.alarms.get(ALARMS.heartbeat);
     expect(alarm?.periodInMinutes).toBe(2);
     expect(state.backendVersion).toBe("0.1.0");
-    const hb = fetch.mock.calls.find(([u]) => String(u).endsWith("/api/v1/monitoring/heartbeat"))!;
-    expect(JSON.parse(String(hb[1]!.body))).toEqual({ client: "chrome-extension", interval_seconds: 120 });
+    const hb = fetch.mock.calls.find(([u]) => String(u).endsWith("/api/v1/monitoring/start"))!;
+    expect(JSON.parse(String(hb[1]!.body))).toEqual({ client: "chrome-extension", interval_seconds: 120, since: null });
+    expect(state.lastServerTime).toBe("2026-11-13T10:00:00Z");
   });
 
   it("goes offline with exponential backoff when the backend is unreachable", async () => {
@@ -141,5 +143,55 @@ describe("syncAlarms", () => {
     expect(fakeChrome.internals.alarms.get(ALARMS.heartbeat)?.periodInMinutes).toBe(5);
     await syncAlarms(false, 5);
     expect(fakeChrome.internals.alarms.size).toBe(0);
+  });
+});
+
+
+describe("heartbeat notifications & since", () => {
+  const live = {
+    type: "streamer_live", streamer_id: 7, streamer_display_name: "Alpha", platform: "twitch",
+    title: "Ranked", category: "Valorant", at: "2026-11-13T10:01:00Z",
+  };
+
+  it("sends `since` from the previous heartbeat and shows enabled notifications", async () => {
+    await updateSettings({ notifications: { onStreamerLive: true } });
+    const bodies: unknown[] = [];
+    mockFetch((url, init) => {
+      if (/monitoring\/(heartbeat|start)$/.test(url)) {
+        bodies.push(JSON.parse(String(init?.body)));
+        return json({ ...HB, live_count: 1, active_sessions: 1, notifications: bodies.length === 2 ? [live] : [], server_time: `T${bodies.length}` });
+      }
+      return json({ status: "ok", version: "x" });
+    });
+    const { manager } = setup();
+    await manager.start();
+    const state = await manager.tick(true);
+    expect((bodies[1] as { since: string }).since).toBe("T1");
+    expect(state).toMatchObject({ liveCount: 1, activeSessions: 1, lastServerTime: "T2" });
+    expect(fakeChrome.internals.notifications).toHaveLength(1);
+    expect(fakeChrome.internals.notifications[0]).toMatchObject({ title: "Alpha is live on Twitch", message: "Ranked · Valorant" });
+  });
+
+  it("stays quiet when live notifications are disabled (default)", async () => {
+    mockFetch((url) => (/monitoring\/(heartbeat|start)$/.test(url) ? json({ ...HB, notifications: [live] }) : json({ status: "ok" })));
+    await setup().manager.start();
+    expect(fakeChrome.internals.notifications).toHaveLength(0);
+  });
+});
+
+describe("settings sync", () => {
+  it("pushes settings (without backendUrl) only when signed in", async () => {
+    const { syncSettingsToBackend } = await import("./settings-sync");
+    const fetch = mockFetch(() => json({}));
+    expect(await syncSettingsToBackend()).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    await chrome.storage.local.set({ "sh.authToken": "tok" });
+    await updateSettings({ privacy: { retentionDays: 9 } });
+    expect(await syncSettingsToBackend()).toBe(true);
+    const [url, init] = fetch.mock.calls.at(-1)!;
+    expect(url).toBe("http://localhost:8000/api/v1/settings");
+    const body = JSON.parse(String(init!.body));
+    expect(body.privacy.retentionDays).toBe(9);
+    expect(body).not.toHaveProperty("backendUrl");
   });
 });

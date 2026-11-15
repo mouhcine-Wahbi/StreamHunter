@@ -13,13 +13,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.routes import activity, auth, health, platform_auth, platforms, streamers, streams
+from app.api.routes import activity, auth, health, monitoring, platform_auth, platforms, streamers, streams
 from app.api.routes import settings as settings_routes
 from app.config import Settings, get_settings
 from app.db.session import create_engine, create_sessionmaker
 from app.errors import install_error_handlers
 from app.integrations.registry import PlatformRegistry
 from app.logging_config import configure_logging
+from app.monitoring.engine import MonitoringEngine
+from app.monitoring.scheduler import Scheduler
 from app.utils.crypto import TokenCipher
 from app.utils.rate_limit import SlidingWindowLimiter
 
@@ -33,7 +35,16 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.info("startup", extra={"version": __version__, "env": settings.app_env})
+        if settings.scheduler_enabled:
+            app.state.scheduler = Scheduler(
+                app.state.monitoring,
+                tick_seconds=settings.scheduler_tick_seconds,
+                retention_seconds=settings.retention_sweep_seconds,
+            )
+            app.state.scheduler.start()
         yield
+        if getattr(app.state, "scheduler", None):
+            await app.state.scheduler.stop()
         await app.state.registry.aclose()
         await app.state.engine.dispose()
         log.info("shutdown")
@@ -50,6 +61,8 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
     app.state.engine = engine
     app.state.sessionmaker = create_sessionmaker(engine)
     app.state.registry = registry or PlatformRegistry.from_settings(settings)
+    app.state.monitoring = MonitoringEngine(app.state.sessionmaker, app.state.registry, settings)
+    app.state.scheduler = None
     app.state.auth_limiter = SlidingWindowLimiter(settings.auth_rate_limit_per_minute, 60)
     app.state.token_cipher = TokenCipher(
         settings.token_encryption_key.get_secret_value() if settings.token_encryption_key else None
@@ -74,7 +87,7 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
         platform_auth.router,
         streamers.router,
         streams.router,
-        activity.monitoring,
+        monitoring.router,
         activity.highlights,
         activity.clips,
         settings_routes.router,

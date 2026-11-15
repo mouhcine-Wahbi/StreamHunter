@@ -7,9 +7,9 @@ Twitch and Kick streamers while your browser is open, reads chat to spot moments
 when the audience reacts, explains *why* each moment was flagged, and helps you turn
 it into a clip. Nothing is ever published without your approval.
 
-> **Status:** Phase 3 is code-complete. Twitch and Kick lookup, live status and account connections
-> are built and tested against mocked platform APIs. Confirming them against the live APIs needs your
-> developer credentials. Browser monitoring (Phase 4) comes next.
+> **Status:** Phase 4 is complete. Browser-based monitoring works end to end: lease, scheduled
+> polling, sessions, notifications and settings sync. Twitch/Kick calls are built and tested against
+> mocked APIs; confirming them live needs your developer credentials. Chat intelligence (Phase 5) comes next.
 > See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ![Overview](docs/screenshots/app-overview.png)
@@ -20,7 +20,8 @@ it into a clip. Nothing is ever published without your approval.
 |---|---|
 | MV3 extension: popup, full-page workspace, side panel | ✅ |
 | Settings (monitoring interval, sensitivity, score threshold, languages, clip defaults, notifications, time zone, retention) | ✅ |
-| Browser-based monitoring control with heartbeat, backoff and restart recovery | ✅ (extension side) |
+| Browser-based monitoring: backend lease, scheduled batched polling, sessions open/pause/resume/end, restart recovery | ✅ |
+| "Streamer went live" desktop notifications (opt-in) | ✅ |
 | Backend: accounts (Argon2, revocable sessions), watchlist API, settings API, capability reporting | ✅ |
 | Twitch search, Kick exact-name lookup, live status, title & category | ✅ (needs credentials) |
 | Connect Twitch / Kick accounts (OAuth; PKCE for Kick; tokens encrypted) | ✅ (needs credentials) |

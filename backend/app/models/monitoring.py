@@ -28,8 +28,33 @@ class MonitoringSession(Base):
     last_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     last_event_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Platform-reported start of the broadcast this session covers. Lets a paused session be
+    # resumed only for the *same* broadcast, and is the base for stream offsets (approximate).
+    broadcast_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
     streamer: Mapped[Streamer] = relationship(lazy="joined")
+
+
+class MonitoringLease(TimestampMixin, Base):
+    """Browser-based monitoring: valid only while the extension keeps sending heartbeats.
+
+    When `expires_at` passes (browser closed, laptop asleep, extension disabled) the backend
+    stops polling for this user and pauses their sessions. It never monitors on its own.
+    """
+
+    __tablename__ = "monitoring_leases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    client: Mapped[str] = mapped_column(String(64), nullable=False)
+    interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    last_heartbeat_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, index=True)
+    released_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+    def is_active(self, now: datetime) -> bool:
+        return self.released_at is None and self.expires_at > now
 
 
 class StreamEvent(CreatedAtMixin, Base):

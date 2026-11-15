@@ -12,31 +12,12 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.api.dependencies import ActivityServiceDep, PageDep
-from app.domain.enums import ClipStatus, MonitoringSessionStatus, Platform
-from app.schemas.activity import ClipOut, HighlightOut, MonitoringSessionOut, StreamEventOut
+from app.domain.enums import ClipStatus, Platform
+from app.schemas.activity import ClipOut, HighlightOut
 from app.schemas.common import ERROR_RESPONSES, Page
-from app.services.activity_service import session_out
 
-monitoring = APIRouter(prefix="/api/v1/monitoring", tags=["monitoring"], responses=ERROR_RESPONSES)
 highlights = APIRouter(prefix="/api/v1/highlights", tags=["highlights"], responses=ERROR_RESPONSES)
 clips = APIRouter(prefix="/api/v1/clips", tags=["clips"], responses=ERROR_RESPONSES)
-
-
-@monitoring.get("", response_model=Page[MonitoringSessionOut], summary="Monitoring session history")
-async def list_sessions(
-    svc: ActivityServiceDep, page: PageDep, status: MonitoringSessionStatus | None = None
-) -> Page[MonitoringSessionOut]:
-    return await svc.list_sessions(limit=page.limit, offset=page.offset, status=status)
-
-
-@monitoring.get("/{session_id}", response_model=MonitoringSessionOut, summary="One monitoring session")
-async def get_session(session_id: int, svc: ActivityServiceDep) -> MonitoringSessionOut:
-    return session_out(await svc.get_session(session_id))
-
-
-@monitoring.get("/{session_id}/events", response_model=Page[StreamEventOut], summary="Detection events of a session")
-async def list_events(session_id: int, svc: ActivityServiceDep, page: PageDep) -> Page[StreamEventOut]:
-    return await svc.list_events(session_id, limit=page.limit, offset=page.offset)
 
 
 @highlights.get("", response_model=Page[HighlightOut], summary="Highlight candidates")

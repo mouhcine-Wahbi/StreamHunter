@@ -26,6 +26,11 @@ export interface MonitoringState {
   consecutiveFailures: number;
   /** Earliest time the next attempt may run (exponential backoff). */
   nextAttemptAt: string | null;
+  /** Counts reported by the latest heartbeat (null until the first one succeeds). */
+  liveCount: number | null;
+  activeSessions: number | null;
+  /** Backend clock at the last heartbeat; sent back as `since` so notifications are not repeated. */
+  lastServerTime: string | null;
 }
 
 export const INITIAL_MONITORING_STATE: MonitoringState = {
@@ -40,4 +45,7 @@ export const INITIAL_MONITORING_STATE: MonitoringState = {
   lastError: null,
   consecutiveFailures: 0,
   nextAttemptAt: null,
+  liveCount: null,
+  activeSessions: null,
+  lastServerTime: null,
 };

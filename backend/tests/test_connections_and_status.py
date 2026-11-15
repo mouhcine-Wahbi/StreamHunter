@@ -42,6 +42,7 @@ async def ctx(tmp_path, tw: FakeTwitch, kk: FakeKick) -> AsyncIterator[tuple]:
     settings = Settings(
         _env_file=None,
         app_env="test",
+        scheduler_enabled=False,
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'c.db'}",
         token_encryption_key=SecretStr(Fernet.generate_key().decode()),
         twitch_client_id="tw-client",

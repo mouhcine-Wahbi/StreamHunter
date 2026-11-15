@@ -22,6 +22,7 @@ class MonitoringSessionOut(Schema):
     last_checked_at: datetime | None
     last_event_at: datetime | None
     error_message: str | None
+    broadcast_started_at: datetime | None = None
 
 
 class StreamEventOut(Schema):
@@ -69,3 +70,40 @@ class ClipOut(Schema):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class HeartbeatRequest(Schema):
+    client: str = Field("chrome-extension", min_length=1, max_length=64)
+    interval_seconds: int = Field(120, ge=30, le=3600)
+    # Return notifications for events after this time (the client's previous heartbeat).
+    since: datetime | None = None
+
+
+class NotificationOut(Schema):
+    type: str  # streamer_live | streamer_offline
+    streamer_id: int
+    streamer_display_name: str
+    platform: Platform
+    title: str | None
+    category: str | None
+    at: datetime
+
+
+class HeartbeatOut(Schema):
+    lease_expires_at: datetime
+    interval_seconds: int
+    started: bool
+    active_sessions: int
+    live_count: int
+    notifications: list[NotificationOut]
+    server_time: datetime
+
+
+class MonitoringStatusOut(Schema):
+    lease_active: bool
+    lease_expires_at: datetime | None
+    last_heartbeat_at: datetime | None
+    active_sessions: int
+    paused_sessions: int
+    scheduler_running: bool
+    last_cycle_at: datetime | None

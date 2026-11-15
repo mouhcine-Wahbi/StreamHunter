@@ -73,11 +73,25 @@ code + **PKCE S256** (scopes `user:read channel:read events:subscribe`). Client 
 | `GET /api/v1/streams/{streamer_id}` | Last known state, no platform call: `{is_live, title, category, viewer_count, started_at, last_checked_at}` |
 | `GET /api/v1/streams/{streamer_id}/status` | Same shape, **freshly fetched** from the platform (503 `status_unavailable` if it can't be) |
 
-### Monitoring, highlights, clips (read; writes arrive in Phases 4–6)
+### Browser monitoring (Phase 4)
 | | |
 |---|---|
-| `GET /api/v1/monitoring?status=` | Session history |
-| `GET /api/v1/monitoring/{id}` / `/{id}/events` | One session / its detection events (aggregates only, no chat text) |
+| `POST /api/v1/monitoring/start` | `{client, interval_seconds (30–3600), since?}`: grants the lease and checks your watchlist immediately |
+| `POST /api/v1/monitoring/heartbeat` | Same body. Extends the lease (TTL = max(`MONITORING_LEASE_TTL_SECONDS`, 3 × interval + 60 s)) → `{lease_expires_at, interval_seconds, started, active_sessions, live_count, notifications[], server_time}`. `notifications` are `streamer_live` / `streamer_offline` events after `since` |
+| `POST /api/v1/monitoring/stop` | Releases the lease now; active sessions are paused → 204 |
+| `GET /api/v1/monitoring/status` | `{lease_active, lease_expires_at, last_heartbeat_at, active_sessions, paused_sessions, scheduler_running, last_cycle_at}` |
+| `GET /api/v1/monitoring?status=` | Session history (`active · paused · ended · error`) |
+| `GET /api/v1/monitoring/{id}` / `/{id}/events` | One session / its events (`stream_online`, `stream_offline`, detector events later). Aggregates only, no chat text |
+
+How it works: while a lease is active, the backend scheduler polls the live status of that user's
+monitored streamers. It batches per platform, polls each streamer at most once per the shortest
+interval among its users (never more often than `MIN_POLL_SECONDS`), and backs off a failing
+platform (30 s → 15 min). When a streamer goes live a session opens. It ends when the stream ends,
+pauses when the lease lapses, and resumes after a pause for the same broadcast.
+
+### Highlights & clips (read; writes arrive in Phases 5–6)
+| | |
+|---|---|
 | `GET /api/v1/highlights` | Filters: `platform, streamer_id, category, min_score, status, date_from, date_to` |
 | `GET /api/v1/highlights/{id}` | One candidate with `reasons` and `signal_breakdown` |
 | `GET /api/v1/clips?status=&platform=` / `/{id}` | Clip library. `platform_clip_url` and `local_file_path` are separate on purpose |
@@ -98,6 +112,6 @@ Capability values: `supported`, `requires_configuration`, `requires_authorizatio
 configuration and your connection state, never hardcoded in the UI.
 
 ## Not yet available (planned)
-`POST /api/v1/monitoring/heartbeat|start|stop` (Phase 4) · `/ws/monitoring` (Phase 4/5) ·
+`/ws/monitoring` (Phase 5, together with live highlight events) ·
 `POST /api/v1/highlights/{id}/approve|reject`, `PATCH /api/v1/highlights/{id}` (Phase 5/6) ·
 `POST /api/v1/clips/{id}/create|export|retry`, `PATCH /api/v1/clips/{id}` (Phase 6).

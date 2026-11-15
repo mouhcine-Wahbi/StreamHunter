@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.domain.enums import Platform
 from app.integrations.base import (
     CAPABILITY_KEYS,
@@ -19,6 +21,9 @@ class FakePlatform(StreamingPlatform):
         self.platform = platform
         self.channels = {c.username.lower(): c for c in channels or []}
         self.calls: list[tuple[str, object]] = []
+        # Set by tests: platform_user_id -> LiveStatus. Ids not present are not reported.
+        self.live: dict[str, LiveStatus] = {}
+        self.fail_with: Exception | None = None
 
     @property
     def configured(self) -> bool:
@@ -42,7 +47,20 @@ class FakePlatform(StreamingPlatform):
         return self.channels.get(username.lower())
 
     async def get_live_status(self, platform_user_ids: list[str]) -> dict[str, LiveStatus]:
-        return {}
+        self.calls.append(("live_status", tuple(platform_user_ids)))
+        if self.fail_with:
+            raise self.fail_with
+        return {k: v for k, v in self.live.items() if k in platform_user_ids}
+
+    def set_live(self, uid: str, live: bool, *, started: datetime | None = None, title: str = "Live now") -> None:
+        self.live[uid] = LiveStatus(
+            platform_user_id=uid,
+            is_live=live,
+            title=title if live else None,
+            category="Just Chatting" if live else None,
+            viewer_count=100 if live else None,
+            started_at=(started or datetime(2026, 11, 15, 5, 0, tzinfo=UTC)) if live else None,
+        )
 
 
 def channel(platform: Platform, uid: str, username: str, *, live: bool | None = False) -> ChannelInfo:

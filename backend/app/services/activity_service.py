@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.enums import ClipStatus, MonitoringSessionStatus, Platform
 from app.errors import NotFoundError
 from app.models import Clip, HighlightCandidate, MonitoringSession, StreamEvent, User
-from app.schemas.activity import ClipOut, HighlightOut, MonitoringSessionOut, StreamEventOut
+from app.schemas.activity import ClipOut, ClipSummary, HighlightOut, MonitoringSessionOut, StreamEventOut
 from app.schemas.common import Page
 
 
@@ -26,10 +26,20 @@ def session_out(s: MonitoringSession) -> MonitoringSessionOut:
     return out
 
 
-def highlight_out(h: HighlightCandidate) -> HighlightOut:
+def highlight_out(h: HighlightCandidate, clip: Clip | None = None) -> HighlightOut:
     out = HighlightOut.model_validate(h)
     out.streamer_display_name = h.streamer.display_name
+    out.streamer_username = h.streamer.username
+    if clip is not None:
+        out.clip = ClipSummary.model_validate(clip)
     return out
+
+
+async def clips_by_candidate(db: AsyncSession, user_id: int, ids: list[int]) -> dict[int, Clip]:
+    if not ids:
+        return {}
+    rows = (await db.scalars(select(Clip).where(Clip.user_id == user_id, Clip.candidate_id.in_(ids)).order_by(Clip.id))).all()
+    return {c.candidate_id: c for c in rows}  # latest per candidate
 
 
 class ActivityService:
@@ -92,7 +102,8 @@ class ActivityService:
         if date_to:
             q = q.where(h.timestamp <= date_to)
         rows, total = await _page(self.db, q.order_by(h.timestamp.desc()), limit, offset)
-        return Page(items=[highlight_out(r) for r in rows], total=total, limit=limit, offset=offset)
+        clips = await clips_by_candidate(self.db, self.user.id, [r.id for r in rows])
+        return Page(items=[highlight_out(r, clips.get(r.id)) for r in rows], total=total, limit=limit, offset=offset)
 
     async def get_highlight(self, highlight_id: int) -> HighlightOut:
         h = await self.db.scalar(
@@ -102,7 +113,8 @@ class ActivityService:
         )
         if h is None:
             raise NotFoundError("Highlight not found")
-        return highlight_out(h)
+        clips = await clips_by_candidate(self.db, self.user.id, [h.id])
+        return highlight_out(h, clips.get(h.id))
 
     # --- clips ---
     async def list_clips(

@@ -3,6 +3,7 @@ import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import type { CandidateStatus, HighlightCandidate } from "@/types/api";
 import { formatOffset, formatRelative } from "@/utils/format";
 import { cn } from "@/utils/cn";
+import { HighlightActions } from "./HighlightActions";
 
 export const CANDIDATE_STATUS_META: Record<CandidateStatus, { label: string; tone: BadgeTone }> = {
   detected: { label: "Detected", tone: "accent" },
@@ -41,7 +42,7 @@ export function ScoreRing({ score, size = 40 }: { score: number; size?: number }
   );
 }
 
-export function HighlightRow({ h, compact = false }: { h: HighlightCandidate; compact?: boolean }) {
+export function HighlightRow({ h, compact = false, onChanged }: { h: HighlightCandidate; compact?: boolean; onChanged?: () => void }) {
   const meta = CANDIDATE_STATUS_META[h.status];
   return (
     <div className={cn("flex items-start gap-3", compact ? "py-2.5" : "py-3.5")}>
@@ -51,6 +52,9 @@ export function HighlightRow({ h, compact = false }: { h: HighlightCandidate; co
           <span className="truncate text-sm font-medium text-fg">{h.streamer_display_name ?? `Streamer #${h.streamer_id}`}</span>
           <PlatformBadge platform={h.platform} />
           <Badge tone={meta.tone}>{meta.label}</Badge>
+          {h.clip && (
+            <Badge tone={CANDIDATE_STATUS_META[h.clip.status].tone}>clip: {CANDIDATE_STATUS_META[h.clip.status].label.toLowerCase()}</Badge>
+          )}
         </div>
         <div className="mt-0.5 text-xs text-fg-muted">
           {CATEGORY_LABEL(h.category)} · {formatRelative(h.timestamp)}
@@ -73,6 +77,7 @@ export function HighlightRow({ h, compact = false }: { h: HighlightCandidate; co
             ))}
           </ul>
         )}
+        {!compact && onChanged && <HighlightActions h={h} onChanged={onChanged} />}
       </div>
     </div>
   );

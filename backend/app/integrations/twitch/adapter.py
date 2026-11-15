@@ -23,7 +23,9 @@ from app.integrations.twitch.client import HelixClient
 from app.integrations.twitch.schemas import HelixStream
 
 # Features of this adapter that are actually built. Extended phase by phase.
-IMPLEMENTED: frozenset[str] = frozenset({"stream_lookup", "live_detection", "category_lookup", "chat_monitoring"})
+IMPLEMENTED: frozenset[str] = frozenset(
+    {"stream_lookup", "live_detection", "category_lookup", "chat_monitoring", "official_clip_creation"}
+)
 
 CHAT_SCOPES = frozenset({"user:read:chat"})
 CLIP_SCOPES = frozenset({"clips:edit"})
@@ -59,6 +61,10 @@ class TwitchAdapter(StreamingPlatform):
     @property
     def http(self) -> httpx.AsyncClient:
         return self._http
+
+    @property
+    def helix(self) -> HelixClient | None:
+        return self._helix
 
     def capabilities(self, connection: UserConnectionState) -> CapabilityReport:
         cfg = self.configured

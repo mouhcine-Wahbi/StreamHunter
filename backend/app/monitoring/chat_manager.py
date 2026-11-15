@@ -33,6 +33,7 @@ from app.integrations.twitch.adapter import TwitchAdapter
 from app.integrations.twitch.chat import TwitchChatConnection
 from app.models import HighlightCandidate, MonitoringSession, PlatformConnection, StreamEvent, Streamer, User, UserSettings
 from app.schemas.settings import UserSettingsModel
+from app.services.clip_service import auto_capture_candidates
 from app.services.connection_service import ConnectionService
 from app.utils.crypto import TokenCipher
 
@@ -73,6 +74,8 @@ class ChatManager:
         self.twitch_connections: dict[int, TwitchChatConnection] = {}  # StreamHunter user id → connection
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
+        self.clip_worker: Any = None  # ClipWorker, set by the app (auto-capture of Twitch clips)
+        self._pending_capture: list[int] = []
 
     # --- message intake ------------------------------------------------------------------------
     def ingest(self, msg: ChatMessage) -> bool:
@@ -276,6 +279,11 @@ class ChatManager:
             for sid, draft in drafts:
                 created += await self._persist(db, draft, sid)
             await db.commit()
+        # Twitch clips what's on air *now*: request them right after commit, not at review time.
+        captures, self._pending_capture = self._pending_capture, []
+        if self.clip_worker is not None:
+            for clip_id in captures:
+                self.clip_worker.spawn(self.clip_worker.request(clip_id))
         return created
 
     async def _persist(self, db: AsyncSession, draft: CandidateDraft | None, streamer_id: int) -> int:
@@ -292,6 +300,7 @@ class ChatManager:
             return 0
         settings = await self._settings(db, {s.user_id for s in sessions})
         created = 0
+        new_candidates: list[HighlightCandidate] = []
         for s in sessions:
             us = settings[s.user_id]
             if draft.strictness < Strictness.for_setting(us.detection.sensitivity):
@@ -304,8 +313,7 @@ class ChatManager:
                     return None  # never guessed
                 return max(0.0, round((ts - s.broadcast_started_at).total_seconds(), 1))
 
-            db.add(
-                HighlightCandidate(
+            cand = HighlightCandidate(
                     user_id=s.user_id,
                     session_id=s.id,
                     streamer_id=streamer_id,
@@ -325,7 +333,8 @@ class ChatManager:
                     },
                     status=ClipStatus.PENDING_REVIEW.value,
                 )
-            )
+            db.add(cand)
+            new_candidates.append(cand)
             for e in draft.events:
                 db.add(
                     StreamEvent(
@@ -341,6 +350,8 @@ class ChatManager:
             s.last_event_at = datetime.now(UTC)
             created += 1
         await db.flush()
+        if self.clip_worker is not None and new_candidates:
+            self._pending_capture += await auto_capture_candidates(db, new_candidates)
         if created:
             log.info("highlight_candidates_created", extra={"streamer_id": streamer_id, "count": created,
                                                            "score": draft.score, "category": draft.category})

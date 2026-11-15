@@ -95,12 +95,28 @@ pauses when the lease lapses, and resumes after a pause for the same broadcast.
 |---|---|
 | `POST /api/v1/webhooks/kick` | Kick event delivery. Register `{KICK_WEBHOOK_PUBLIC_URL}/api/v1/webhooks/kick` in your Kick app. Requests must carry a valid `Kick-Event-Signature` (RSA-SHA256 over `id.timestamp.body`, verified with Kick's published key), a timestamp within ±5 min and an unseen message id; otherwise 401 `invalid_signature`. `chat.message.sent` feeds the analyzer. Verified deliveries always get 200 |
 
-### Highlights & clips (read; review and clip writes arrive in Phase 6)
+### Highlights (review)
 | | |
 |---|---|
-| `GET /api/v1/highlights` | Filters: `platform, streamer_id, category, min_score, status, date_from, date_to` |
+| `GET /api/v1/highlights` | Filters: `platform, streamer_id, category, min_score, status, date_from, date_to`. Each item includes `clip` (`{id, status, platform_clip_url, error_message}` or null) and `streamer_username` |
 | `GET /api/v1/highlights/{id}` | One candidate with `reasons` and `signal_breakdown` |
-| `GET /api/v1/clips?status=&platform=` / `/{id}` | Clip library. `platform_clip_url` and `local_file_path` are separate on purpose |
+| `POST /api/v1/highlights/{id}/approve` | `pending_review → approved`; prepares its clip → `{highlight, clip}`. Twitch: clip `approved` (not requested yet). Kick: clip `unsupported`, with manual instructions in `error_message` |
+| `POST /api/v1/highlights/{id}/reject` | `→ rejected` (also from `approved`) |
+| `PATCH /api/v1/highlights/{id}` | `{status: "pending_review"}` reopens a rejected highlight. Also `start_offset_sec`, `end_offset_sec` (window ≤ 180 s) and `category` |
+
+### Clips
+| | |
+|---|---|
+| `GET /api/v1/clips?status=&platform=` / `/{id}` | `{…, platform_clip_url, edit_url, local_file_path, source: auto\|editor\|manual, requested_at, request_lag_seconds, published_at, published_url}`. A platform clip URL and a local file are separate on purpose |
+| `POST /api/v1/clips/{id}/create` | `{accept_current_moment?: false}`. Twitch only: needs a connected account with `clips:edit` (503 `requires_authorization`) and a live channel (409 `stream_offline`). For moments older than 90 s it answers 409 `moment_passed` unless `accept_current_moment` is true, because Twitch clips what is on air *now*. The clip is requested immediately and confirmed via Get Clips (up to ~25 s) → `created` with its URL, or `failed` with a reason. Kick: 409 `requires_manual_action` |
+| `POST /api/v1/clips/{id}/retry` | Same as create, for `failed` clips |
+| `PATCH /api/v1/clips/{id}` | `{title?, aspect_ratio?, platform_clip_url?}`. The URL is for the manual workflow (must be https on kick.com / clips.twitch.tv) and turns `unsupported` into `created` |
+| `POST /api/v1/clips/{id}/export` | 409 `media_unavailable`: export needs an authorized media source, and none exists in the MVP |
+| `POST /api/v1/clips/{id}/publish` | `{confirm: true, published_url?}`. Records that **you** published it. StreamHunter never posts anywhere; without `confirm: true` the request is rejected (422) |
+
+**Auto-capture:** with `clips.autoCreatePlatformClips` on (the default), a Twitch highlight that meets
+your minimum score gets its official clip requested the moment it is detected (`source: "auto"`).
+The highlight itself stays `pending_review`.
 
 ### Settings
 | | |
@@ -119,5 +135,4 @@ configuration and your connection state, never hardcoded in the UI.
 
 ## Not yet available (planned)
 `/ws/monitoring`: not planned for the MVP. A Manifest V3 service worker can't hold a socket open, so events arrive with each heartbeat instead ·
-`POST /api/v1/highlights/{id}/approve|reject`, `PATCH /api/v1/highlights/{id}` (Phase 5/6) ·
-`POST /api/v1/clips/{id}/create|export|retry`, `PATCH /api/v1/clips/{id}` (Phase 6).
+Media export (needs an authorized media source; Phase 7).

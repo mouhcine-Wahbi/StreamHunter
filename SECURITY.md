@@ -65,6 +65,15 @@ Implemented in Phase 5:
 * Known bots, `!commands` and the broadcaster's own messages are ignored. Each chatter counts at
   most twice per 5 s, so one person can't fake an audience reaction.
 
+Implemented in Phase 6:
+
+* Publishing needs `confirm: true` in the request *and* a confirmation step in the UI. StreamHunter
+  never posts content; "published" is a record of what the editor did.
+* Auto-capture only creates an unpublished Twitch clip, with the user's own token and only if they opted in
+  (on by default, can be switched off). It never approves or publishes.
+* Manually entered clip URLs must be https on the platform's own domains. The extension only renders
+  https links.
+
 Planned:
 
 * HTTPS required in production; CORS restricted to the extension origin.

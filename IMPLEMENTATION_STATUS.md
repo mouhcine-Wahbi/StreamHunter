@@ -128,7 +128,24 @@ They are covered by tests that drive a fake platform through every transition.
 were loaded in (now fixed, with a test that no phrase is ambiguous after normalization).
 Repeated common lines ("hi chat") were also creating false candidates; repeated phrases are now
 relative to the stream's baseline and can't create a candidate on their own.
-## Phase 6 — Clip workflow ⏳
+## Phase 6 — Clip workflow ✅ (Twitch clip calls pending credentials)
+
+| Item | Status | Notes |
+|---|---|---|
+| Review: approve / reject / reopen, adjust window and category | ✅ | State machine enforced |
+| Twitch Create Clip + confirmation via Get Clips → created / failed with a reason | ✅ | Mocked Helix with processing delay and offline refusal |
+| "Moment passed" guard (Twitch clips the current broadcast) with an explicit override | ✅ | 90 s threshold; request lag recorded |
+| Auto-capture at detection time (opt-out setting, meets the min score, own token) | ✅ | Never approves or publishes |
+| Retry for failed clips | ✅ | |
+| Kick manual workflow: instructions, open channel, paste clip URL (validated) | ✅ | Kick has no clip API |
+| Title, aspect ratio | ✅ | Stored in StreamHunter (Twitch titles are edited in Twitch's editor via `edit_url`) |
+| Export | 🚫 for now | Honest `media_unavailable`; needs an authorized media source (Phase 7) |
+| Publish only with explicit confirmation (API and UI) | ✅ | |
+| Extension: review actions, clip status on highlights, Clip Library actions, auto-capture toggle | ✅ | |
+| Tests | ✅ | Backend 100; extension 68 |
+| Live stack check | ✅ | Built extension + uvicorn: Twitch approve → create refused with "Connect your Twitch account…". Kick approve → manual instructions → pasted clip link → export refused honestly → publish after confirmation |
+
+**Found and fixed:** the aspect-ratio selector stretched across the whole clip card; it is now fixed width.
 ## Phase 7 — VOD & advanced AI ⏳
 
 ## Known platform limitations (by design, not bugs)

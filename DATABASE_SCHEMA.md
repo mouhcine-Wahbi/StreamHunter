@@ -37,7 +37,7 @@ All foreign keys to `users` and `streamers` cascade on delete.
 | `monitoring_leases` | user_id, client, interval_seconds, started_at, last_heartbeat_at, expires_at, released_at | `uq(user_id)`, `ix(expires_at)` | **Addition (Phase 4).** Browser lease; no lease = no polling for that user |
 | `stream_events` | session_id, streamer_id, event_type, platform_timestamp, stream_offset_sec, confidence, metadata (JSON) | `ix(session_id, created_at)`, `ix(streamer_id)` | Aggregated detector output only, never raw chat. The Python attribute is `event_metadata` because `metadata` is reserved |
 | `highlight_candidates` | **user_id**, session_id, streamer_id, platform, start/end_offset_sec, timestamp, score, confidence, category, reasons (JSON), signal_breakdown (JSON), status | `ix(user_id, timestamp)`, `ix(user_id, status)`, `ix(streamer_id)` | `user_id` is denormalized (an addition) so every query can be scoped to its owner cheaply |
-| `clips` | candidate_id, user_id, platform, platform_clip_id, platform_clip_url, local_file_path, title, duration_seconds, aspect_ratio, status, error_message | `ix(user_id, created_at)`, `ix(candidate_id)` | A platform clip URL and a local file are tracked separately |
+| `clips` | candidate_id, user_id, platform, platform_clip_id, platform_clip_url, local_file_path, title, duration_seconds, aspect_ratio, status, error_message, source, edit_url, requested_at, request_lag_seconds, published_at, published_url | `ix(user_id, created_at)`, `ix(candidate_id)` | A platform clip URL and a local file are tracked separately. `source` = auto / editor / manual; `request_lag_seconds` = time between the peak and the Twitch request (Phase 6 additions) |
 | `user_settings` | user_id, settings (JSON) | `uq(user_id)` | Validated by `UserSettingsModel` on every write |
 
 ## Status lifecycle (`highlight_candidates.status`, `clips.status`)
@@ -46,8 +46,11 @@ Enforced in `app/domain/status.py`. Every change goes through `transition()`, an
 `published` requires `user_confirmed=True`:
 
 ```text
-detected → pending_review → approved → creation_requested → created → exporting → ready → published
-     └→ rejected ⇄ pending_review     └→ unsupported → published (manual)    failed → retry
+highlight:  pending_review → approved | rejected;  approved → rejected;  rejected → pending_review
+clip (starts as approved, creation_requested or unsupported):
+  approved → creation_requested → created | failed;  failed → creation_requested (retry)
+  unsupported (Kick) → created (editor pasted the clip URL)
+  created | ready | unsupported → published   (only with explicit confirmation)
 ```
 
 ## Migrations

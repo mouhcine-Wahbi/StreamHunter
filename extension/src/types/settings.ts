@@ -36,6 +36,8 @@ export interface Settings {
     /** Seconds included after the detected moment. */
     postRollSeconds: number;
     defaultAspectRatio: AspectRatio;
+    /** Request the official Twitch clip as soon as a highlight is detected (it is not published). */
+    autoCreatePlatformClips: boolean;
   };
   notifications: {
     onHighlight: boolean;
@@ -61,7 +63,7 @@ export const DEFAULT_SETTINGS: Settings = {
     keywordLanguages: ["en"],
     customKeywords: [],
   },
-  clips: { preRollSeconds: 20, postRollSeconds: 10, defaultAspectRatio: "9:16" },
+  clips: { preRollSeconds: 20, postRollSeconds: 10, defaultAspectRatio: "9:16", autoCreatePlatformClips: true },
   notifications: { onHighlight: true, onStreamerLive: false },
   locale: { timeZone: "auto", language: "en" },
   privacy: { retentionDays: 30 },

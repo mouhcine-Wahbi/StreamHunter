@@ -122,6 +122,7 @@ export function sanitizeSettings(input: unknown): Settings {
         d.clips.postRollSeconds,
       ),
       defaultAspectRatio: oneOf(clips.defaultAspectRatio, RATIOS, d.clips.defaultAspectRatio),
+      autoCreatePlatformClips: bool(clips.autoCreatePlatformClips, d.clips.autoCreatePlatformClips),
     },
     notifications: {
       onHighlight: bool(notif.onHighlight, d.notifications.onHighlight),

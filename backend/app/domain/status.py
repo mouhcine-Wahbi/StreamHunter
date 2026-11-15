@@ -16,10 +16,17 @@ ALLOWED_TRANSITIONS: dict[S, frozenset[S]] = {
     S.EXPORTING: frozenset({S.READY, S.FAILED}),
     S.READY: frozenset({S.PUBLISHED, S.EXPORTING}),
     S.FAILED: frozenset({S.CREATION_REQUESTED, S.EXPORTING, S.REJECTED}),
-    # Manual workflow: the editor clipped it by hand and marks it published.
-    S.UNSUPPORTED: frozenset({S.PUBLISHED, S.REJECTED}),
+    # Manual workflow (no platform API): the editor clips it on the platform and either pastes
+    # the clip URL (→ created) or marks it published directly.
+    S.UNSUPPORTED: frozenset({S.CREATED, S.PUBLISHED, S.REJECTED}),
     S.PUBLISHED: frozenset(),
 }
+
+# Where a new clip row may start (clips are created, not transitioned into existence):
+#   approved           – editor approved; platform clip not requested yet
+#   creation_requested – requested immediately (auto-capture at detection time)
+#   unsupported        – platform has no clip API (Kick): manual action needed
+CLIP_INITIAL: frozenset[S] = frozenset({S.APPROVED, S.CREATION_REQUESTED, S.UNSUPPORTED})
 
 # Reaching `published` is only ever done by an explicit user confirmation endpoint.
 REQUIRES_USER_CONFIRMATION: frozenset[S] = frozenset({S.PUBLISHED})

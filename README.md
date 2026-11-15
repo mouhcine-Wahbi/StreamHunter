@@ -7,10 +7,10 @@ Twitch and Kick streamers while your browser is open, reads chat to spot moments
 when the audience reacts, explains *why* each moment was flagged, and helps you turn
 it into a clip. Nothing is ever published without your approval.
 
-> **Status:** Phase 5 is complete. Chat intelligence turns chat spikes, emote waves, clip requests
-> and multilingual reactions into explained highlight candidates. Twitch chat comes via EventSub and Kick chat
-> via signed webhooks. Everything is tested with simulated chat and mocked platform APIs; real chat
-> needs your credentials. Clip creation and review (Phase 6) come next.
+> **Status:** Phases 0–6 (the MVP) are built. You can monitor streamers, detect highlights from chat, and
+> review them; Twitch clips are created (automatically at detection, or on request) and Kick clips
+> go through a guided manual step. Publishing always needs your confirmation. Everything is tested
+> against simulated chat and mocked platform APIs; real platform use needs your credentials.
 > See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ![Overview](docs/screenshots/app-overview.png)
@@ -28,7 +28,9 @@ it into a clip. Nothing is ever published without your approval.
 | Connect Twitch / Kick accounts (OAuth; PKCE for Kick; tokens encrypted) | ✅ (needs credentials) |
 | Chat-based highlight detection with explainable scores (spikes, emotes, clip requests, reactions in 8 languages, sentiment) | ✅ |
 | Live chat activity per session, highlight notifications | ✅ |
-| Twitch clip creation; Kick manual workflow | ⏳ Phase 6 |
+| Review workflow (approve / reject / reopen), Twitch clip creation (auto-capture or on request), Kick manual clip step | ✅ (Twitch needs credentials) |
+| Publish only after explicit confirmation | ✅ |
+| Media export (MP4, vertical crops, subtitles) | ⏳ Phase 7 (needs an authorized media source) |
 
 ## Technology
 

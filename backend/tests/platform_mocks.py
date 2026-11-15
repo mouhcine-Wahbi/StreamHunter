@@ -37,6 +37,10 @@ class FakeTwitch:
     requests: list[httpx.Request] = field(default_factory=list)
     user_token_scopes: list[str] = field(default_factory=lambda: ["clips:edit", "user:read:chat"])
     revoked: list[str] = field(default_factory=list)
+    # Create Clip simulation: a clip becomes visible after `clip_ready_after` Get Clips polls.
+    clip_ready_after: int = 1
+    clips_requested: list[dict] = field(default_factory=list)
+    clip_polls: dict[str, int] = field(default_factory=dict)
 
     def handler(self, req: httpx.Request) -> httpx.Response:
         self.requests.append(req)
@@ -64,6 +68,15 @@ class FakeTwitch:
             if path == "/oauth2/revoke":
                 self.revoked.append(form.get("token", ""))
                 return httpx.Response(200)
+        if url.host == "api.twitch.tv" and url.path == "/helix/clips" and req.method == "POST":
+            if req.headers.get("Authorization") not in ("Bearer user-at", "Bearer user-at-2") or req.headers.get("Client-Id") != self.client_id:
+                return _json({"error": "Unauthorized", "status": 401}, 401)
+            bid = url.params["broadcaster_id"]
+            if bid not in self.live:
+                return _json({"error": "Not Found", "status": 404, "message": "Clipping is not possible for an offline channel."}, 404)
+            cid = f"Clip{len(self.clips_requested) + 1}"
+            self.clips_requested.append({"id": cid, "broadcaster_id": bid, "has_delay": url.params.get("has_delay")})
+            return _json({"data": [{"id": cid, "edit_url": f"https://clips.twitch.tv/{cid}/edit"}]}, 202)
         if url.host == "api.twitch.tv":
             auth = req.headers.get("Authorization", "")
             if req.headers.get("Client-Id") != self.client_id or not auth.startswith("Bearer app-"):
@@ -81,6 +94,14 @@ class FakeTwitch:
                 ids = q.get("user_id", [])
                 assert len(ids) <= 100, "Helix allows at most 100 user_id values"
                 return _json({"data": [s for uid, s in self.live.items() if uid in ids], "pagination": {}})
+            if path == "/helix/clips":
+                cid = q["id"][0]
+                self.clip_polls[cid] = self.clip_polls.get(cid, 0) + 1
+                known = any(c["id"] == cid for c in self.clips_requested)
+                if not known or self.clip_polls[cid] < self.clip_ready_after:
+                    return _json({"data": [], "pagination": {}})
+                return _json({"data": [{"id": cid, "url": f"https://clips.twitch.tv/{cid}", "title": "Ranked grind",
+                                        "duration": 30.0, "thumbnail_url": "https://clips-media.example/x.jpg"}]})
             if path == "/helix/search/channels":
                 term = q["query"][0].lower()
                 data = []

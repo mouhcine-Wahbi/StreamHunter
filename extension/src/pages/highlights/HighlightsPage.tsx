@@ -15,8 +15,6 @@ const STATUS_FILTERS: readonly { id: CandidateStatus | "all"; label: string }[] 
   { id: "pending_review", label: "Pending review" },
   { id: "approved", label: "Approved" },
   { id: "rejected", label: "Rejected" },
-  { id: "created", label: "Clip created" },
-  { id: "unsupported", label: "Manual action" },
 ];
 
 export function HighlightsPage() {
@@ -67,7 +65,7 @@ export function HighlightsPage() {
               ) : (
                 <div className="divide-y divide-ink-700/70">
                   {page.items.map((h) => (
-                    <HighlightRow key={h.id} h={h} />
+                    <HighlightRow key={h.id} h={h} onChanged={query.reload} />
                   ))}
                 </div>
               )

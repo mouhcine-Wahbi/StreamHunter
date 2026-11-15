@@ -52,6 +52,9 @@ class ClipSettings(_Strict):
     preRollSeconds: int = Field(20, ge=0, le=120)
     postRollSeconds: int = Field(10, ge=0, le=120)
     defaultAspectRatio: Literal["16:9", "9:16", "1:1"] = "9:16"
+    # Twitch clips capture the broadcast at request time, so capture right when a highlight is
+    # detected (unpublished; the editor still reviews it). Ignored on platforms without a clip API.
+    autoCreatePlatformClips: bool = True
 
 
 class NotificationSettings(_Strict):

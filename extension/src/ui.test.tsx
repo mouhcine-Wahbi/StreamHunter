@@ -334,3 +334,126 @@ describe("chat intelligence UI (Phase 5)", () => {
     expect(screen.getByText(/≈0:29:50 into stream/)).toBeInTheDocument();
   });
 });
+
+describe("review & clip workflow (Phase 6)", () => {
+  const baseHighlight = {
+    id: 5, session_id: 1, streamer_id: 3, streamer_display_name: "Alpha", streamer_username: "alpha", platform: "twitch",
+    timestamp: "2026-11-15T12:30:00Z", start_offset_sec: 100, end_offset_sec: 140, score: 84, confidence: 0.9,
+    category: "funny_moment", reasons: ["'KEKW' used by 40 chatters"], signal_breakdown: { chat: 84, audio: null },
+  };
+  const page = (items: unknown[]) => ({ items, total: items.length, limit: 50, offset: 0 });
+  const clip = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 11, candidate_id: 5, platform: "twitch", platform_clip_id: null, platform_clip_url: null, local_file_path: null,
+    title: null, duration_seconds: 40, aspect_ratio: "9:16", status: "approved", error_message: null, source: "editor",
+    edit_url: null, requested_at: null, request_lag_seconds: null, published_at: null, published_url: null,
+    created_at: "2026-11-15T12:31:00Z", ...over,
+  });
+
+  it("approves a highlight and handles 'moment passed' with an explicit choice", async () => {
+    let state: Record<string, unknown> = { ...baseHighlight, status: "pending_review", clip: null };
+    const posts: { url: string; body: unknown }[] = [];
+    mockFetch((url, init) => {
+      if (init?.method === "POST") posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : null });
+      if (url.endsWith("/api/v1/highlights/5/approve")) {
+        state = { ...state, status: "approved", clip: { id: 11, status: "approved", platform_clip_url: null, error_message: null } };
+        return json({ highlight: state, clip: clip() });
+      }
+      if (url.endsWith("/api/v1/clips/11/create")) {
+        const body = JSON.parse(String(init!.body));
+        if (!body.accept_current_moment)
+          return json({ error: { code: "moment_passed", message: "This moment was 5 min 0 s ago. Confirm to capture the current broadcast instead." } }, 409);
+        state = { ...state, clip: { id: 11, status: "created", platform_clip_url: "https://clips.twitch.tv/Clip1", error_message: null } };
+        return json(clip({ status: "created", platform_clip_url: "https://clips.twitch.tv/Clip1" }));
+      }
+      if (url.includes("/api/v1/highlights")) return json(page([state]));
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/highlights";
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Create Twitch clip" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Moment has passed" });
+    expect(within(dialog).getByText(/5 min 0 s ago/)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Capture current broadcast" }));
+    expect(await screen.findByRole("link", { name: /Open clip/ })).toHaveAttribute("href", "https://clips.twitch.tv/Clip1");
+    expect(posts.filter((p) => p.url.endsWith("/create")).map((p) => p.body)).toEqual([
+      { accept_current_moment: false },
+      { accept_current_moment: true },
+    ]);
+    expect(screen.getByRole("link", { name: /Open stream/ })).toHaveAttribute("href", "https://www.twitch.tv/alpha");
+  });
+
+  it("rejects and reopens", async () => {
+    let status = "pending_review";
+    mockFetch((url, init) => {
+      if (url.endsWith("/reject")) {
+        status = "rejected";
+        return json({ highlight: { ...baseHighlight, status }, clip: null });
+      }
+      if (url.endsWith("/api/v1/highlights/5") && init?.method === "PATCH") {
+        status = "pending_review";
+        return json({ ...baseHighlight, status });
+      }
+      if (url.includes("/api/v1/highlights")) return json(page([{ ...baseHighlight, status, clip: null }]));
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/highlights";
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Reject" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Reopen" }));
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
+  });
+
+  it("clip library: manual Kick link, honest export, and confirmed publishing", async () => {
+    let c = clip({ platform: "kick", status: "unsupported", error_message: "Kick has no clip API. Open https://kick.com/kickstar, create the clip there, then paste its URL here." });
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    mockFetch((url, init) => {
+      const method = init?.method ?? "GET";
+      if (method !== "GET") calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (url.endsWith("/api/v1/clips/11") && method === "PATCH") {
+        c = { ...c, status: "created", source: "manual", platform_clip_url: "https://kick.com/kickstar/clips/clip_1" };
+        return json(c);
+      }
+      if (url.endsWith("/api/v1/clips/11/export"))
+        return json({ error: { code: "media_unavailable", message: "Export needs the video itself, and StreamHunter has no authorized media source for this clip." } }, 409);
+      if (url.endsWith("/api/v1/clips/11/publish")) {
+        c = { ...c, status: "published", published_at: "2026-11-15T13:00:00Z" };
+        return json(c);
+      }
+      if (url.includes("/api/v1/clips")) return json(page([c]));
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/clips";
+    render(<App />);
+    expect(await screen.findByText(/Kick has no clip API/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mark as published" })).toBeInTheDocument(); // manual clips may be published
+    await userEvent.type(screen.getByLabelText("Clip URL"), "https://kick.com/kickstar/clips/clip_1");
+    await userEvent.click(screen.getByRole("button", { name: "Save clip link" }));
+    expect(await screen.findByRole("link", { name: /Platform clip/ })).toHaveAttribute("href", "https://kick.com/kickstar/clips/clip_1");
+
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    expect(await screen.findByText(/no authorized media source/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Mark as published" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Confirm publishing" });
+    expect(within(dialog).getByText(/does not post anything itself/)).toBeInTheDocument();
+    expect(calls.some((x) => x.url.endsWith("/publish"))).toBe(false); // nothing until confirmed
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm: mark as published" }));
+    await waitFor(() => expect(calls.find((x) => x.url.endsWith("/publish"))?.body).toEqual({ confirm: true }));
+    expect(await screen.findByText("Published")).toBeInTheDocument();
+  });
+
+  it("settings: auto-capture toggle persists", async () => {
+    mockFetch(() => json({ detail: "Not Found" }, 404));
+    installWorker();
+    window.location.hash = "/settings";
+    render(<App />);
+    const toggle = await screen.findByRole("switch", { name: "Capture Twitch clips automatically" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(toggle);
+    await waitFor(async () => expect((await getSettings()).clips.autoCreatePlatformClips).toBe(false));
+  });
+});

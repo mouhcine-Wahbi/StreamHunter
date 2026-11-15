@@ -284,6 +284,23 @@ export function SettingsPage() {
           </Field>
         </Section>
 
+        <Section id="clip-capture" title="Clip capture" description="Twitch clips capture what is on stream at the moment of the request, so waiting for your review would clip the wrong moment.">
+          <Field
+            inline
+            label="Capture Twitch clips automatically"
+            hint="When a highlight scores at least your minimum, request the official Twitch clip right away. It is only a clip on Twitch: nothing is approved or published for you. Needs a connected Twitch account."
+          >
+            {({ id }) => (
+              <Switch
+                id={id}
+                label="Capture Twitch clips automatically"
+                checked={s.clips.autoCreatePlatformClips}
+                onChange={(autoCreatePlatformClips) => void update({ clips: { autoCreatePlatformClips } })}
+              />
+            )}
+          </Field>
+        </Section>
+
         <Section id="notifications" title="Notifications" description="Desktop notifications are delivered by Chrome while it is open.">
           <Field inline label="New highlight detected">
             {({ id }) => <Switch id={id} label="New highlight detected" checked={s.notifications.onHighlight} onChange={(onHighlight) => void update({ notifications: { onHighlight } })} />}

@@ -123,3 +123,12 @@ class Clip(TimestampMixin, Base):
     aspect_ratio: Mapped[str | None] = mapped_column(String(8), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # How the platform clip came to be: auto (captured at detection), editor (requested from the
+    # review screen) or manual (editor made it on the platform and pasted the URL).
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="editor", server_default="editor")
+    edit_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # Twitch clip editor link
+    requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    # Seconds between the detected peak and the clip request (Twitch clips the broadcast *now*).
+    request_lag_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    published_url: Mapped[str | None] = mapped_column(Text, nullable=True)

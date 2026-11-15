@@ -66,10 +66,19 @@ export type CandidateStatus =
   | "published"
   | "unsupported";
 
+export interface ClipSummary {
+  id: number;
+  status: CandidateStatus;
+  platform_clip_url: string | null;
+  error_message: string | null;
+}
+
 export interface HighlightCandidate {
   id: number;
   streamer_id: number;
   streamer_display_name?: string;
+  streamer_username?: string | null;
+  clip?: ClipSummary | null;
   platform: Platform;
   timestamp: string;
   start_offset_sec: number | null;
@@ -94,5 +103,11 @@ export interface Clip {
   aspect_ratio: string | null;
   status: CandidateStatus;
   error_message: string | null;
+  source: "auto" | "editor" | "manual";
+  edit_url: string | null;
+  requested_at: string | null;
+  request_lag_seconds: number | null;
+  published_at: string | null;
+  published_url: string | null;
   created_at: string;
 }

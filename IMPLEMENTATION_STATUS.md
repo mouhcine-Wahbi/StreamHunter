@@ -66,7 +66,26 @@ the view says so ("Backend not reachable" or "Not available on this backend").
   *Degraded: this backend does not provide the monitoring endpoint (404)*. Phase 4 adds it.
 * The data-retention cleanup job is not implemented yet (Phase 4). No chat data is collected yet, so nothing accumulates.
 
-## Phase 3 — Twitch & Kick integration ⏳
+## Phase 3 — Twitch & Kick integration ✅ (code complete; live API check pending credentials)
+
+| Item | Status | Notes |
+|---|---|---|
+| Shared HTTP layer: timeouts, retry on 5xx/network, rate-limit handling, error mapping | ✅ | `integrations/http.py` |
+| App access tokens (client credentials), cached, renewed after 401 | ✅ | Both platforms |
+| Twitch: search, channel lookup, batched live status (100 ids/request), title, category, viewers, start time | ✅ | Helix |
+| Kick: channel lookup by exact name, profile picture, batched live status, title, category | ✅ | Kick has no search API; field names unverified (see ARCHITECTURE §3) |
+| Account connections: authorize, callback, status, disconnect | ✅ | Twitch code flow; Kick code + PKCE; tokens encrypted; refresh before expiry |
+| Capability reporting from real config + connection state | ✅ | |
+| `POST /streams/refresh` and fresh `GET /streams/{id}/status` | ✅ | Skips streamers checked < 30 s ago |
+| Extension: Connect/Disconnect, connected-as badge, Refresh status, last-checked times, Kick exact-name hint | ✅ | |
+| Tests | ✅ | Backend 55 (mocked Twitch/Kick APIs) + 2 opt-in live tests; extension 57 |
+| Live stack check | ✅ | Real uvicorn + built extension: capabilities, authorize URLs (PKCE for Kick), forged callback rejected, consent tab opens. Platform calls fail cleanly with `platform_unreachable` because Twitch/Kick are unreachable from the dev container |
+| **Calls to the real Twitch/Kick APIs** | ⏳ | Needs credentials + network: `pytest -m integration` |
+
+**Acceptance status:** searching both platforms, live status, and title/category all work against
+mocked platform APIs with documented response shapes. The one remaining check, *"results are real
+when credentials are configured"*, can only be confirmed with real credentials on a machine that can
+reach Twitch and Kick.
 ## Phase 4 — Browser monitoring (backend lease) ⏳
 ## Phase 5 — Chat intelligence ⏳
 ## Phase 6 — Clip workflow ⏳

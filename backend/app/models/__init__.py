@@ -2,13 +2,14 @@
 
 from app.models.monitoring import Clip, HighlightCandidate, MonitoringSession, StreamEvent
 from app.models.streamer import Streamer, UserStreamer
-from app.models.user import AuthSession, PlatformConnection, User, UserSettings
+from app.models.user import AuthSession, OAuthState, PlatformConnection, User, UserSettings
 
 __all__ = [
     "AuthSession",
     "Clip",
     "HighlightCandidate",
     "MonitoringSession",
+    "OAuthState",
     "PlatformConnection",
     "StreamEvent",
     "Streamer",

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trash2, Users } from "lucide-react";
+import { RefreshCw, Trash2, Users } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +10,14 @@ import { Avatar, LiveBadge, PlatformBadge } from "@/components/streamers/Platfor
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
 import { useAction } from "@/hooks/useAction";
 import type { Page, Streamer } from "@/types/api";
+import { formatRelative } from "@/utils/format";
+
+interface RefreshResult {
+  checked: number;
+  live: number;
+  skipped_recent: number;
+  unavailable: Record<string, string>;
+}
 
 function StreamerCard({ s, onChanged }: { s: Streamer; onChanged: () => void }) {
   const client = useApiClient();
@@ -38,6 +46,10 @@ function StreamerCard({ s, onChanged }: { s: Streamer; onChanged: () => void }) 
       <div className="mt-3 min-h-8 text-xs text-fg-muted">
         <div className="truncate">{s.current_category ?? "No category"}</div>
         {s.current_title && <div className="truncate text-fg-subtle">{s.current_title}</div>}
+        <div className="mt-1 text-[11px] text-fg-subtle">
+          {s.status_checked_at ? `Status checked ${formatRelative(s.status_checked_at)}` : "Status not checked yet"}
+          {s.is_live && s.viewer_count !== null ? ` · ${s.viewer_count.toLocaleString()} viewers` : ""}
+        </div>
       </div>
       {(toggle.error || remove.error) && <p className="mt-2 text-xs text-danger">{toggle.error ?? remove.error}</p>}
       <div className="mt-4 flex items-center justify-between border-t border-ink-700 pt-3">
@@ -75,9 +87,32 @@ function StreamerCard({ s, onChanged }: { s: Streamer; onChanged: () => void }) 
 
 export function StreamersPage({ onDiscover }: { onDiscover: () => void }) {
   const query = useApiQuery<Page<Streamer>>("/api/v1/streamers?limit=100");
+  const client = useApiClient();
+  const [notice, setNotice] = useState<string | null>(null);
+  const refresh = useAction(async () => {
+    const r = await client.post<RefreshResult>("/api/v1/streams/refresh");
+    const problems = Object.entries(r.unavailable).map(([p, msg]) => `${p}: ${msg}`);
+    setNotice(
+      [`Checked ${r.checked}${r.skipped_recent ? ` (${r.skipped_recent} checked in the last 30 s)` : ""}, ${r.live} live.`, ...problems].join(" "),
+    );
+    query.reload();
+  });
   return (
     <>
-      <PageHeader title="My Streamers" description="Channels on your watchlist. Toggle monitoring per streamer." />
+      <PageHeader
+        title="My Streamers"
+        description="Channels on your watchlist. Toggle monitoring per streamer."
+        actions={
+          <Button variant="secondary" size="sm" loading={refresh.pending} icon={<RefreshCw className="size-3.5" />} onClick={() => void refresh.run()}>
+            Refresh status
+          </Button>
+        }
+      />
+      {(notice || refresh.error) && (
+        <p role="status" className="-mt-3 mb-4 text-xs text-fg-muted">
+          {refresh.error ?? notice}
+        </p>
+      )}
       <ApiStateView query={query} feature="your watchlist">
         {(page) =>
           page.items.length === 0 ? (

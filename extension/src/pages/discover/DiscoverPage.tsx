@@ -88,7 +88,13 @@ export function DiscoverPage() {
             onChange={(e) => setUsername(e.target.value)}
             aria-invalid={validation ? true : undefined}
           />
-          {validation && <p className="mt-1.5 text-xs text-danger">{validation}</p>}
+          {validation ? (
+            <p className="mt-1.5 text-xs text-danger">{validation}</p>
+          ) : (
+            platform === "kick" && (
+              <p className="mt-1.5 text-xs text-fg-subtle">Kick has no search API: enter the exact channel name from kick.com/&lt;name&gt;.</p>
+            )
+          )}
         </div>
         <Button type="submit" variant="primary" icon={<Search className="size-4" />}>
           Search

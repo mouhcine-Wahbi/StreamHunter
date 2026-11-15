@@ -10,6 +10,7 @@ timezone-aware, and naive datetimes are rejected on write. On PostgreSQL the col
 
 ```text
 users ─┬─< auth_sessions
+       ├─< oauth_states
        ├─< platform_connections        (one per platform)
        ├── user_settings               (one per user, JSON)
        ├─< user_streamers >── streamers (shared channel records)
@@ -27,7 +28,8 @@ All foreign keys to `users` and `streamers` cascade on delete.
 |---|---|---|---|
 | `users` | email, username, hashed_password | `uq(email)` | Argon2id hashes; email stored lowercase |
 | `auth_sessions` | user_id, token_hash, expires_at, revoked_at, last_used_at, user_agent | `uq(token_hash)`, `ix(user_id)` | **Addition to the spec.** Opaque, revocable bearer sessions; only the SHA-256 of the token is stored |
-| `platform_connections` | user_id, platform, platform_user_id, access_token_enc, refresh_token_enc, token_expires_at, scopes (JSON), connection_status | `uq ix(user_id, platform)` | Tokens are Fernet-encrypted (Phase 3) |
+| `platform_connections` | user_id, platform, platform_user_id, platform_username, access_token_enc, refresh_token_enc, token_expires_at, scopes (JSON), connection_status, last_error | `uq ix(user_id, platform)` | Tokens are Fernet-encrypted; refreshed automatically 5 min before expiry |
+| `oauth_states` | user_id, platform, state_hash, code_verifier_enc, expires_at, used_at | `uq(state_hash)`, `ix(user_id)` | **Addition (Phase 3).** Pending authorizations: single use, 10 min, only the state's SHA-256 stored, PKCE verifier encrypted |
 | `streamers` | platform, platform_user_id, username, display_name, profile_image_url, is_live, current_title, current_category, viewer_count, stream_started_at, status_checked_at, monitoring_enabled | `uq(platform, platform_user_id)`, `ix(platform, username)`, `ix(is_live)` | Shared across users. `is_live` is `NULL` until checked. `monitoring_enabled` = at least one user monitors it. `status_checked_at` is an addition |
 | `user_streamers` | user_id, streamer_id, is_favorite, monitoring_enabled | `uq(user_id, streamer_id)` | The per-user watchlist and source of truth for monitoring per user |
 | `monitoring_sessions` | user_id, streamer_id, platform, started_at, ended_at, status, last_checked_at, last_event_at, error_message | `ix(user_id, status)`, `ix(streamer_id)` | status: `active · paused · ended · error` |

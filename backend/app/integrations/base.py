@@ -101,3 +101,48 @@ class StreamingPlatform(ABC):
     async def aclose(self) -> None:
         """Release network resources (HTTP clients, sockets)."""
         return None
+
+    @property
+    def oauth(self) -> OAuthProvider | None:
+        """User authorization flow, or None when the platform/adapter has none."""
+        return None
+
+
+# --- User authorization (OAuth) -------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class TokenSet:
+    access_token: str
+    refresh_token: str | None
+    expires_in: int | None
+    scopes: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformIdentity:
+    platform_user_id: str
+    username: str
+
+
+class OAuthProvider(ABC):
+    """Authorization-code flow for one platform. Client secrets stay on the backend."""
+
+    scopes: tuple[str, ...]
+    uses_pkce: bool
+
+    @abstractmethod
+    def authorization_url(self, *, state: str, code_challenge: str | None) -> str: ...
+
+    @abstractmethod
+    async def exchange_code(self, code: str, *, code_verifier: str | None) -> TokenSet: ...
+
+    @abstractmethod
+    async def refresh(self, refresh_token: str) -> TokenSet: ...
+
+    @abstractmethod
+    async def identify(self, access_token: str) -> PlatformIdentity: ...
+
+    @abstractmethod
+    async def revoke(self, token: str) -> None:
+        """Best effort; must not raise for an already-invalid token."""

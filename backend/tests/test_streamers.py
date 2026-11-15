@@ -102,10 +102,13 @@ async def test_live_and_status_endpoints(client, auth_headers) -> None:
     await add(client, auth_headers, username="bravo")
     live = (await client.get("/api/v1/streams/live", headers=auth_headers)).json()
     assert live["total"] == 1 and live["items"][0]["username"] == "alpha"
-    status = (await client.get(f"/api/v1/streams/{alpha['id']}/status", headers=auth_headers)).json()
-    assert status["is_live"] is True and status["category"] == "Just Chatting"
-    # Never checked by monitoring yet: reported honestly as null.
-    assert status["last_checked_at"] is None
+    cached = (await client.get(f"/api/v1/streams/{alpha['id']}", headers=auth_headers)).json()
+    assert cached["is_live"] is True and cached["category"] == "Just Chatting"
+    # Never checked yet: reported honestly as null.
+    assert cached["last_checked_at"] is None
+    # /status asks the platform; the fake reports nothing, so last known values are kept.
+    fresh = (await client.get(f"/api/v1/streams/{alpha['id']}/status", headers=auth_headers)).json()
+    assert fresh["is_live"] is True and fresh["last_checked_at"] is not None
 
 
 async def test_pagination(client, auth_headers) -> None:

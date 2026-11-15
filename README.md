@@ -7,9 +7,10 @@ Twitch and Kick streamers while your browser is open, reads chat to spot moments
 when the audience reacts, explains *why* each moment was flagged, and helps you turn
 it into a clip. Nothing is ever published without your approval.
 
-> **Status:** Phase 2 is complete. The extension and the backend (accounts, watchlist,
-> settings, and platform capability reporting) both work. Twitch and Kick API calls come next,
-> in Phase 3. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+> **Status:** Phase 3 is code-complete. Twitch and Kick lookup, live status and account connections
+> are built and tested against mocked platform APIs. Confirming them against the live APIs needs your
+> developer credentials. Browser monitoring (Phase 4) comes next.
+> See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ![Overview](docs/screenshots/app-overview.png)
 
@@ -21,7 +22,8 @@ it into a clip. Nothing is ever published without your approval.
 | Settings (monitoring interval, sensitivity, score threshold, languages, clip defaults, notifications, time zone, retention) | ✅ |
 | Browser-based monitoring control with heartbeat, backoff and restart recovery | ✅ (extension side) |
 | Backend: accounts (Argon2, revocable sessions), watchlist API, settings API, capability reporting | ✅ |
-| Streamer search via Twitch / Kick APIs | ⏳ Phase 3 (the API currently returns an explicit "not configured" / "not implemented" error) |
+| Twitch search, Kick exact-name lookup, live status, title & category | ✅ (needs credentials) |
+| Connect Twitch / Kick accounts (OAuth; PKCE for Kick; tokens encrypted) | ✅ (needs credentials) |
 | Chat-based highlight detection with explainable scores | ⏳ Phase 5 |
 | Twitch clip creation; Kick manual workflow | ⏳ Phase 6 |
 
@@ -125,7 +127,7 @@ Run the backend tests:
 .venv/bin/python -m pytest
 ```
 
-## Twitch & Kick setup (used from Phase 3)
+## Twitch & Kick setup
 
 * **Twitch:** create an app at https://dev.twitch.tv/console/apps, set the redirect URI
   to `http://localhost:8000/api/v1/auth/twitch/callback`, and put `TWITCH_CLIENT_ID` and
@@ -136,7 +138,20 @@ Run the backend tests:
   webhook URL** (`KICK_WEBHOOK_PUBLIC_URL`, for example a Cloudflare Tunnel), because Kick delivers chat
   only through webhooks.
 
+* **Encryption key:** set `TOKEN_ENCRYPTION_KEY` in `backend/.env` (the command to generate one is in
+  `.env.example`). Without it, accounts cannot be connected, because tokens are only stored encrypted.
+
+Restart the backend, then use **Settings → Platform connections → Connect account**. Searching
+and live status only need the client ID and secret; connecting an account is needed for chat (Phase 5)
+and Twitch clips (Phase 6).
+
 Without these, **Settings → Platform connections** shows exactly what is missing.
+
+Verify your credentials against the live APIs (optionally set `SH_TWITCH_LOGIN` / `SH_KICK_SLUG`):
+
+```bash
+set -a; . ./.env; set +a; .venv/bin/python -m pytest -m integration -v
+```
 
 ## Known limitations
 

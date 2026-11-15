@@ -221,3 +221,66 @@ describe("account (Phase 2)", () => {
     expect(screen.getByText(/Kick is not configured on the backend/)).toBeInTheDocument();
   });
 });
+
+describe("platform connections & status (Phase 3)", () => {
+  const caps = (configured: boolean) => [
+    { platform: "twitch", configured, connection_status: "not_connected", capabilities: { stream_lookup: configured ? "supported" : "requires_configuration" }, notes: [] },
+  ];
+
+  it("opens the platform consent page in a new tab", async () => {
+    mockFetch((url) => {
+      if (url.endsWith("/api/v1/platforms/capabilities")) return json(caps(true));
+      if (url.endsWith("/api/v1/auth/twitch/status")) return json({ platform: "twitch", configured: true, connection_status: "not_connected", platform_username: null, scopes: [], last_error: null });
+      if (url.endsWith("/api/v1/auth/twitch/authorize")) return json({ authorization_url: "https://id.twitch.tv/oauth2/authorize?client_id=x&state=s", expires_at: "2026-11-15T07:00:00Z" });
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/settings";
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Connect account" }));
+    await waitFor(() => expect(fakeChrome.internals.createdTabs).toEqual(["https://id.twitch.tv/oauth2/authorize?client_id=x&state=s"]));
+  });
+
+  it("refuses to open an unexpected authorization host", async () => {
+    mockFetch((url) => {
+      if (url.endsWith("/api/v1/platforms/capabilities")) return json(caps(true));
+      if (url.endsWith("/status")) return json({ platform: "twitch", configured: true, connection_status: "not_connected", platform_username: null, scopes: [], last_error: null });
+      if (url.endsWith("/authorize")) return json({ authorization_url: "https://evil.example/phish", expires_at: "x" });
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/settings";
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Connect account" }));
+    expect(await screen.findByText("Unexpected authorization URL")).toBeInTheDocument();
+    expect(fakeChrome.internals.createdTabs).toEqual([]);
+  });
+
+  it("shows the connected account and disables connect when the backend is not configured", async () => {
+    mockFetch((url) => {
+      if (url.endsWith("/api/v1/platforms/capabilities")) return json(caps(false));
+      if (url.endsWith("/status")) return json({ platform: "twitch", configured: false, connection_status: "not_connected", platform_username: null, scopes: [], last_error: null });
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/settings";
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Connect account" })).toBeDisabled();
+    expect(screen.getByText("not configured")).toBeInTheDocument();
+  });
+
+  it("refreshes watchlist status and reports platform problems", async () => {
+    const page = { items: [], total: 0, limit: 100, offset: 0 };
+    mockFetch((url, init) => {
+      if (url.endsWith("/api/v1/streams/refresh") && init?.method === "POST")
+        return json({ checked: 3, live: 1, skipped_recent: 0, unavailable: { kick: "Kick is not configured on the backend." } });
+      if (url.includes("/api/v1/streamers")) return json(page);
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/streamers";
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Refresh status" }));
+    expect(await screen.findByText(/Checked 3, 1 live\. kick: Kick is not configured/)).toBeInTheDocument();
+  });
+});

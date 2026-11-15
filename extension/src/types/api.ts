@@ -31,7 +31,9 @@ export interface Streamer extends StreamerSearchResult {
   id: number;
   viewer_count: number | null;
   stream_started_at: string | null;
+  status_checked_at: string | null;
   monitoring_enabled: boolean;
+  is_favorite: boolean;
   updated_at: string;
 }
 

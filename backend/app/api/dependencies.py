@@ -18,6 +18,9 @@ from app.models import User
 from app.schemas.common import PageParams
 from app.services.activity_service import ActivityService
 from app.services.auth_service import AuthService
+from app.services.connection_service import ConnectionService
+from app.services.stream_status_service import StreamStatusService
+from app.utils.crypto import TokenCipher
 from app.services.settings_service import SettingsService
 from app.services.streamer_service import StreamerService
 from app.utils.rate_limit import SlidingWindowLimiter
@@ -101,3 +104,19 @@ SettingsServiceDep = Annotated[SettingsService, Depends(settings_service)]
 
 def adapter_for(registry: PlatformRegistry, platform: Platform) -> StreamingPlatform:
     return registry.get(platform)
+
+
+def get_cipher(request: Request) -> TokenCipher:
+    return request.app.state.token_cipher  # type: ignore[no-any-return]
+
+
+def connection_service(db: DbDep, registry: RegistryDep, request: Request) -> ConnectionService:
+    return ConnectionService(db, registry, get_cipher(request))
+
+
+def stream_status_service(db: DbDep, registry: RegistryDep) -> StreamStatusService:
+    return StreamStatusService(db, registry)
+
+
+ConnectionServiceDep = Annotated[ConnectionService, Depends(connection_service)]
+StreamStatusServiceDep = Annotated[StreamStatusService, Depends(stream_status_service)]

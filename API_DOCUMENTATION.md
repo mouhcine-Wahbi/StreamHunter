@@ -26,9 +26,10 @@ this page is the overview.
 | 422 / 400 | `validation_error` | Invalid input; `details.errors` lists fields |
 | 429 | `rate_limited` | Too many auth attempts |
 | 501 | `not_implemented` | Platform feature not built yet in this version |
-| 503 | `platform_not_configured` | Backend lacks the platform credentials |
+| 502 | `platform_auth_failed`, `upstream_error` | Twitch/Kick rejected our credentials or returned something unexpected |
+| 503 | `platform_not_configured`, `platform_unreachable`, `platform_timeout`, `platform_rate_limited`, `encryption_not_configured`, `requires_authorization` | Platform feature currently unavailable; the message says why |
 
-## Endpoints (Phase 2)
+## Endpoints
 
 ### Health
 | | |
@@ -43,12 +44,21 @@ this page is the overview.
 | `POST /api/v1/auth/logout` | Revokes the current session → 204 |
 | `GET /api/v1/auth/me` | The signed-in user |
 
-Platform OAuth (`/api/v1/auth/{platform}/authorize|callback|status|disconnect`) arrives in Phase 3.
+### Platform connections (OAuth, Phase 3)
+| | |
+|---|---|
+| `GET /api/v1/auth/{platform}/authorize` | → `{authorization_url, expires_at}`. Open the URL in a browser tab. Needs `TOKEN_ENCRYPTION_KEY` (503 `encryption_not_configured` otherwise) |
+| `GET /api/v1/auth/{platform}/callback?code&state` | Redirect target registered with Twitch/Kick. Returns a small HTML result page (400 on failure). `state` is single use, bound to user and platform, valid 10 min |
+| `GET /api/v1/auth/{platform}/status` | `{configured, connection_status, platform_user_id, platform_username, scopes, token_expires_at, last_error}` |
+| `POST /api/v1/auth/{platform}/disconnect` | Revokes the tokens at the platform (best effort) and deletes them → 204 |
+
+Twitch uses the authorization-code flow (scopes `user:read:chat clips:edit`). Kick uses authorization
+code + **PKCE S256** (scopes `user:read channel:read events:subscribe`). Client secrets never leave the backend.
 
 ### Streamers (watchlist)
 | | |
 |---|---|
-| `GET /api/v1/streamers/search?platform=twitch\|kick&username=…&limit=10` | Live search through the platform adapter |
+| `GET /api/v1/streamers/search?platform=twitch\|kick&username=…&limit=10` | Twitch: Helix channel search. **Kick: exact channel-name lookup** (Kick has no search API) |
 | `GET /api/v1/streamers` | Your watchlist (favorites first) |
 | `POST /api/v1/streamers` | `{platform, username}`: the channel is **resolved through the platform API** before it's stored. 201, or 409 `already_in_watchlist` |
 | `GET /api/v1/streamers/{id}` | One entry |
@@ -59,7 +69,9 @@ Platform OAuth (`/api/v1/auth/{platform}/authorize|callback|status|disconnect`) 
 | | |
 |---|---|
 | `GET /api/v1/streams/live` | Watchlist entries currently known to be live |
-| `GET /api/v1/streams/{streamer_id}` and `/status` | `{is_live, title, category, viewer_count, started_at, last_checked_at}`. `last_checked_at` is `null` until monitoring has checked |
+| `POST /api/v1/streams/refresh` | Checks your whole watchlist now (batched per platform; skips streamers checked < 30 s ago) → `{checked, live, skipped_recent, unavailable{platform: reason}}` |
+| `GET /api/v1/streams/{streamer_id}` | Last known state, no platform call: `{is_live, title, category, viewer_count, started_at, last_checked_at}` |
+| `GET /api/v1/streams/{streamer_id}/status` | Same shape, **freshly fetched** from the platform (503 `status_unavailable` if it can't be) |
 
 ### Monitoring, highlights, clips (read; writes arrive in Phases 4–6)
 | | |

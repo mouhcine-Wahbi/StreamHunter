@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.routes import activity, auth, health, platforms, streamers, streams
+from app.api.routes import activity, auth, health, platform_auth, platforms, streamers, streams
 from app.api.routes import settings as settings_routes
 from app.config import Settings, get_settings
 from app.db.session import create_engine, create_sessionmaker
@@ -71,6 +71,7 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
     for router in (
         health.router,
         auth.router,
+        platform_auth.router,
         streamers.router,
         streams.router,
         activity.monitoring,

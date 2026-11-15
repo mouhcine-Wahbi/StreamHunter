@@ -110,7 +110,14 @@ Monitoring states shown to the user: `stopped`, `starting`, `active`, `degraded`
 | **VOD / video** | **No official endpoint** → `unsupported` |
 | Rate limits | Not documented |
 
-### Twitch (Helix + EventSub) — *unverified this session*
+**Phase 3 verification update (2026-11-15):** the Kick OAuth parameters above were re-read from
+the docs source (`getting-started/generating-tokens-oauth2-flow.md`). Kick's per-endpoint field names
+live only in the OpenAPI spec, which was still unreachable, so `app/integrations/kick/schemas.py`
+parses them defensively and documents them as unverified. Twitch `Get Users` / `Get Streams` fields
+were checked against the official `twitchdev/twitch-cli` mock API source. The opt-in tests in
+`tests/integration/` confirm everything against the live APIs once credentials exist.
+
+### Twitch (Helix + EventSub) — *partially verified (see above)*
 
 | Item | Finding |
 |---|---|

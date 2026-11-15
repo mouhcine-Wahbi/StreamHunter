@@ -44,9 +44,19 @@ Implemented in Phase 2:
 * Logs are JSON with bearer tokens, OAuth codes, secrets and passwords redacted.
 * In production, the backend refuses to start without `TOKEN_ENCRYPTION_KEY` or with SQLite.
 
+Implemented in Phase 3:
+
+* Platform OAuth: random `state`, stored only as a hash, single use, bound to user + platform, 10-minute expiry.
+  Replayed, forged, cross-platform and expired callbacks are rejected. Kick uses PKCE (S256); the verifier is encrypted at rest.
+* Platform tokens are stored Fernet-encrypted. Connecting is refused while `TOKEN_ENCRYPTION_KEY` is missing.
+  Disconnecting revokes the tokens at the platform and deletes them.
+* The OAuth callback page has no scripts (`Content-Security-Policy: default-src 'none'`), escapes all
+  values, and is sent with `no-store` and `no-referrer`.
+* The extension only opens authorization URLs on `id.twitch.tv` / `id.kick.com`.
+* Platform error bodies are never echoed to clients; only status codes are logged.
+
 Planned:
 
-* OAuth `state` is single-use and time-limited; Kick uses PKCE (S256).
 * Kick webhooks: RSA-SHA256 signature verification using Kick's published public
   key, timestamp freshness check, and deduplication by message ID.
 * HTTPS required in production; CORS restricted to the extension origin.

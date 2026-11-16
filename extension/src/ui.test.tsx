@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "@/app/App";
 import { Popup } from "@/popup/Popup";
@@ -48,6 +48,59 @@ describe("popup", () => {
     await userEvent.click(screen.getByRole("button", { name: /open workspace/i }));
     await waitFor(() => expect(fakeChrome.internals.createdTabs).toHaveLength(1));
     expect(close).toHaveBeenCalled();
+  });
+});
+
+describe("popup tab audio (Phase 7)", () => {
+  function workerWithTabAudio(onStart: (msg: { tabId: number; url: string }) => void) {
+    chrome.runtime.onMessage.addListener((msg: unknown, _sender, respond) => {
+      const m = msg as { type: string; tabId: number; url: string };
+      if (m.type === "tab-audio/start") {
+        onStart(m);
+        const state = { status: "measuring", tabId: m.tabId, platform: "twitch", channel: "streamerone", startedAt: "2026-11-16T12:00:00Z",
+          lastSentAt: null, levelDb: null, message: "Measuring… the first values arrive within a few seconds." };
+        void chrome.storage.local.set({ "sh.tabAudio": state }).then(() => respond({ ok: true, data: state }));
+        return true;
+      }
+      if (m.type === "tab-audio/stop") {
+        const state = { status: "off", tabId: null, platform: null, channel: null, startedAt: null, lastSentAt: null, levelDb: null, message: null };
+        void chrome.storage.local.set({ "sh.tabAudio": state }).then(() => respond({ ok: true, data: state }));
+        return true;
+      }
+      return false;
+    });
+  }
+
+  it("offers to measure a Twitch channel tab, then shows the live level and stops", async () => {
+    mockFetch(() => json({ detail: "Not Found" }, 404));
+    fakeChrome.internals.setActiveTab({ id: 42, url: "https://www.twitch.tv/StreamerOne" });
+    const starts: unknown[] = [];
+    workerWithTabAudio((m) => starts.push(m));
+    render(<Popup />);
+    await userEvent.click(await screen.findByRole("button", { name: "Measure this tab's audio (streamerone)" }));
+    expect(starts).toEqual([{ type: "tab-audio/start", tabId: 42, url: "https://www.twitch.tv/StreamerOne" }]);
+    expect(await screen.findByText("Measuring")).toBeInTheDocument();
+    expect(screen.getByText("twitch.tv/streamerone")).toBeInTheDocument();
+
+    // The worker updates the level as batches are delivered.
+    await act(async () => {
+      await chrome.storage.local.set({ "sh.tabAudio": { status: "waiting", tabId: 42, platform: "twitch", channel: "streamerone", startedAt: "2026-11-16T12:00:00Z",
+        lastSentAt: null, levelDb: -23.4, message: "streamerone has no active monitoring session" } });
+    });
+    expect(screen.getByText("Not monitored")).toBeInTheDocument();
+    expect(screen.getByText(/· -23 dB/)).toBeInTheDocument();
+    expect(screen.getByText("streamerone has no active monitoring session")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop measuring" }));
+    expect(await screen.findByRole("button", { name: "Measure this tab's audio (streamerone)" })).toBeInTheDocument();
+  });
+
+  it("explains what to do on other pages", async () => {
+    mockFetch(() => json({ detail: "Not Found" }, 404));
+    fakeChrome.internals.setActiveTab({ id: 1, url: "https://www.youtube.com/" });
+    render(<Popup />);
+    expect(await screen.findByText(/Open a Twitch or Kick channel in this tab/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Measure this tab/ })).not.toBeInTheDocument();
   });
 });
 

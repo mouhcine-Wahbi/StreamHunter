@@ -15,14 +15,21 @@
    aggregated window statistics and detection events are stored, and they expire after
    the configured retention period.
 6. **Explicit consent.** Monitoring status is always visible (badge, popup, side
-   panel). Media capture, if added later, needs a user gesture and Chrome's
-   permission prompt. Publishing always needs an explicit confirmation.
+   panel). Tab-audio measurement only starts when the user clicks it in the popup on
+   that tab, shows Chrome's sharing indicator while it runs, and stops with the tab.
+   Publishing always needs an explicit confirmation.
 7. **Official APIs only.** No scraping, no unofficial chat sockets, no downloaders,
    no DRM or restriction bypasses.
 
 ## Extension specifics (implemented in Phase 1)
 
-* Manifest V3 with the minimum permissions: `storage`, `alarms`, `sidePanel`.
+* Manifest V3 with the minimum permissions: `storage`, `alarms`, `sidePanel`, `notifications`,
+  and for live tab audio (Phase 7) `activeTab` (read the channel URL of the tab the popup was
+  opened on), `tabCapture` and `offscreen` (measure that tab's loudness in an offscreen page).
+* Tab audio: the offscreen page turns the captured audio into one RMS loudness value per second.
+  Only these numbers are sent (to the user's own backend); no audio is recorded or uploaded. The
+  backend keeps them in memory for about 7 minutes and only uses them for the user's own monitored
+  sessions.
 * Host access only for `localhost:8000` / `127.0.0.1:8000`. A remote backend
   needs `https://` and an optional host permission that the user grants at runtime.
 * Plain `http://` is rejected for any host other than localhost.

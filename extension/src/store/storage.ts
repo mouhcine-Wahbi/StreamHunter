@@ -1,4 +1,5 @@
 import { INITIAL_MONITORING_STATE, type MonitoringState } from "@/types/monitoring";
+import { INITIAL_TAB_AUDIO_STATE, type TabAudioState } from "@/types/tab-audio";
 import type { DeepPartial, Settings } from "@/types/settings";
 import { mergeSettings, sanitizeSettings } from "@/utils/settings";
 
@@ -10,6 +11,7 @@ export const STORAGE_KEYS = {
   settings: "sh.settings",
   monitoring: "sh.monitoring",
   authToken: "sh.authToken",
+  tabAudio: "sh.tabAudio",
 } as const;
 
 type Key = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
@@ -46,6 +48,21 @@ export async function setMonitoringState(state: MonitoringState): Promise<Monito
 
 export async function patchMonitoringState(patch: Partial<MonitoringState>): Promise<MonitoringState> {
   return setMonitoringState({ ...(await getMonitoringState()), ...patch });
+}
+
+export async function getTabAudioState(): Promise<TabAudioState> {
+  const raw = await read(STORAGE_KEYS.tabAudio);
+  if (typeof raw !== "object" || raw === null) return { ...INITIAL_TAB_AUDIO_STATE };
+  return { ...INITIAL_TAB_AUDIO_STATE, ...(raw as Partial<TabAudioState>) };
+}
+
+export async function setTabAudioState(state: TabAudioState): Promise<TabAudioState> {
+  await chrome.storage.local.set({ [STORAGE_KEYS.tabAudio]: state });
+  return state;
+}
+
+export async function patchTabAudioState(patch: Partial<TabAudioState>): Promise<TabAudioState> {
+  return setTabAudioState({ ...(await getTabAudioState()), ...patch });
 }
 
 /** StreamHunter session token (never a platform OAuth token). */

@@ -7,6 +7,8 @@
 * `ingest()` receives normalized messages from either platform.
 * `analyze()` (every 5 s) runs the detectors and stores candidates for every user with an
   active session on that streamer, filtered by each user's sensitivity.
+* `ingest_audio()` receives live loudness from an editor's tab; new candidates then carry a
+  measured audio signal (see app/detection/live_audio.py).
 One analyzer per streamer is shared by all users monitoring it.
 """
 
@@ -23,7 +25,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.detection.analyzer import StreamAnalyzer
+from app.detection.live_audio import LiveAudioBuffer
 from app.detection.models import CandidateDraft, ChatMessage, Strictness
+from app.detection.scoring_engine import DEFAULT_WEIGHTS, calculate_score
 from app.domain.enums import ClipStatus, ConnectionStatus, MonitoringSessionStatus as SS, Platform
 from app.errors import AppError
 from app.integrations.kick.adapter import KickAdapter
@@ -71,6 +75,7 @@ class ChatManager:
         self.tracked: dict[int, _Tracked] = {}  # streamer_id → state
         self.by_channel: dict[tuple[Platform, str], int] = {}  # (platform, broadcaster_id) → streamer_id
         self.states: dict[int, ChatState] = {}
+        self.audio: dict[int, LiveAudioBuffer] = {}  # streamer_id → live tab loudness
         self.twitch_connections: dict[int, TwitchChatConnection] = {}  # StreamHunter user id → connection
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -88,6 +93,12 @@ class ChatManager:
         if st and st.state != "connected":
             self.states[sid] = ChatState(t.platform, "connected")
         return True
+
+    def ingest_audio(self, streamer_id: int, samples: list[tuple[datetime, float]], now: datetime) -> int:
+        """Loudness samples (server clock) for a monitored streamer. Returns how many were kept."""
+        if streamer_id not in self.tracked:
+            return 0
+        return self.audio.setdefault(streamer_id, LiveAudioBuffer()).add(samples, now)
 
     def _channel_error(self, platform: Platform, broadcaster_id: str, reason: str) -> None:
         sid = self.by_channel.get((platform, broadcaster_id))
@@ -173,6 +184,7 @@ class ChatManager:
             return
         self.by_channel.pop((t.platform, t.broadcaster_id), None)
         self.states.pop(sid, None)
+        self.audio.pop(sid, None)
         if t.twitch_owner is not None and (conn := self.twitch_connections.get(t.twitch_owner)):
             await conn.set_channels(conn.desired - {t.broadcaster_id})
         if t.kick_subscriptions:
@@ -299,6 +311,17 @@ class ChatManager:
         if not sessions:
             return 0
         settings = await self._settings(db, {s.user_id for s in sessions})
+        buf = self.audio.get(streamer_id)
+        measured = buf.window_score(draft.start_at, draft.end_at) if buf is not None else None
+        score, breakdown, reasons = draft.score, dict(draft.signal_breakdown), list(draft.reasons)
+        if measured is not None:
+            audio, loudest = measured
+            breakdown.update({"audio": audio, "chat_only_score": draft.score, "audio_source": "live_tab",
+                              "active_signals": ["chat", "audio"]})
+            score = round(calculate_score({"chat": breakdown.get("chat"), "audio": audio, "visual": None, "context": None},
+                                          DEFAULT_WEIGHTS), 1)
+            if audio >= 40:
+                reasons.append(f"Stream audio {loudest} dB louder than usual")
         created = 0
         new_candidates: list[HighlightCandidate] = []
         for s in sessions:
@@ -321,12 +344,12 @@ class ChatManager:
                     timestamp=draft.peak_at,
                     start_offset_sec=offset(start),
                     end_offset_sec=offset(end),
-                    score=draft.score,
+                    score=score,
                     confidence=draft.confidence,
                     category=draft.category,
-                    reasons=draft.reasons,
+                    reasons=reasons,
                     signal_breakdown={
-                        **draft.signal_breakdown,
+                        **breakdown,
                         "window": {"start": start.isoformat(), "end": end.isoformat(), "peak": draft.peak_at.isoformat()},
                         "offsets_approximate": s.broadcast_started_at is not None,
                         "strictness": draft.strictness.name.lower(),
@@ -367,4 +390,6 @@ class ChatManager:
         }
         if t:
             base.update(t.analyzer.activity(now))
+        buf = self.audio.get(streamer_id)
+        base.update(buf.status(now) if buf is not None else {"audio_state": "off"})
         return base

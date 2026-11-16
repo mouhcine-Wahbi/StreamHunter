@@ -146,7 +146,7 @@ relative to the stream's baseline and can't create a candidate on their own.
 | Live stack check | ✅ | Built extension + uvicorn: Twitch approve → create refused with "Connect your Twitch account…". Kick approve → manual instructions → pasted clip link → export refused honestly → publish after confirmation |
 
 **Found and fixed:** the aspect-ratio selector stretched across the whole clip card; it is now fixed width.
-## Phase 7 — VOD & advanced AI 🟡 (core and subtitles delivered; live audio not started)
+## Phase 7 — VOD & advanced AI 🟡 (core, subtitles and live tab audio delivered; ML classification not started)
 
 | Item | Status | Notes |
 |---|---|---|
@@ -161,9 +161,9 @@ relative to the stream's baseline and can't create a candidate on their own.
 | Recordings panel per session, analysis status, export progress, download, VOD links | ✅ | |
 | Subtitles (speech-to-text) | ✅ | faster-whisper, local CPU (optional `requirements-media.txt`). Burned into the export in the same encode, plus a downloadable .srt. Short lines for vertical video. Language detected or chosen |
 | Bundled FFmpeg fallback | ✅ | `static-ffmpeg` (optional) is used automatically when `ffmpeg` isn't on PATH |
-| Live tab-audio capture (`chrome.tabCapture` + offscreen document) | ⏳ | Needs extra permissions and a user gesture each time; not started |
+| Live tab audio (`chrome.tabCapture` + offscreen document) | ✅ | Started from the popup on the stream tab (Chrome needs that click). One RMS loudness value per second → `POST /monitoring/audio` → live highlights get a measured audio signal. Permissions `activeTab`, `tabCapture`, `offscreen` |
 | Laughter / excitement classification, gameplay or visual event recognition | ⏳ | Would need ML models; loudness and scene cuts are the honest baseline |
-| Tests | ✅ | Backend 115 (incl. real-FFmpeg media and subtitle tests; the speech model is faked in tests); extension 73 |
+| Tests | ✅ | Backend 120 (incl. real-FFmpeg media and subtitle tests; the speech model is faked in tests); extension 92 |
 | Live stack check | ✅ | Built extension + uvicorn: uploaded an MP4 via the file picker → FFmpeg analysis (1 audio peak, 2 scene cuts, 2 highlights enriched) → approve → export → downloaded 1080×1920 H.264/AAC, 25.0 s. Subtitles (2026-11-16): real `base` model on a spoken test recording → accurate 2-cue .srt in 3.9 s, captions visible in the 1080×1920 export; Clip Library switch → export → Download .srt in the browser preview |
 
 **Found and fixed during this phase:**

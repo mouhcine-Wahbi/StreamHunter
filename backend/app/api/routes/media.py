@@ -69,7 +69,7 @@ async def capabilities(request: Request, user: CurrentUser) -> MediaCapabilities
         visual_analysis=tools,
         export=tools,
         subtitles=_subtitles_capability(request, lib),
-        live_tab_audio="not_implemented",
+        live_tab_audio="supported",  # the extension measures; POST /api/v1/monitoring/audio receives loudness
         platform_vod_download="unsupported",  # by design: only user-provided recordings
     )
 

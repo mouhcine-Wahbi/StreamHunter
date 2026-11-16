@@ -87,6 +87,29 @@ class ClipOut(Schema):
     updated_at: datetime
 
 
+class LiveAudioSample(Schema):
+    model_config = {"extra": "forbid"}
+    t: datetime  # browser clock; corrected with sent_at
+    db: float = Field(ge=-200, le=20)  # RMS loudness of that second, dBFS
+
+
+class LiveAudioIn(Schema):
+    """One batch of tab loudness (about 5 s). Numbers only: audio never leaves the browser."""
+
+    model_config = {"extra": "forbid"}
+    platform: Platform
+    channel: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")  # login / slug from the tab URL
+    sent_at: datetime  # browser clock when sent, to correct clock differences
+    samples: list[LiveAudioSample] = Field(max_length=120)
+
+
+class LiveAudioOut(Schema):
+    session_id: int
+    streamer_id: int
+    accepted: int
+    audio_state: str
+
+
 class HeartbeatRequest(Schema):
     client: str = Field("chrome-extension", min_length=1, max_length=64)
     interval_seconds: int = Field(120, ge=30, le=3600)

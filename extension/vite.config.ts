@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => ({
         popup: resolve(root, "popup.html"),
         app: resolve(root, "app.html"),
         sidepanel: resolve(root, "sidepanel.html"),
+        offscreen: resolve(root, "offscreen.html"),
         "service-worker": resolve(root, "src/background/service-worker.ts"),
       },
       output: {

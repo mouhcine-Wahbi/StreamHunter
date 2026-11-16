@@ -94,7 +94,7 @@ async def test_capabilities(ctx) -> None:
     _, client, h = ctx
     c = (await client.get("/api/v1/media/capabilities", headers=h)).json()
     assert c["ffmpeg_available"] is True and c["export"] == "supported"
-    assert c["platform_vod_download"] == "unsupported" and c["live_tab_audio"] == "not_implemented"
+    assert c["platform_vod_download"] == "unsupported" and c["live_tab_audio"] == "supported"
     assert c["media_folder"].endswith("/library/1")
 
 

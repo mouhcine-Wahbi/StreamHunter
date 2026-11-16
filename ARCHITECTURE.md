@@ -158,7 +158,7 @@ user's connection state (`GET /api/v1/platforms/capabilities`), not hardcoded in
 * Kick's undocumented Pusher WebSocket for chat, scraping channel pages, or any
   unofficial clip/VOD downloader (e.g. yt-dlp against platform media).
 * Capturing tab audio/video without an explicit user gesture and Chrome's
-  `tabCapture`/`offscreen` permission flow (future, opt-in only).
+  `tabCapture`/`offscreen` permission flow (live tab audio is opt-in per tab, started from the popup).
 
 ---
 
@@ -240,7 +240,18 @@ Twitch Get Videos (archive) ──► session.vod_url ──► highlight.vod_ur
 loudness relative to the recording's own baseline; it can't tell laughter from shouting, so
 audio-only highlights are categorized `unknown`. Subtitles use faster-whisper on the CPU (int8);
 the model is loaded once and reused, and captions are wrapped to short lines for vertical video.
-Live tab-audio capture is not implemented.
+Live tab audio (opt-in per tab):
+
+```text
+popup (user click on the stream tab) ─tab-audio/start─► worker ─tabCapture.getMediaStreamId─► offscreen page
+offscreen: getUserMedia(tab) → speakers (stays audible) + AnalyserNode → RMS dBFS per second
+        ─tab-audio/samples (every 5 s)─► worker ─POST /api/v1/monitoring/audio {platform, channel, sent_at, samples}─► backend
+backend: active session for (user, platform, channel) → per-streamer buffer (~7 min, clock-corrected via sent_at)
+        → each new live highlight: loudest second in [start − 15 s, end] vs the 2-min rolling median
+          → signal_breakdown.audio (audio_source "live_tab"), score = chat + audio (same weights as post-stream)
+```
+
+The audio signal needs 30 s of history first; until then highlights stay chat-only.
 
 ## 6. Clip state machine
 

@@ -1,4 +1,5 @@
 import type { MonitoringState } from "./monitoring";
+import type { LoudnessSample, TabAudioState } from "./tab-audio";
 
 /** Messages UI surfaces send to the background service worker. */
 export type RuntimeRequest =
@@ -6,7 +7,19 @@ export type RuntimeRequest =
   | { type: "monitoring/start" }
   | { type: "monitoring/stop" }
   | { type: "monitoring/check-now" }
-  | { type: "app/open"; route?: string };
+  | { type: "app/open"; route?: string }
+  // Live tab audio (popup → worker; the popup click is what lets Chrome capture the tab).
+  | { type: "tab-audio/get" }
+  | { type: "tab-audio/start"; tabId: number; url: string }
+  | { type: "tab-audio/stop" }
+  // From the offscreen loudness meter to the worker.
+  | { type: "tab-audio/samples"; samples: LoudnessSample[] }
+  | { type: "tab-audio/ended"; reason: string };
+
+/** Messages the worker sends to the offscreen document (never handled by the worker). */
+export type OffscreenRequest =
+  | { target: "offscreen"; type: "meter/start"; streamId: string }
+  | { target: "offscreen"; type: "meter/stop" };
 
 export type RuntimeResponse<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -16,6 +29,11 @@ export interface ResponseMap {
   "monitoring/stop": MonitoringState;
   "monitoring/check-now": MonitoringState;
   "app/open": null;
+  "tab-audio/get": TabAudioState;
+  "tab-audio/start": TabAudioState;
+  "tab-audio/stop": TabAudioState;
+  "tab-audio/samples": TabAudioState;
+  "tab-audio/ended": TabAudioState;
 }
 
 export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
@@ -24,6 +42,11 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "monitoring/stop",
   "monitoring/check-now",
   "app/open",
+  "tab-audio/get",
+  "tab-audio/start",
+  "tab-audio/stop",
+  "tab-audio/samples",
+  "tab-audio/ended",
 ]);
 
 export function isRuntimeRequest(v: unknown): v is RuntimeRequest {

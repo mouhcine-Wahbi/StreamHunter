@@ -34,7 +34,7 @@ it into a clip. Nothing is ever published without your approval.
 | Post-stream analysis of your own recordings: audio peaks, scene changes, combined scoring, merging | ✅ (needs FFmpeg) |
 | MP4 export: 9:16 / 1:1 / 16:9, loudness-normalized | ✅ (needs FFmpeg + your recording) |
 | Subtitles: local speech-to-text, burned into the MP4 + downloadable .srt | ✅ (needs the optional media extras) |
-| Live tab-audio capture | ⏳ not started |
+| Live tab audio: the stream's loudness from your open Twitch/Kick tab joins live highlight detection | ✅ (start it from the popup) |
 
 ## Technology
 
@@ -204,12 +204,30 @@ model once (`WHISPER_MODEL`, default `base`, about 145 MB) into `media/models`. 
 
 For very large files, copy them into the media folder shown in the panel and register them through the API (`POST /api/v1/media/register`).
 
+## Live tab audio
+
+With a Twitch or Kick channel open in a tab, click the StreamHunter icon and choose
+**Measure this tab's audio**. StreamHunter then measures the stream's loudness once per second, and
+new live highlights get a measured audio signal ("Stream audio 12 dB louder than usual") next to chat.
+
+* Only one loudness number per second is sent to your backend. The audio itself is never recorded,
+  stored or sent anywhere, and the tab stays audible.
+* Chrome only allows capturing a tab after you click the extension on it, so this is started by
+  hand each time. Chrome shows its "sharing audio" indicator on the tab while it runs.
+* It stops when you click **Stop measuring**, close the tab, or close Chrome.
+* The channel must be on your watchlist, live and monitored; otherwise the popup says **Not monitored**
+  and nothing is kept.
+* After about 30 seconds StreamHunter knows the stream's normal level. Muting the player on the
+  page also silences the measurement.
+
 ## Known limitations
 
 * Monitoring runs **only while Chrome is open**. Closing the browser pauses it.
 * Kick has **no official clip or VOD API**. Kick clips need a manual step.
 * A Twitch clip is a link on Twitch, not a downloadable video file.
 * Stream offsets are approximate (they come from the platform's `started_at`).
+* Tab audio follows what you see, a few seconds behind the broadcast (like chat). Loudness can't tell
+  laughter from shouting; it is one signal next to chat.
 
 ## Documentation
 

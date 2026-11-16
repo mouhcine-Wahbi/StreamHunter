@@ -15,8 +15,10 @@ import { handleMessage, isTrustedSender } from "./message-handler";
 import { createMonitoringManager } from "./monitoring-manager";
 import { HIGHLIGHT_PREFIX, NOTIFICATION_PREFIX } from "./notifications";
 import { syncSettingsToBackend } from "./settings-sync";
+import { createTabAudioManager } from "./tab-audio";
 
 const manager = createMonitoringManager();
+const tabAudio = createTabAudioManager();
 
 function log(event: string, data?: Record<string, unknown>) {
   console.info(JSON.stringify({ src: "streamhunter.sw", event, ...data }));
@@ -26,6 +28,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   log("installed", { reason: details.reason });
   void (async () => {
     await manager.restore();
+    await tabAudio.reset();
     if (details.reason === "install") {
       await chrome.tabs.create({ url: chrome.runtime.getURL("app.html#/overview") });
     }
@@ -35,6 +38,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.runtime.onStartup.addListener(() => {
   log("browser_startup");
   void manager.restore();
+  void tabAudio.reset();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -50,9 +54,13 @@ chrome.notifications?.onClicked.addListener((id) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedSender(sender)) return false;
-  handleMessage(message, manager).then(sendResponse);
+  // Messages addressed to the offscreen document are not for the worker.
+  if ((message as { target?: unknown } | null)?.target === "offscreen") return false;
+  handleMessage(message, manager, tabAudio).then(sendResponse);
   return true; // keep the channel open for the async response
 });
+
+chrome.tabs.onRemoved.addListener((tabId) => void tabAudio.onTabRemoved(tabId));
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;

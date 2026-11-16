@@ -9,12 +9,15 @@ from sqlalchemy import func, select
 
 from app.api.dependencies import ActivityServiceDep, CurrentUser, DbDep, PageDep
 from app.db.types import utcnow
+from app.errors import NotFoundError
 from app.domain.enums import MonitoringSessionStatus
 from app.models import HighlightCandidate, MonitoringLease, MonitoringSession, Streamer, UserStreamer
 from app.monitoring.engine import MonitoringEngine
 from app.schemas.activity import (
     HeartbeatOut,
     HeartbeatRequest,
+    LiveAudioIn,
+    LiveAudioOut,
     MonitoringSessionOut,
     MonitoringStatusOut,
     NotificationOut,
@@ -136,6 +139,32 @@ async def monitoring_status(request: Request, user: CurrentUser, db: DbDep) -> M
         scheduler_running=bool(getattr(request.app.state, "scheduler", None)),
         last_cycle_at=engine.last_cycle_at,
     )
+
+
+@router.post("/audio", response_model=LiveAudioOut, summary="Live tab loudness for a monitored channel (numbers only)")
+async def live_audio(body: LiveAudioIn, request: Request, user: CurrentUser, db: DbDep) -> LiveAudioOut:
+    session = await db.scalar(
+        select(MonitoringSession)
+        .join(Streamer, Streamer.id == MonitoringSession.streamer_id)
+        .where(
+            MonitoringSession.user_id == user.id,
+            MonitoringSession.status == MonitoringSessionStatus.ACTIVE.value,
+            Streamer.platform == body.platform.value,
+            func.lower(Streamer.username) == body.channel.lower(),
+        )
+        .order_by(MonitoringSession.id.desc())
+    )
+    if session is None:
+        raise NotFoundError(
+            f"{body.channel} has no active monitoring session: it must be on your watchlist, live, and monitoring must be on",
+            code="not_monitoring",
+        )
+    now = utcnow()
+    skew = now - body.sent_at  # browser clock → server clock
+    chat = request.app.state.chat
+    accepted = chat.ingest_audio(session.streamer_id, [(s.t + skew, s.db) for s in body.samples], now)
+    state = chat.audio[session.streamer_id].status(now)["audio_state"] if session.streamer_id in chat.audio else "off"
+    return LiveAudioOut(session_id=session.id, streamer_id=session.streamer_id, accepted=accepted, audio_state=str(state))
 
 
 @router.get("", response_model=Page[MonitoringSessionOut], summary="Monitoring session history")

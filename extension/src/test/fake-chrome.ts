@@ -22,6 +22,8 @@ export function createFakeChrome() {
   const onAlarm = new Event<[chrome.alarms.Alarm]>();
   const onMessage = new Event<[unknown, chrome.runtime.MessageSender, (r: unknown) => void]>();
   const createdTabs: string[] = [];
+  const onTabRemoved = new Event<[number]>();
+  let activeTab: { id: number; url: string } | null = null;
   const notifications: Record<string, unknown>[] = [];
   const clone = <T>(v: T): T => (v === undefined ? v : structuredClone(v));
 
@@ -105,6 +107,10 @@ export function createFakeChrome() {
         createdTabs.push(url);
         return { id: createdTabs.length, url };
       },
+      async query() {
+        return activeTab ? [{ ...activeTab, active: true }] : [];
+      },
+      onRemoved: onTabRemoved,
     },
     action: {
       setBadgeText: async () => undefined,
@@ -137,6 +143,11 @@ export function createFakeChrome() {
       alarms,
       createdTabs,
       notifications,
+      /** The tab the popup sees as active (null = none / no URL access). */
+      setActiveTab: (tab: { id: number; url: string } | null) => {
+        activeTab = tab;
+      },
+      removeTab: (id: number) => onTabRemoved.emit(id),
       fireAlarm: (name: string) => {
         const a = alarms.get(name);
         if (a) onAlarm.emit(a);

@@ -1,6 +1,6 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-15_
+_Last updated: 2026-11-16_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
@@ -146,7 +146,7 @@ relative to the stream's baseline and can't create a candidate on their own.
 | Live stack check | ✅ | Built extension + uvicorn: Twitch approve → create refused with "Connect your Twitch account…". Kick approve → manual instructions → pasted clip link → export refused honestly → publish after confirmation |
 
 **Found and fixed:** the aspect-ratio selector stretched across the whole clip card; it is now fixed width.
-## Phase 7 — VOD & advanced AI 🟡 (core delivered; subtitles and live audio not started)
+## Phase 7 — VOD & advanced AI 🟡 (core and subtitles delivered; live audio not started)
 
 | Item | Status | Notes |
 |---|---|---|
@@ -159,16 +159,19 @@ relative to the stream's baseline and can't create a candidate on their own.
 | Audio-only candidates, candidate merging | ✅ | |
 | MP4 export: trim, 9:16 / 1:1 / 16:9, loudness normalization, download | ✅ | |
 | Recordings panel per session, analysis status, export progress, download, VOD links | ✅ | |
-| Subtitles (speech-to-text) | ⏳ | Needs a local speech model (e.g. faster-whisper, a large download). Reported as `not_implemented` |
+| Subtitles (speech-to-text) | ✅ | faster-whisper, local CPU (optional `requirements-media.txt`). Burned into the export in the same encode, plus a downloadable .srt. Short lines for vertical video. Language detected or chosen |
+| Bundled FFmpeg fallback | ✅ | `static-ffmpeg` (optional) is used automatically when `ffmpeg` isn't on PATH |
 | Live tab-audio capture (`chrome.tabCapture` + offscreen document) | ⏳ | Needs extra permissions and a user gesture each time; not started |
 | Laughter / excitement classification, gameplay or visual event recognition | ⏳ | Would need ML models; loudness and scene cuts are the honest baseline |
-| Tests | ✅ | Backend 109 (incl. 9 real-FFmpeg media tests); extension 71 |
-| Live stack check | ✅ | Built extension + uvicorn: uploaded an MP4 via the file picker → FFmpeg analysis (1 audio peak, 2 scene cuts, 2 highlights enriched) → approve → export → downloaded 1080×1920 H.264/AAC, 25.0 s |
+| Tests | ✅ | Backend 115 (incl. real-FFmpeg media and subtitle tests; the speech model is faked in tests); extension 73 |
+| Live stack check | ✅ | Built extension + uvicorn: uploaded an MP4 via the file picker → FFmpeg analysis (1 audio peak, 2 scene cuts, 2 highlights enriched) → approve → export → downloaded 1080×1920 H.264/AAC, 25.0 s. Subtitles (2026-11-16): real `base` model on a spoken test recording → accurate 2-cue .srt in 3.9 s, captions visible in the 1080×1920 export; Clip Library switch → export → Download .srt in the browser preview |
 
 **Found and fixed during this phase:**
 * Windows outside the recording got a visual score of 0 (lowering their score) instead of "not measured".
 * An unreadable upload returned 500 and leaked the server path; it now returns 400 `invalid_media` with the file name only.
 * The Clip Library stopped polling an export that took longer than one refresh; it now polls until the export is done.
+* faster-whisper 1.2.1 can't decode files with the current PyAV (19); StreamHunter now passes it the samples FFmpeg already decoded.
+* SQLAlchemy didn't install `greenlet` on Apple Silicon (`sqlalchemy[asyncio]` now), and a chat test depended on the time of day.
 
 **Tuning point:** with measured audio, a chat-flagged moment over quiet audio gets a lower combined
 score (the specified weights: chat 25 %, audio 30 %, visual 20 %) and may drop below the minimum.

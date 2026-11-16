@@ -102,6 +102,8 @@ export interface Clip {
   platform_clip_id: string | null;
   platform_clip_url: string | null;
   local_file_path: string | null;
+  /** .srt next to the export when it was made with subtitles. */
+  subtitles_file_path: string | null;
   title: string | null;
   duration_seconds: number | null;
   aspect_ratio: string | null;
@@ -148,6 +150,7 @@ export interface MediaCapabilities {
   max_upload_mb: number;
   media_folder: string;
   supported_extensions: string[];
+  /** "supported" when the backend has FFmpeg and local speech recognition. */
   subtitles: string;
   live_tab_audio: string;
 }

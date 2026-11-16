@@ -71,6 +71,7 @@ class ClipOut(Schema):
     platform_clip_id: str | None
     platform_clip_url: str | None
     local_file_path: str | None
+    subtitles_file_path: str | None
     title: str | None
     duration_seconds: int | None
     aspect_ratio: str | None
@@ -156,6 +157,14 @@ class ClipPatch(Schema):
     aspect_ratio: Literal["16:9", "9:16", "1:1"] | None = None
     # Manual workflow (Kick): link to the clip the editor made on the platform.
     platform_clip_url: str | None = Field(None, max_length=500)
+
+
+class ExportRequest(Schema):
+    model_config = {"extra": "forbid"}
+    # Transcribe the clip locally and burn the captions in (an .srt is kept for download too).
+    subtitles: bool = False
+    # Spoken language as an ISO 639-1 code (e.g. "en", "fr"); detected automatically when omitted.
+    language: str | None = Field(None, pattern=r"^[a-z]{2,3}$")
 
 
 class PublishRequest(Schema):

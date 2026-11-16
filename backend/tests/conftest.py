@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -14,6 +15,18 @@ from app.domain.enums import Platform
 from app.integrations.registry import PlatformRegistry
 from app.main import create_app
 from tests.fakes import FakePlatform, channel
+
+
+def _media_tools_on_path() -> None:
+    """Media tests call `ffmpeg` directly: use the optional static-ffmpeg binaries when there's no system FFmpeg."""
+    from app.clipping.media_access import find_tool
+
+    ff = find_tool("ffmpeg", "ffmpeg")
+    if ff != "ffmpeg":
+        os.environ["PATH"] = str(Path(ff).parent) + os.pathsep + os.environ.get("PATH", "")
+
+
+_media_tools_on_path()
 
 
 @pytest.fixture

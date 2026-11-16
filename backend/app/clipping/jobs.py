@@ -1,4 +1,4 @@
-"""Background media jobs (analyze a recording, export a clip) with bounded concurrency."""
+"""Background media jobs (analyze a recording, export a clip, optionally subtitled) with bounded concurrency."""
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.clipping import ffmpeg_processor as ff
 from app.clipping.media_access import MediaLibrary
+from app.clipping.subtitles import Transcriber, cues, to_srt
 from app.clipping.vod_analysis import analyze_recording
 from app.config import Settings
 from app.db.types import utcnow
 from app.domain.enums import ClipStatus as S
 from app.domain.status import transition
-from app.errors import AppError
+from app.errors import AppError, PlatformUnavailableError
 from app.models import Clip, HighlightCandidate, MediaJob, MediaSource, User
 from app.services.settings_service import SettingsService
 
@@ -39,10 +40,12 @@ def export_window(cand: HighlightCandidate, media: MediaSource) -> tuple[float, 
 
 
 class MediaJobRunner:
-    def __init__(self, maker: async_sessionmaker[AsyncSession], library: MediaLibrary, settings: Settings):
+    def __init__(self, maker: async_sessionmaker[AsyncSession], library: MediaLibrary, settings: Settings,
+                 transcriber: Transcriber | None = None):
         self.maker = maker
         self.library = library
         self.settings = settings
+        self.transcriber = transcriber
         self._sem = asyncio.Semaphore(settings.max_concurrent_media_jobs)
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -110,14 +113,49 @@ class MediaJobRunner:
         aspect = clip.aspect_ratio or "9:16"
         name = f"clip_{clip.id}_{aspect.replace(':', 'x')}.mp4"
         dst = self.library.resolve_export(job.user_id, name)
+        srt = dst.with_suffix(".srt")
+        options = job.result or {}
+        subtitles: dict[str, Any] | None = None
+        if options.get("subtitles_requested"):
+            subtitles = await self._transcribe(path, srt, media=media, start=start, duration=duration, aspect=aspect,
+                                               language=options.get("language"))
+        else:
+            srt.unlink(missing_ok=True)  # never leave captions from an earlier export next to a new file
+        burn = srt if subtitles and subtitles["cues"] and media.has_video else None
         await ff.export_clip(self.library.ffmpeg, path, dst, start=start, duration=duration, aspect=aspect,
                              has_video=media.has_video, has_audio=media.has_audio,
-                             timeout=self.settings.media_job_timeout_seconds)
+                             timeout=self.settings.media_job_timeout_seconds, subtitles=burn)
         clip.local_file_path = name
+        clip.subtitles_file_path = srt.name if subtitles and subtitles["cues"] else None
         clip.status = transition(clip.status, S.READY).value
         clip.error_message = None
-        return {"file": name, "start_sec": round(start, 2), "duration_sec": round(duration, 2), "aspect_ratio": aspect,
-                "size_bytes": dst.stat().st_size}
+        out: dict[str, Any] = {"file": name, "start_sec": round(start, 2), "duration_sec": round(duration, 2),
+                               "aspect_ratio": aspect, "size_bytes": dst.stat().st_size}
+        if subtitles is not None:
+            out["subtitles"] = {**subtitles, "burned_in": burn is not None}
+        return out
+
+    async def _transcribe(self, src: Any, srt: Any, *, media: MediaSource, start: float, duration: float, aspect: str,
+                          language: str | None) -> dict[str, Any]:
+        """Write the clip's captions to `srt` (if any speech is found) and describe the result."""
+        if self.transcriber is None or not self.transcriber.available:
+            raise PlatformUnavailableError("Speech recognition is not installed on the backend", code="subtitles_unavailable")
+        if not media.has_audio:
+            raise AppError("This recording has no audio track, so it can't be subtitled", code="no_audio")
+        wav = srt.with_suffix(".audio.wav")
+        try:
+            await ff.extract_audio(self.library.ffmpeg, src, wav, start=start, duration=duration,
+                                   timeout=self.settings.media_job_timeout_seconds)
+            transcript = await self.transcriber.transcribe(wav, language=language,
+                                                           timeout=self.settings.media_job_timeout_seconds)
+        finally:
+            wav.unlink(missing_ok=True)
+        items = cues(transcript.segments, aspect=aspect, duration=duration)
+        if items:
+            srt.write_text(to_srt(items), encoding="utf-8")
+        else:
+            srt.unlink(missing_ok=True)
+        return {"file": srt.name if items else None, "language": transcript.language, "cues": len(items)}
 
     async def _revert_clip(self, db: AsyncSession, job: MediaJob) -> None:
         if job.kind != "export" or not job.clip_id:

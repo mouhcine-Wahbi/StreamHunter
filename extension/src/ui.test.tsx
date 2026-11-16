@@ -464,7 +464,7 @@ describe("recordings, VOD and export (Phase 7)", () => {
     ended_at: "2026-11-15T12:00:00Z", status: "ended", last_checked_at: null, last_event_at: null, error_message: null,
     broadcast_started_at: "2026-11-15T10:00:00Z", vod_id: null, vod_url: null,
   };
-  const caps = { ffmpeg_available: true, max_upload_mb: 4096, media_folder: "/srv/media/library/1", supported_extensions: [".mp4"], subtitles: "not_implemented", live_tab_audio: "not_implemented" };
+  const caps = { ffmpeg_available: true, max_upload_mb: 4096, media_folder: "/srv/media/library/1", supported_extensions: [".mp4"], subtitles: "requires_configuration", live_tab_audio: "not_implemented" };
 
   it("finds the VOD, uploads a recording with rights confirmation, and shows analysis results", async () => {
     let s: Record<string, unknown> = { ...session };
@@ -558,5 +558,60 @@ describe("recordings, VOD and export (Phase 7)", () => {
     expect(await screen.findByText(/Exporting 9:16 MP4/)).toBeInTheDocument();
     await userEvent.click(await screen.findByRole("button", { name: "Download MP4" }, { timeout: 9000 }));
     await waitFor(() => expect(clickSpy).toHaveBeenCalled());
+  });
+
+  it("exports with burned-in subtitles and offers the .srt", { timeout: 15000 }, async () => {
+    let c: Record<string, unknown> = { id: 5, candidate_id: 1, platform: "kick", platform_clip_id: null, platform_clip_url: null, local_file_path: null,
+      subtitles_file_path: null, title: null, duration_seconds: 30, aspect_ratio: "9:16", status: "unsupported", error_message: null, source: "editor",
+      edit_url: null, requested_at: null, request_lag_seconds: null, published_at: null, published_url: null, created_at: "2026-11-15T12:00:00Z" };
+    const exportBodies: unknown[] = [];
+    const downloads: string[] = [];
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    });
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL: () => undefined }));
+    mockFetch((url, init) => {
+      if (url.endsWith("/api/v1/media/capabilities")) return json({ ffmpeg_available: true, max_upload_mb: 4096, media_folder: "/m", supported_extensions: [".mp4"], subtitles: "supported", live_tab_audio: "not_implemented" });
+      if (url.endsWith("/api/v1/clips/5/export") && init?.method === "POST") {
+        exportBodies.push(JSON.parse(String(init.body)));
+        c = { ...c, status: "exporting" };
+        return json(c, 202);
+      }
+      if (url.endsWith("/api/v1/clips/5/subtitles")) return new Response(new Blob(["1\n"]), { status: 200, headers: { "Content-Type": "application/x-subrip" } });
+      if (url.includes("/api/v1/clips")) {
+        if (c.status === "exporting") c = { ...c, status: "ready", local_file_path: "clip_5_9x16.mp4", subtitles_file_path: "clip_5_9x16.srt" };
+        return json({ items: [c], total: 1, limit: 50, offset: 0 });
+      }
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/clips";
+    render(<App />);
+    const toggle = await screen.findByRole("switch", { name: "Subtitles" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("button", { name: "Export MP4" }));
+    await waitFor(() => expect(exportBodies).toEqual([{ subtitles: true }]));
+    await userEvent.click(await screen.findByRole("button", { name: "Download .srt" }, { timeout: 9000 }));
+    await waitFor(() => expect(downloads).toContain("clip_5_9x16.srt"));
+    // After a subtitled export the switch stays on for re-exports.
+    expect(screen.getByRole("switch", { name: "Subtitles" })).toHaveAttribute("aria-checked", "true");
+    clickSpy.mockRestore();
+  });
+
+  it("hides the subtitles switch when the backend can't transcribe", async () => {
+    const c = { id: 6, candidate_id: 1, platform: "kick", platform_clip_id: null, platform_clip_url: null, local_file_path: null, subtitles_file_path: null,
+      title: null, duration_seconds: 30, aspect_ratio: "9:16", status: "unsupported", error_message: null, source: "editor", edit_url: null,
+      requested_at: null, request_lag_seconds: null, published_at: null, published_url: null, created_at: "2026-11-15T12:00:00Z" };
+    mockFetch((url) => {
+      if (url.endsWith("/api/v1/media/capabilities")) return json({ ffmpeg_available: true, max_upload_mb: 4096, media_folder: "/m", supported_extensions: [".mp4"], subtitles: "requires_configuration", live_tab_audio: "not_implemented" });
+      if (url.includes("/api/v1/clips")) return json({ items: [c], total: 1, limit: 50, offset: 0 });
+      return json({ detail: "Not Found" }, 404);
+    });
+    installWorker();
+    window.location.hash = "/clips";
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Export MP4" })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Subtitles" })).not.toBeInTheDocument();
   });
 });

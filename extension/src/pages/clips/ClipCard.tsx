@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Clapperboard, ExternalLink, FileVideo, Pencil, Send } from "lucide-react";
+import { Captions, Clapperboard, ExternalLink, FileVideo, Pencil, Send } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input, Select } from "@/components/ui/Field";
+import { Switch } from "@/components/ui/Switch";
 import { CANDIDATE_STATUS_META } from "@/components/highlights/HighlightRow";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useClipRequest } from "@/components/clips/useClipRequest";
@@ -27,7 +28,11 @@ const SOURCE_LABEL: Record<Clip["source"], string> = {
   manual: "made manually on the platform",
 };
 
-export function ClipCard({ c, onChanged }: { c: Clip; onChanged: () => void }) {
+/**
+ * One clip in the library. `subtitles` is true when the backend can transcribe speech; the editor
+ * can then burn captions into the exported MP4 (an .srt is kept for download as well).
+ */
+export function ClipCard({ c, onChanged, subtitles = false }: { c: Clip; onChanged: () => void; subtitles?: boolean }) {
   const client = useApiClient();
   const meta = CANDIDATE_STATUS_META[c.status];
   const [title, setTitle] = useState(c.title ?? "");
@@ -36,6 +41,7 @@ export function ClipCard({ c, onChanged }: { c: Clip; onChanged: () => void }) {
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState("");
   const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [withSubtitles, setWithSubtitles] = useState(c.subtitles_file_path !== null);
 
   const patch = useAction(async (body: Record<string, unknown>) => {
     await client.patch(`/api/v1/clips/${c.id}`, body);
@@ -49,21 +55,23 @@ export function ClipCard({ c, onChanged }: { c: Clip; onChanged: () => void }) {
   const doExport = useAction(async () => {
     setExportMsg(null);
     try {
-      await client.post(`/api/v1/clips/${c.id}/export`);
+      await client.post(`/api/v1/clips/${c.id}/export`, subtitles ? { subtitles: withSubtitles } : undefined);
       onChanged();
     } catch (e) {
       setExportMsg(e instanceof Error ? e.message : "Export unavailable");
     }
   });
-  const download = useAction(async () => {
-    const blob = await client.blob(`/api/v1/clips/${c.id}/file`);
+  async function save(path: string, filename: string) {
+    const blob = await client.blob(path);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = c.local_file_path ?? `clip_${c.id}.mp4`;
+    a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  });
+  }
+  const download = useAction(() => save(`/api/v1/clips/${c.id}/file`, c.local_file_path ?? `clip_${c.id}.mp4`));
+  const downloadSrt = useAction(() => save(`/api/v1/clips/${c.id}/subtitles`, c.subtitles_file_path ?? `clip_${c.id}.srt`));
   // While exporting, keep refreshing until the job finishes (the status may stay
   // "exporting" across several refreshes, so this must be an interval, not a one-shot).
   useEffect(() => {
@@ -74,7 +82,7 @@ export function ClipCard({ c, onChanged }: { c: Clip; onChanged: () => void }) {
   const clipReq = useClipRequest(onChanged);
 
   const canPublish = c.status === "created" || c.status === "ready" || c.status === "unsupported";
-  const error = patch.error ?? publish.error ?? clipReq.error ?? download.error;
+  const error = patch.error ?? publish.error ?? clipReq.error ?? download.error ?? downloadSrt.error;
 
   function saveTitle(e: FormEvent) {
     e.preventDefault();
@@ -140,13 +148,26 @@ export function ClipCard({ c, onChanged }: { c: Clip; onChanged: () => void }) {
             <ExternalLink className="size-3" /> Edit on Twitch
           </a>
         )}
+        {subtitles && c.status !== "exporting" && (
+          <label className="inline-flex h-8 items-center gap-1.5 px-1 text-fg-muted" title="Transcribe speech and burn captions into the MP4">
+            <Switch checked={withSubtitles} onChange={setWithSubtitles} label="Subtitles" />
+            Subtitles
+          </label>
+        )}
         {c.status === "exporting" ? (
-          <Badge tone="accent">Exporting {c.aspect_ratio ?? ""} MP4…</Badge>
+          <Badge tone="accent">
+            Exporting {c.aspect_ratio ?? ""} MP4{subtitles && withSubtitles ? " with subtitles" : ""}…
+          </Badge>
         ) : c.local_file_path ? (
           <>
             <Button size="sm" variant="primary" loading={download.pending} icon={<FileVideo className="size-3.5" />} onClick={() => void download.run()}>
               Download MP4
             </Button>
+            {c.subtitles_file_path && (
+              <Button size="sm" variant="secondary" loading={downloadSrt.pending} icon={<Captions className="size-3.5" />} onClick={() => void downloadSrt.run()}>
+                Download .srt
+              </Button>
+            )}
             <Button size="sm" variant="ghost" loading={doExport.pending} onClick={() => void doExport.run()}>
               Re-export
             </Button>

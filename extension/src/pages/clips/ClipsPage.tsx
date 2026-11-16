@@ -3,11 +3,13 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiStateView } from "@/components/ApiStateView";
 import { useApiQuery } from "@/hooks/useApiQuery";
-import type { Clip, Page } from "@/types/api";
+import type { Clip, MediaCapabilities, Page } from "@/types/api";
 import { ClipCard } from "./ClipCard";
 
 export function ClipsPage() {
   const query = useApiQuery<Page<Clip>>("/api/v1/clips?limit=50");
+  const caps = useApiQuery<MediaCapabilities>("/api/v1/media/capabilities");
+  const subtitles = caps.data?.subtitles === "supported";
   return (
     <>
       <PageHeader
@@ -23,7 +25,7 @@ export function ClipsPage() {
           ) : (
             <div className="space-y-3">
               {page.items.map((c) => (
-                <ClipCard key={c.id} c={c} onChanged={query.reload} />
+                <ClipCard key={c.id} c={c} onChanged={query.reload} subtitles={subtitles} />
               ))}
             </div>
           )

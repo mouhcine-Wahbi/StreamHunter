@@ -33,7 +33,8 @@ it into a clip. Nothing is ever published without your approval.
 | Twitch VOD links at each highlight's timestamp | ✅ (needs credentials) |
 | Post-stream analysis of your own recordings: audio peaks, scene changes, combined scoring, merging | ✅ (needs FFmpeg) |
 | MP4 export: 9:16 / 1:1 / 16:9, loudness-normalized | ✅ (needs FFmpeg + your recording) |
-| Subtitles, live tab-audio capture | ⏳ not started |
+| Subtitles: local speech-to-text, burned into the MP4 + downloadable .srt | ✅ (needs the optional media extras) |
+| Live tab-audio capture | ⏳ not started |
 
 ## Technology
 
@@ -45,7 +46,8 @@ it into a clip. Nothing is ever published without your approval.
 * Node.js 20+ and npm 10+
 * Google Chrome 116+ (or another Chromium browser)
 * Python 3.12+ (backend)
-* FFmpeg with ffprobe (optional; needed only for recording analysis and MP4 export)
+* FFmpeg with ffprobe (optional; needed only for recording analysis and MP4 export). No system
+  FFmpeg? `requirements-media.txt` installs one into the backend's virtual environment.
 
 ## Install & build the extension
 
@@ -183,6 +185,22 @@ attach a recording you own, for example a VOD you downloaded from your own dashb
 2. Click **Analyze**. Highlights gain measured audio and visual signals, strong loud moments chat
    missed are added, and overlapping highlights are merged.
 3. In the **Clip Library**, choose an aspect ratio and click **Export MP4**, then **Download MP4**.
+   Turn on **Subtitles** first to transcribe the speech and burn captions into the video; the
+   captions are also available as **Download .srt**.
+
+### Optional media extras (FFmpeg and subtitles)
+
+From `backend/`:
+
+```bash
+.venv/bin/pip install -r requirements-media.txt
+```
+
+This adds a bundled FFmpeg (used automatically when `ffmpeg` isn't on your PATH) and
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) for speech-to-text. Transcription runs
+on your machine; audio is never sent anywhere. The first subtitled export downloads the speech
+model once (`WHISPER_MODEL`, default `base`, about 145 MB) into `media/models`. Larger models
+(`small`, `medium`, `large-v3`) are more accurate but slower. The language is detected automatically.
 
 For very large files, copy them into the media folder shown in the panel and register them through the API (`POST /api/v1/media/register`).
 

@@ -27,6 +27,25 @@ class Probe:
     height: int | None
 
 
+def find_tool(configured: str, name: str) -> str:
+    """The configured FFmpeg tool, or the binary of the optional `static-ffmpeg` package.
+
+    Only an explicit default ("ffmpeg"/"ffprobe") that isn't on PATH falls back, and only to
+    binaries static-ffmpeg has already unpacked (nothing is downloaded here).
+    """
+    if shutil.which(configured) is not None or configured != name:
+        return configured
+    try:
+        from static_ffmpeg.run import get_platform_dir
+    except ImportError:
+        return configured
+    try:
+        candidate = Path(get_platform_dir()) / name
+    except OSError:
+        return configured
+    return str(candidate) if candidate.is_file() else configured
+
+
 class MediaLibrary:
     def __init__(self, root: str | Path, *, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe"):
         self.root = Path(root).resolve()

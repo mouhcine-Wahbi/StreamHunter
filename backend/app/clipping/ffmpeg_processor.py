@@ -32,9 +32,10 @@ class MediaProcessingError(AppError):
     code = "media_processing_failed"
 
 
-async def run(cmd: list[str], *, timeout: float) -> RunResult:
+async def run(cmd: list[str], *, timeout: float, cwd: Path | None = None) -> RunResult:
     proc = await asyncio.create_subprocess_exec(
-        *cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        *cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -85,14 +86,38 @@ def aspect_filter(aspect: AspectRatio) -> str:
     return "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1"
 
 
+def subtitle_filter(srt_name: str, aspect: AspectRatio) -> str:
+    """Burn-in style: bold white text with a dark outline, bottom-centred (higher up on vertical video).
+
+    Sizes are in libass's 288-line reference frame, so they scale with the output height.
+    `srt_name` must be a bare file name (FFmpeg runs in its folder), which avoids filter escaping.
+    """
+    margin = 60 if aspect == "9:16" else 20
+    style = f"FontName=Arial,FontSize=12,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1.5,Shadow=0,Alignment=2,MarginV={margin}"
+    return f"subtitles=filename={srt_name}:force_style='{style}'"
+
+
+async def extract_audio(ffmpeg: str, src: Path, dst: Path, *, start: float, duration: float, timeout: float) -> None:
+    """The clip window's audio as 16 kHz mono WAV (what speech recognition expects)."""
+    await run([ffmpeg, "-hide_banner", "-nostats", "-y", "-ss", f"{max(0.0, start):.3f}", "-i", str(src),
+               "-t", f"{duration:.3f}", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst)], timeout=timeout)
+
+
 async def export_clip(
     ffmpeg: str, src: Path, dst: Path, *, start: float, duration: float, aspect: AspectRatio,
-    has_video: bool, has_audio: bool, timeout: float,
+    has_video: bool, has_audio: bool, timeout: float, subtitles: Path | None = None,
 ) -> None:
-    """Trim, reframe and loudness-normalize into an MP4 (H.264/AAC, web-optimized)."""
+    """Trim, reframe and loudness-normalize into an MP4 (H.264/AAC, web-optimized).
+
+    With `subtitles` (an SRT timed from the clip start, in the same folder as `dst`), the captions
+    are burned into the picture in the same encode.
+    """
     cmd = [ffmpeg, "-hide_banner", "-nostats", "-y", "-ss", f"{max(0.0, start):.3f}", "-i", str(src), "-t", f"{duration:.3f}"]
     if has_video:
-        cmd += ["-vf", aspect_filter(aspect), "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
+        vf = aspect_filter(aspect)
+        if subtitles is not None:
+            vf += "," + subtitle_filter(subtitles.name, aspect)
+        cmd += ["-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
     else:
         cmd += ["-vn"]
     if has_audio:
@@ -102,7 +127,7 @@ async def export_clip(
     tmp = dst.with_suffix(".partial.mp4")
     cmd += ["-movflags", "+faststart", str(tmp)]
     try:
-        await run(cmd, timeout=timeout)
+        await run(cmd, timeout=timeout, cwd=subtitles.parent if subtitles is not None else None)
         tmp.replace(dst)  # atomic: never leave a half-written file under the final name
     finally:
         tmp.unlink(missing_ok=True)

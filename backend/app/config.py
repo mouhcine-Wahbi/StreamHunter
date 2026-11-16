@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     ffprobe_path: str = "ffprobe"
     media_job_timeout_seconds: int = Field(default=3600, ge=10)
     max_concurrent_media_jobs: int = Field(default=1, ge=1, le=8)
+    # Subtitles: local speech-to-text with faster-whisper (optional dependency, see requirements-media.txt).
+    # tiny | base | small | medium | large-v3 — bigger is more accurate but slower. Downloaded once on first use.
+    whisper_model: str = "base"
+    whisper_model_dir: str | None = None  # default: <media_root>/models
 
     # --- Platforms (credentials only ever live here, never in the extension) ---
     twitch_client_id: str | None = None

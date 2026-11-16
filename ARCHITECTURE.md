@@ -232,13 +232,15 @@ media_sources ──analyze job──► loudness per second (astats) + scene ch
       │                              ├─ audio-only peaks (≥ 6 dB over the 2-min rolling median, ≥ 2 s) → origin "vod"
       │                              └─ merge overlapping pending highlights
       └──export job──► trim [start,end] − offset_in_stream → crop/pad 9:16 | 1:1 | 16:9 → loudnorm → MP4
+                         └─ subtitles? window audio → 16 kHz WAV → faster-whisper (local) → .srt → burned in
 Twitch Get Videos (archive) ──► session.vod_url ──► highlight.vod_url_at (?t=…, approximate)
 ```
 
 `offset_in_stream_sec` maps file time to stream time (0 for a full VOD). Audio "excitement" is
 loudness relative to the recording's own baseline; it can't tell laughter from shouting, so
-audio-only highlights are categorized `unknown`. Subtitles (speech-to-text) and live tab-audio
-capture are not implemented.
+audio-only highlights are categorized `unknown`. Subtitles use faster-whisper on the CPU (int8);
+the model is loaded once and reused, and captions are wrapped to short lines for vertical video.
+Live tab-audio capture is not implemented.
 
 ## 6. Clip state machine
 

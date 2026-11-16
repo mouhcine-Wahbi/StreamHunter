@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +22,8 @@ from app.errors import install_error_handlers
 from app.integrations.registry import PlatformRegistry
 from app.logging_config import configure_logging
 from app.clipping.jobs import MediaJobRunner
-from app.clipping.media_access import MediaLibrary
+from app.clipping.media_access import MediaLibrary, find_tool
+from app.clipping.subtitles import WhisperTranscriber
 from app.clipping.worker import ClipWorker
 from app.monitoring.chat_manager import ChatManager
 from app.monitoring.engine import MonitoringEngine
@@ -79,8 +81,11 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
     app.state.monitoring.chat = app.state.chat
     app.state.clip_worker = ClipWorker(app.state.sessionmaker, app.state.registry, app.state.token_cipher)
     app.state.chat.clip_worker = app.state.clip_worker
-    app.state.media_library = MediaLibrary(settings.media_root, ffmpeg=settings.ffmpeg_path, ffprobe=settings.ffprobe_path)
-    app.state.media_jobs = MediaJobRunner(app.state.sessionmaker, app.state.media_library, settings)
+    app.state.media_library = MediaLibrary(settings.media_root, ffmpeg=find_tool(settings.ffmpeg_path, "ffmpeg"),
+                                           ffprobe=find_tool(settings.ffprobe_path, "ffprobe"))
+    transcriber = WhisperTranscriber(settings.whisper_model,
+                                     settings.whisper_model_dir or Path(settings.media_root) / "models")
+    app.state.media_jobs = MediaJobRunner(app.state.sessionmaker, app.state.media_library, settings, transcriber)
     app.state.kick_verifier = None  # created on first webhook (needs Kick credentials)
 
     app.add_middleware(

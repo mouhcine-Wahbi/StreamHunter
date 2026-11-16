@@ -11,10 +11,10 @@ from app.api.dependencies import ActivityServiceDep, CurrentUser, DbDep, PageDep
 from app.clipping.jobs import export_window, latest_media_for_session
 from app.clipping.worker import ClipWorker
 from app.domain.status import transition
-from app.errors import NotFoundError
+from app.errors import AppError, NotFoundError, PlatformUnavailableError
 from app.models import MediaJob
 from app.domain.enums import ClipStatus, Platform
-from app.schemas.activity import ClipCreateRequest, ClipOut, ClipPatch, PublishRequest
+from app.schemas.activity import ClipCreateRequest, ClipOut, ClipPatch, ExportRequest, PublishRequest
 from app.schemas.common import ERROR_RESPONSES, Page
 from app.services.clip_service import ClipService
 
@@ -63,8 +63,10 @@ async def retry(clip_id: int, body: ClipCreateRequest, request: Request, svc: Cl
 
 
 @router.post("/{clip_id}/export", response_model=ClipOut, status_code=202,
-             summary="Export an MP4 from the recording attached to the highlight's session")
-async def export(clip_id: int, request: Request, svc: ClipServiceDep, db: DbDep, user: CurrentUser) -> ClipOut:
+             summary="Export an MP4 (optionally with burned-in subtitles) from the recording attached to the highlight's session")
+async def export(clip_id: int, request: Request, svc: ClipServiceDep, db: DbDep, user: CurrentUser,
+                 body: ExportRequest | None = None) -> ClipOut:
+    options = body or ExportRequest()
     clip = await svc.clip(clip_id)
     cand = await svc.candidate(clip.candidate_id)
     media = await latest_media_for_session(db, user.id, cand.session_id)
@@ -72,11 +74,19 @@ async def export(clip_id: int, request: Request, svc: ClipServiceDep, db: DbDep,
         await svc.export(clip_id)  # raises the explicit "no authorized media source" error
     request.app.state.media_library.require_tools()
     export_window(cand, media)  # fail fast if the recording doesn't cover the moment
+    if options.subtitles:
+        transcriber = request.app.state.media_jobs.transcriber
+        if transcriber is None or not transcriber.available:
+            raise PlatformUnavailableError(
+                "Subtitles need speech recognition on the backend: install requirements-media.txt", code="subtitles_unavailable")
+        if not media.has_audio:
+            raise AppError("This recording has no audio track, so it can't be subtitled", code="no_audio")
     previous = clip.status
     clip.status = transition(clip.status, ClipStatus.EXPORTING).value
     clip.error_message = None
     job = MediaJob(user_id=user.id, kind="export", media_source_id=media.id, clip_id=clip.id, status="queued",
-                   result={"previous_status": previous})
+                   result={"previous_status": previous, "subtitles_requested": options.subtitles,
+                           "language": options.language})
     db.add(job)
     await db.commit()
     request.app.state.media_jobs.submit(job.id)
@@ -93,6 +103,17 @@ async def download(clip_id: int, request: Request, svc: ClipServiceDep, user: Cu
     if not path.is_file():
         raise NotFoundError("The exported file is missing on the backend")
     return FileResponse(path, media_type="video/mp4", filename=clip.local_file_path)
+
+
+@router.get("/{clip_id}/subtitles", summary="Download the clip's subtitles (.srt)", response_class=FileResponse)
+async def download_subtitles(clip_id: int, request: Request, svc: ClipServiceDep, user: CurrentUser) -> FileResponse:
+    clip = await svc.clip(clip_id)
+    if not clip.subtitles_file_path:
+        raise NotFoundError("This clip has no subtitles; export it with subtitles first")
+    path = request.app.state.media_library.resolve_export(user.id, clip.subtitles_file_path)
+    if not path.is_file():
+        raise NotFoundError("The subtitle file is missing on the backend")
+    return FileResponse(path, media_type="application/x-subrip", filename=clip.subtitles_file_path)
 
 
 @router.patch("/{clip_id}", response_model=ClipOut, summary="Title, aspect ratio, or manual clip URL")

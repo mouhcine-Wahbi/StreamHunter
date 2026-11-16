@@ -125,6 +125,7 @@ class Clip(TimestampMixin, Base):
     platform_clip_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     platform_clip_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     local_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subtitles_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)  # .srt next to the export
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     aspect_ratio: Mapped[str | None] = mapped_column(String(8), nullable=True)

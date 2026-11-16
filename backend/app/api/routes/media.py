@@ -51,6 +51,11 @@ async def _probe_into(lib: MediaLibrary, m: MediaSource, path: Path) -> None:
     m.size_bytes = path.stat().st_size
 
 
+def _subtitles_capability(request: Request, lib: MediaLibrary) -> str:
+    transcriber = _jobs(request).transcriber
+    return "supported" if lib.available and transcriber is not None and transcriber.available else "requires_configuration"
+
+
 @router.get("/capabilities", response_model=MediaCapabilitiesOut, summary="What media processing this backend can do")
 async def capabilities(request: Request, user: CurrentUser) -> MediaCapabilitiesOut:
     lib = _lib(request)
@@ -63,7 +68,7 @@ async def capabilities(request: Request, user: CurrentUser) -> MediaCapabilities
         audio_analysis=tools,
         visual_analysis=tools,
         export=tools,
-        subtitles="not_implemented",
+        subtitles=_subtitles_capability(request, lib),
         live_tab_audio="not_implemented",
         platform_vod_download="unsupported",  # by design: only user-provided recordings
     )

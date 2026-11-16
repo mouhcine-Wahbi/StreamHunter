@@ -2,8 +2,8 @@
 
 Runs on the CPU through LiteRT (`ai-edge-litert`, an optional dependency). The model file
 (~4 MB) is downloaded once, on first use, into the models folder and checked against a fixed
-SHA-256. Audio is decoded by FFmpeg and streamed through the model one second at a time, so a
-long recording never has to fit in memory. Nothing leaves the backend machine.
+SHA-256. Audio is decoded by FFmpeg and streamed through the model in overlapping windows every
+0.5 s (a second keeps the stronger of its two), so a long recording never has to fit in memory. Nothing leaves the backend machine.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ MODEL_SHA256 = "10c95ea3eb9a7bb4cb8bddf6feb023250381008177ac162ce169694d05c317de
 MODEL_FILE = "yamnet.tflite"
 RATE = 16_000
 WINDOW = 15_600  # samples per inference (0.975 s), fixed by the model
+HOP = RATE // 2  # a new window every 0.5 s (YAMNet's own step), so short laughs aren't missed
 
 
 class SoundClassifier(Protocol):
@@ -101,25 +102,37 @@ class YamnetClassifier:
         cmd = [ffmpeg, "-hide_banner", "-nostats", "-loglevel", "error", "-i", str(path),
                "-vn", "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"]
         deadline = time.monotonic() + timeout
-        frames: list[Frame] = []
+        per_second: dict[int, dict[str, float]] = {}
+
+        def infer(window: Any, start: int) -> None:
+            interpreter.set_tensor(inp, window)
+            interpreter.invoke()
+            scores = interpreter.get_tensor(out)[0]
+            # Related classes share the probability (a laugh is "Laughter" *and* "Snicker"), so a kind's
+            # value is their sum, capped at 1. A second keeps the stronger of its two half-second windows.
+            values = {k: min(1.0, float(sum(scores[i] for i in ids))) for k, ids in groups.items() if ids}
+            slot = per_second.setdefault(start // RATE, dict.fromkeys(values, 0.0))
+            for k, v in values.items():
+                slot[k] = max(slot[k], v)
+
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # noqa: S603
         try:
             assert proc.stdout is not None
-            second = 0
+            buf = np.zeros(0, dtype=np.float32)
+            buf_start = 0  # sample index of buf[0] in the file
             while chunk := proc.stdout.read(RATE * 2):
                 if time.monotonic() > deadline:
                     raise MediaProcessingError(f"Sound classification took longer than {int(timeout)} s and was stopped")
                 samples = np.frombuffer(chunk[: len(chunk) - len(chunk) % 2], dtype=np.int16).astype(np.float32) / 32768.0
-                if len(samples) < RATE // 2:
-                    break  # a last fragment under half a second says too little
+                buf = np.concatenate([buf, samples])
+                while len(buf) >= WINDOW:
+                    infer(buf[:WINDOW], buf_start)
+                    buf, buf_start = buf[HOP:], buf_start + HOP
+            while len(buf) >= RATE // 2:  # the tail: windows with at least half a second of audio, zero-padded
                 window = np.zeros(WINDOW, dtype=np.float32)
-                window[: min(WINDOW, len(samples))] = samples[:WINDOW]
-                interpreter.set_tensor(inp, window)
-                interpreter.invoke()
-                scores = interpreter.get_tensor(out)[0]
-                frames.append((float(second), {k: round(float(max(scores[i] for i in ids)), 3)
-                                                for k, ids in groups.items() if ids}))
-                second += 1
+                window[: len(buf)] = buf[:WINDOW]
+                infer(window, buf_start)
+                buf, buf_start = buf[HOP:], buf_start + HOP
             proc.wait(timeout=10)
             if proc.returncode not in (0, None):
                 err = proc.stderr.read().decode(errors="replace").strip().splitlines() if proc.stderr else []
@@ -130,7 +143,7 @@ class YamnetClassifier:
                 with contextlib.suppress(ProcessLookupError):
                     proc.kill()
                 proc.wait()
-        return frames
+        return [(float(s), {k: round(v, 3) for k, v in per_second[s].items()}) for s in sorted(per_second)]
 
     async def classify(self, ffmpeg: str, path: Path, *, timeout: float) -> list[Frame]:
         if not self.available:

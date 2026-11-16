@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from app.domain.enums import HighlightCategory as HC
 
 # Kind of sound → the YAMNet (AudioSet) class names that make it up. A second's value for a kind
-# is the highest probability among its classes.
+# is the sum of its classes' probabilities, capped at 1: YAMNet spreads one laugh over "Laughter",
+# "Snicker", "Giggle"…, so any single class understates it (measured on real laughter recordings).
 SOUND_KINDS: dict[str, tuple[str, ...]] = {
     "laughter": ("Laughter", "Baby laughter", "Giggle", "Snicker", "Belly laugh", "Chuckle, chortle"),
     "cheering": ("Cheering", "Applause", "Whoop"),
@@ -42,7 +43,7 @@ class SoundEvent:
     start: float
     end: float
     peak_t: float
-    peak: float  # highest probability in the event (0–1)
+    peak: float  # strongest value in the event (0–1)
 
     @property
     def score(self) -> float:
@@ -94,4 +95,4 @@ def strongest(sounds: dict[str, float] | None) -> tuple[str, float] | None:
 
 
 def reason_for(kind: str, probability: float) -> str:
-    return f"{KIND_LABEL[kind]} in the audio ({round(probability * 100)}% sure)"
+    return f"{KIND_LABEL[kind]} in the audio ({round(probability * 100)}% match)"

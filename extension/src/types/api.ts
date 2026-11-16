@@ -96,7 +96,7 @@ export interface HighlightCandidate {
     audio?: number | null;
     visual?: number | null;
     context?: number | null;
-    /** Post-stream sound classification: highest probability (0–1) of each kind of sound in the window. */
+    /** Post-stream sound classification: strongest value (0–1, summed over related model classes) of each kind of sound in the window. */
     sounds?: Partial<Record<SoundKind, number>> | null;
   };
   status: CandidateStatus;

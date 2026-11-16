@@ -186,7 +186,7 @@ attach a recording you own, for example a VOD you downloaded from your own dashb
 2. Click **Analyze**. Highlights gain measured audio and visual signals, strong loud moments chat
    missed are added, and overlapping highlights are merged. With the media extras installed,
    StreamHunter also listens for **laughter, cheering and screaming**: a highlight with clear
-   laughter becomes a *funny moment* ("Laughter in the audio (80% sure)"), and laughs or cheers
+   laughter becomes a *funny moment* ("Laughter in the audio (80% match)"), and laughs or cheers
    chat missed become new highlights. The result line says what was heard.
 3. In the **Clip Library**, choose an aspect ratio and click **Export MP4**, then **Download MP4**.
    Turn on **Subtitles** first to transcribe the speech and burn captions into the video; the
@@ -240,6 +240,8 @@ new live highlights get a measured audio signal ("Stream audio 12 dB louder than
   is measured, which can't tell laughter from shouting; laughter detection runs on recordings.
 * Laughter detection hears a stream's sound as a whole: a laugh track, a game's crowd or music with
   cheering can count too. It names a moment only when it is fairly sure (45% or more).
+  It hears a laugh best when it's the main sound (the streamer laughing instead of talking); a laugh
+  quieter than game dialogue or other voices playing at the same time is often missed.
 
 ## Documentation
 

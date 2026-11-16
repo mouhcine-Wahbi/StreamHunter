@@ -89,7 +89,7 @@ async def test_laughter_names_a_chat_moment_and_lifts_audio(ctx, recording: Path
 
     [c] = [x for x in (await client.get("/api/v1/highlights?limit=100", headers=h)).json()["items"] if x["id"] == quiet]
     b = c["signal_breakdown"]
-    assert c["category"] == "funny_moment" and "Laughter in the audio (80% sure)" in c["reasons"]
+    assert c["category"] == "funny_moment" and "Laughter in the audio (80% match)" in c["reasons"]
     assert b["sounds"]["laughter"] == 0.8 and b["audio"] == 100 and b["audio_loudness"] < 20
     async with app.state.sessionmaker() as db:
         [e] = (await db.scalars(select(StreamEvent).where(StreamEvent.event_type == "laughter"))).all()
@@ -111,7 +111,7 @@ async def test_sound_only_candidate_gets_its_category(ctx, recording: Path) -> N
     # Cheering during the loud tone at 60–65 s: one moment (the loudness peak is the same one).
     r, [cheer] = await _analyze_fresh(app, client, h, recording, frames(cheering=(60, 64, 0.9)))
     assert r["candidates_created"] == 1
-    assert cheer["category"] == "exciting_moment" and cheer["reasons"][0] == "Cheering in the audio (90% sure) for 5 s"
+    assert cheer["category"] == "exciting_moment" and cheer["reasons"][0] == "Cheering in the audio (90% match) for 5 s"
     assert any(x.startswith("Audio ") for x in cheer["reasons"])  # it was also much louder than usual
     assert cheer["confidence"] == 0.95 and cheer["signal_breakdown"]["chat"] is None
 
@@ -122,7 +122,7 @@ async def test_nearby_sound_moments_are_merged(ctx, recording: Path) -> None:  #
     r, [moment] = await _analyze_fresh(app, client, h, recording, frames(laughter=(28, 32, 0.7), cheering=(60, 64, 0.9)))
     assert r["candidates_created"] == 2 and r["candidates_merged"] == 1
     assert moment["category"] == "funny_moment" and moment["origin"] == "merged"
-    assert {"Laughter in the audio (70% sure) for 5 s", "Cheering in the audio (90% sure) for 5 s"} <= set(moment["reasons"])
+    assert {"Laughter in the audio (70% match) for 5 s", "Cheering in the audio (90% match) for 5 s"} <= set(moment["reasons"])
 
 
 async def test_classifier_failure_keeps_the_rest_of_the_analysis(ctx, recording: Path) -> None:  # noqa: F811

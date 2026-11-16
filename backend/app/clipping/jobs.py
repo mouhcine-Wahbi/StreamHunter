@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.clipping import ffmpeg_processor as ff
 from app.clipping.media_access import MediaLibrary
+from app.clipping.sound_classifier import SoundClassifier
 from app.clipping.subtitles import Transcriber, cues, to_srt
 from app.clipping.vod_analysis import analyze_recording
 from app.config import Settings
@@ -41,11 +42,12 @@ def export_window(cand: HighlightCandidate, media: MediaSource) -> tuple[float, 
 
 class MediaJobRunner:
     def __init__(self, maker: async_sessionmaker[AsyncSession], library: MediaLibrary, settings: Settings,
-                 transcriber: Transcriber | None = None):
+                 transcriber: Transcriber | None = None, sound_classifier: SoundClassifier | None = None):
         self.maker = maker
         self.library = library
         self.settings = settings
         self.transcriber = transcriber
+        self.sound_classifier = sound_classifier
         self._sem = asyncio.Semaphore(settings.max_concurrent_media_jobs)
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -100,7 +102,8 @@ class MediaJobRunner:
         user = await db.get(User, job.user_id)
         settings = await SettingsService(db, user).get()  # type: ignore[arg-type]
         return await analyze_recording(db, media, path, ffmpeg=self.library.ffmpeg,
-                                       timeout=self.settings.media_job_timeout_seconds, settings=settings)
+                                       timeout=self.settings.media_job_timeout_seconds, settings=settings,
+                                       classifier=self.sound_classifier if self.settings.sound_events_enabled else None)
 
     async def _export(self, db: AsyncSession, job: MediaJob) -> dict[str, Any]:
         media, path = await self._media(db, job)

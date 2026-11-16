@@ -91,6 +91,8 @@ Implemented in Phase 7:
 * FFmpeg/ffprobe run as argument lists (no shell) with timeouts and bounded concurrency. Exports are written
   under a temporary name and then moved into place. Error messages show file names only, never server paths.
 * Exported files are downloadable only by their owner.
+* Speech-to-text and sound classification run locally. Model files are downloaded only from fixed
+  HTTPS URLs; the sound model is checked against a pinned SHA-256 before it is used.
 
 Planned:
 

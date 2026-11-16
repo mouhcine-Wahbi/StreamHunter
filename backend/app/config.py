@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # tiny | base | small | medium | large-v3 — bigger is more accurate but slower. Downloaded once on first use.
     whisper_model: str = "base"
     whisper_model_dir: str | None = None  # default: <media_root>/models
+    # Laughter / cheering / screaming in recordings: YAMNet through ai-edge-litert (optional, see
+    # requirements-media.txt). The ~4 MB model is downloaded once into the same models folder.
+    sound_events_enabled: bool = True
 
     # --- Platforms (credentials only ever live here, never in the extension) ---
     twitch_client_id: str | None = None

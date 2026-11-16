@@ -47,6 +47,7 @@ async def ctx(tmp_path) -> AsyncIterator[tuple]:  # type: ignore[type-arg]
     settings = Settings(_env_file=None, app_env="test", scheduler_enabled=False, media_root=str(tmp_path / "media"),
                         database_url=f"sqlite+aiosqlite:///{tmp_path / 'm.db'}", max_upload_mb=10)
     app = create_app(settings, registry=PlatformRegistry({Platform.TWITCH: FakePlatform(Platform.TWITCH), Platform.KICK: FakePlatform(Platform.KICK)}))
+    app.state.media_jobs.sound_classifier = None  # tests never download the sound model (see test_sound_events.py)
     async with app.state.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:

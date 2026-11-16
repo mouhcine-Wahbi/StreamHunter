@@ -34,6 +34,7 @@ it into a clip. Nothing is ever published without your approval.
 | Post-stream analysis of your own recordings: audio peaks, scene changes, combined scoring, merging | ✅ (needs FFmpeg) |
 | MP4 export: 9:16 / 1:1 / 16:9, loudness-normalized | ✅ (needs FFmpeg + your recording) |
 | Subtitles: local speech-to-text, burned into the MP4 + downloadable .srt | ✅ (needs the optional media extras) |
+| Laughter, cheering and screaming in your recordings (local sound classifier) name and score highlights | ✅ (needs the optional media extras) |
 | Live tab audio: the stream's loudness from your open Twitch/Kick tab joins live highlight detection | ✅ (start it from the popup) |
 
 ## Technology
@@ -183,12 +184,15 @@ attach a recording you own, for example a VOD you downloaded from your own dashb
    rights confirmation. If the file doesn't start at the beginning of the stream, enter the stream
    second where it starts.
 2. Click **Analyze**. Highlights gain measured audio and visual signals, strong loud moments chat
-   missed are added, and overlapping highlights are merged.
+   missed are added, and overlapping highlights are merged. With the media extras installed,
+   StreamHunter also listens for **laughter, cheering and screaming**: a highlight with clear
+   laughter becomes a *funny moment* ("Laughter in the audio (80% sure)"), and laughs or cheers
+   chat missed become new highlights. The result line says what was heard.
 3. In the **Clip Library**, choose an aspect ratio and click **Export MP4**, then **Download MP4**.
    Turn on **Subtitles** first to transcribe the speech and burn captions into the video; the
    captions are also available as **Download .srt**.
 
-### Optional media extras (FFmpeg and subtitles)
+### Optional media extras (FFmpeg, subtitles, laughter detection)
 
 From `backend/`:
 
@@ -201,6 +205,12 @@ This adds a bundled FFmpeg (used automatically when `ffmpeg` isn't on your PATH)
 on your machine; audio is never sent anywhere. The first subtitled export downloads the speech
 model once (`WHISPER_MODEL`, default `base`, about 145 MB) into `media/models`. Larger models
 (`small`, `medium`, `large-v3`) are more accurate but slower. The language is detected automatically.
+
+It also adds [LiteRT](https://pypi.org/project/ai-edge-litert/) to run Google's
+[YAMNet](https://github.com/tensorflow/models/tree/master/research/audioset/yamnet) sound classifier (Apache-2.0) for laughter,
+cheering and screaming. It runs on your machine too; the first analysis downloads the model once
+(about 4 MB, checked against a fixed SHA-256) into `media/models`. Turn it off with
+`SOUND_EVENTS_ENABLED=false`. Without it, analysis still works on loudness and scene changes.
 
 For very large files, copy them into the media folder shown in the panel and register them through the API (`POST /api/v1/media/register`).
 
@@ -226,8 +236,10 @@ new live highlights get a measured audio signal ("Stream audio 12 dB louder than
 * Kick has **no official clip or VOD API**. Kick clips need a manual step.
 * A Twitch clip is a link on Twitch, not a downloadable video file.
 * Stream offsets are approximate (they come from the platform's `started_at`).
-* Tab audio follows what you see, a few seconds behind the broadcast (like chat). Loudness can't tell
-  laughter from shouting; it is one signal next to chat.
+* Tab audio follows what you see, a few seconds behind the broadcast (like chat). Live, only loudness
+  is measured, which can't tell laughter from shouting; laughter detection runs on recordings.
+* Laughter detection hears a stream's sound as a whole: a laugh track, a game's crowd or music with
+  cheering can count too. It names a moment only when it is fairly sure (45% or more).
 
 ## Documentation
 

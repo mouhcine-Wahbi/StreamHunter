@@ -91,9 +91,18 @@ export interface HighlightCandidate {
   confidence: number;
   category: string;
   reasons: string[];
-  signal_breakdown?: { chat?: number | null; audio?: number | null; visual?: number | null; context?: number | null };
+  signal_breakdown?: {
+    chat?: number | null;
+    audio?: number | null;
+    visual?: number | null;
+    context?: number | null;
+    /** Post-stream sound classification: highest probability (0–1) of each kind of sound in the window. */
+    sounds?: Partial<Record<SoundKind, number>> | null;
+  };
   status: CandidateStatus;
 }
+
+export type SoundKind = "laughter" | "cheering" | "screaming";
 
 export interface Clip {
   id: number;
@@ -152,5 +161,7 @@ export interface MediaCapabilities {
   supported_extensions: string[];
   /** "supported" when the backend has FFmpeg and local speech recognition. */
   subtitles: string;
+  /** "supported" when the backend can hear laughter, cheering and screaming in recordings. */
+  sound_events: string;
   live_tab_audio: string;
 }

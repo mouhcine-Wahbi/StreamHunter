@@ -146,7 +146,7 @@ relative to the stream's baseline and can't create a candidate on their own.
 | Live stack check | ✅ | Built extension + uvicorn: Twitch approve → create refused with "Connect your Twitch account…". Kick approve → manual instructions → pasted clip link → export refused honestly → publish after confirmation |
 
 **Found and fixed:** the aspect-ratio selector stretched across the whole clip card; it is now fixed width.
-## Phase 7 — VOD & advanced AI 🟡 (core, subtitles and live tab audio delivered; ML classification not started)
+## Phase 7 — VOD & advanced AI 🟡 (core, subtitles, live tab audio and laughter detection delivered; gameplay/visual recognition not started)
 
 | Item | Status | Notes |
 |---|---|---|
@@ -162,9 +162,10 @@ relative to the stream's baseline and can't create a candidate on their own.
 | Subtitles (speech-to-text) | ✅ | faster-whisper, local CPU (optional `requirements-media.txt`). Burned into the export in the same encode, plus a downloadable .srt. Short lines for vertical video. Language detected or chosen |
 | Bundled FFmpeg fallback | ✅ | `static-ffmpeg` (optional) is used automatically when `ffmpeg` isn't on PATH |
 | Live tab audio (`chrome.tabCapture` + offscreen document) | ✅ | Started from the popup on the stream tab (Chrome needs that click). One RMS loudness value per second → `POST /monitoring/audio` → live highlights get a measured audio signal. Permissions `activeTab`, `tabCapture`, `offscreen` |
-| Laughter / excitement classification, gameplay or visual event recognition | ⏳ | Would need ML models; loudness and scene cuts are the honest baseline |
-| Tests | ✅ | Backend 120 (incl. real-FFmpeg media and subtitle tests; the speech model is faked in tests); extension 92 |
-| Live stack check | ✅ | Built extension + uvicorn: uploaded an MP4 via the file picker → FFmpeg analysis (1 audio peak, 2 scene cuts, 2 highlights enriched) → approve → export → downloaded 1080×1920 H.264/AAC, 25.0 s. Subtitles (2026-11-16): real `base` model on a spoken test recording → accurate 2-cue .srt in 3.9 s, captions visible in the 1080×1920 export; Clip Library switch → export → Download .srt in the browser preview |
+| Laughter / cheering / screaming in recordings | ✅ | YAMNet (AudioSet) via LiteRT, local CPU (optional `requirements-media.txt`); model fetched once and SHA-256 checked. One inference per second, audio streamed from FFmpeg. Audio signal = max(loudness, sound); a clear sound (≥ 45%) names unnamed moments (laughter → funny, cheering → exciting, screaming → unexpected reaction); sound-only highlights; `laughter`/`cheering`/`screaming` stream events. A classifier failure doesn't fail the analysis |
+| Gameplay or visual event recognition, live (in-browser) laughter detection | ⏳ | Would need more models; scene cuts and live loudness are the baseline |
+| Tests | ✅ | Backend 129 + 2 that use the real sound model when `SOUND_MODEL_DIR` points to it (incl. real-FFmpeg media and subtitle tests; speech and sound models are faked otherwise); extension 94 |
+| Live stack check | ✅ | Built extension + uvicorn: uploaded an MP4 via the file picker → FFmpeg analysis (1 audio peak, 2 scene cuts, 2 highlights enriched) → approve → export → downloaded 1080×1920 H.264/AAC, 25.0 s. Subtitles (2026-11-16): real `base` model on a spoken test recording → accurate 2-cue .srt in 3.9 s, captions visible in the 1080×1920 export; Clip Library switch → export → Download .srt in the browser preview. Sound model (2026-11-17): speech → Speech 0.99, sine → Sine wave 0.92, a synthetic "ha ha" voice → no laughter (not a false positive). Not yet checked on a real laughing streamer |
 
 **Found and fixed during this phase:**
 * Windows outside the recording got a visual score of 0 (lowering their score) instead of "not measured".

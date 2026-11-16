@@ -1,9 +1,18 @@
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
-import type { CandidateStatus, HighlightCandidate } from "@/types/api";
+import type { CandidateStatus, HighlightCandidate, SoundKind } from "@/types/api";
 import { formatOffset, formatRelative } from "@/utils/format";
 import { cn } from "@/utils/cn";
 import { HighlightActions } from "./HighlightActions";
+
+/** Same bar as the backend (0.45) for naming a moment by its sound. */
+const HEARD_AT = 0.45;
+
+/** "laughter 80%" for the clearest laughter / cheering / screaming in the window, if any. */
+export function heardLabel(sounds: Partial<Record<SoundKind, number>> | null | undefined): string | null {
+  const top = Object.entries(sounds ?? {}).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0];
+  return top && (top[1] ?? 0) >= HEARD_AT ? `${top[0]} ${Math.round((top[1] ?? 0) * 100)}%` : null;
+}
 
 export const CANDIDATE_STATUS_META: Record<CandidateStatus, { label: string; tone: BadgeTone }> = {
   detected: { label: "Detected", tone: "accent" },
@@ -67,6 +76,7 @@ export function HighlightRow({ h, compact = false, onChanged }: { h: HighlightCa
             {h.signal_breakdown?.chat != null && ` chat ${Math.round(h.signal_breakdown.chat)}`}
             {h.signal_breakdown?.audio != null && ` · audio ${Math.round(h.signal_breakdown.audio)}`}
             {h.signal_breakdown?.visual != null && ` · visual ${Math.round(h.signal_breakdown.visual)}`}
+            {heardLabel(h.signal_breakdown?.sounds) && ` · heard ${heardLabel(h.signal_breakdown?.sounds)}`}
             {h.signal_breakdown && h.signal_breakdown.audio == null && " · audio and video not analysed yet"}
             {h.start_offset_sec !== null && " · offsets approximate"}
           </div>

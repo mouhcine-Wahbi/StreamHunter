@@ -56,6 +56,12 @@ def _subtitles_capability(request: Request, lib: MediaLibrary) -> str:
     return "supported" if lib.available and transcriber is not None and transcriber.available else "requires_configuration"
 
 
+def _sound_capability(request: Request, lib: MediaLibrary) -> str:
+    classifier = _jobs(request).sound_classifier
+    enabled = request.app.state.settings.sound_events_enabled
+    return "supported" if lib.available and enabled and classifier is not None and classifier.available else "requires_configuration"
+
+
 @router.get("/capabilities", response_model=MediaCapabilitiesOut, summary="What media processing this backend can do")
 async def capabilities(request: Request, user: CurrentUser) -> MediaCapabilitiesOut:
     lib = _lib(request)
@@ -69,6 +75,7 @@ async def capabilities(request: Request, user: CurrentUser) -> MediaCapabilities
         visual_analysis=tools,
         export=tools,
         subtitles=_subtitles_capability(request, lib),
+        sound_events=_sound_capability(request, lib),
         live_tab_audio="supported",  # the extension measures; POST /api/v1/monitoring/audio receives loudness
         platform_vod_download="unsupported",  # by design: only user-provided recordings
     )

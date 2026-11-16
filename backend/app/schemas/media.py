@@ -17,6 +17,7 @@ class MediaCapabilitiesOut(Schema):
     visual_analysis: str
     export: str
     subtitles: str
+    sound_events: str  # laughter / cheering / screaming in recordings
     live_tab_audio: str
     platform_vod_download: str
 

@@ -29,6 +29,24 @@ const RESULT_LABELS: Record<string, string> = {
   candidates_merged: "merged",
 };
 
+const SOUND_LABELS: Record<string, string> = { laughter: "laughter", cheering: "cheering", screaming: "screaming" };
+
+/** One line about laughter / cheering / screaming found in a finished analysis (or why it was skipped). */
+export function soundSummary(result: Record<string, unknown>): { text: string; warn: boolean } | null {
+  const status = result.sound_classification;
+  if (typeof status !== "string") return null;
+  if (status === "done") {
+    const counts = (result.sound_events ?? {}) as Record<string, number>;
+    const heard = Object.entries(SOUND_LABELS)
+      .filter(([k]) => (counts[k] ?? 0) > 0)
+      .map(([k, label]) => `${counts[k]} ${label}`);
+    return { text: heard.length ? `Heard: ${heard.join(" · ")}` : "No laughter, cheering or screaming heard", warn: false };
+  }
+  if (status.startsWith("failed: ")) return { text: `Sound detection skipped: ${status.slice(8)}`, warn: true };
+  if (status === "not_installed") return { text: "Laughter detection isn't installed on the backend", warn: false };
+  return null;
+}
+
 /** Post-stream tools for one session: platform VOD link, user-provided recording, analysis. */
 export function SessionMedia({ session, onVodFound }: { session: MonitoringSession; onVodFound: () => void }) {
   const client = useApiClient();
@@ -122,6 +140,11 @@ export function SessionMedia({ session, onVodFound }: { session: MonitoringSessi
                 .join(" · ")}
             </span>
           )}
+          {job.status === "succeeded" &&
+            (() => {
+              const s = soundSummary(job.result);
+              return s && <p className={`mt-1 ${s.warn ? "text-warn" : "text-fg-muted"}`}>{s.text}</p>;
+            })()}
           {job.error_message && <span className="ml-2 text-danger">{job.error_message}</span>}
         </div>
       )}

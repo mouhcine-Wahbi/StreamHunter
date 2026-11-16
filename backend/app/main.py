@@ -23,6 +23,7 @@ from app.integrations.registry import PlatformRegistry
 from app.logging_config import configure_logging
 from app.clipping.jobs import MediaJobRunner
 from app.clipping.media_access import MediaLibrary, find_tool
+from app.clipping.sound_classifier import YamnetClassifier
 from app.clipping.subtitles import WhisperTranscriber
 from app.clipping.worker import ClipWorker
 from app.monitoring.chat_manager import ChatManager
@@ -83,9 +84,10 @@ def create_app(settings: Settings | None = None, registry: PlatformRegistry | No
     app.state.chat.clip_worker = app.state.clip_worker
     app.state.media_library = MediaLibrary(settings.media_root, ffmpeg=find_tool(settings.ffmpeg_path, "ffmpeg"),
                                            ffprobe=find_tool(settings.ffprobe_path, "ffprobe"))
-    transcriber = WhisperTranscriber(settings.whisper_model,
-                                     settings.whisper_model_dir or Path(settings.media_root) / "models")
-    app.state.media_jobs = MediaJobRunner(app.state.sessionmaker, app.state.media_library, settings, transcriber)
+    models_dir = settings.whisper_model_dir or Path(settings.media_root) / "models"
+    transcriber = WhisperTranscriber(settings.whisper_model, models_dir)
+    app.state.media_jobs = MediaJobRunner(app.state.sessionmaker, app.state.media_library, settings, transcriber,
+                                          YamnetClassifier(models_dir))
     app.state.kick_verifier = None  # created on first webhook (needs Kick credentials)
 
     app.add_middleware(

@@ -218,6 +218,10 @@ async def _user_session(app, email: str, *, sensitivity: str, live_since: dateti
 async def test_kick_webhook_to_candidates_per_user_sensitivity(stack) -> None:  # type: ignore[no-untyped-def]
     app, client, kk, key = stack
     sim = ChatSim(platform=Platform.KICK)
+    # The signed webhook below is stamped with the real clock. Start the simulated chat after it
+    # (else every message is "late" and lands in the webhook's bucket) and beyond the 5-min baseline
+    # window (else that lone message looks like quiet history). Minute-aligned like T0.
+    sim.now = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=10)
     live_since = sim.now - timedelta(minutes=30)
     strict_user, strict_sess = await _user_session(app, "strict@example.com", sensitivity="low", live_since=live_since)
     eager_user, eager_sess = await _user_session(app, "eager@example.com", sensitivity="high", live_since=live_since)

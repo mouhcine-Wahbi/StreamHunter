@@ -183,8 +183,8 @@ export function SettingsPage() {
 
         <Section
           id="connections"
-          title="Platform connections"
-          description="Twitch and Kick accounts are connected through the backend with OAuth. What each platform allows is reported by the backend."
+          title="Platforms"
+          description="StreamHunter talks to Twitch and Kick directly from this browser, with your own free developer app for each platform."
         >
           <PlatformConnections />
         </Section>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiClient, ApiError } from "@/services/api-client";
+import { LocalApi } from "@/local/local-api";
 import { getAuthToken, onStorageKeyChange, STORAGE_KEYS } from "@/store/storage";
 import { useSettings } from "./useSettings";
 
@@ -15,7 +16,8 @@ export function useApiClient(): ApiClient {
   const { settings } = useSettings();
   const authVersion = useAuthVersion();
   return useMemo(
-    () => new ApiClient({ baseUrl: settings.backendUrl, getToken: getAuthToken }),
+    // Local-first: answered inside the extension; paths not migrated yet still reach the old backend.
+    (): ApiClient => new LocalApi({ baseUrl: settings.backendUrl, getToken: getAuthToken }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [settings.backendUrl, authVersion],
   );

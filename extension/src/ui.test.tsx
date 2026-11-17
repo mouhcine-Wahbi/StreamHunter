@@ -7,6 +7,11 @@ import { createMonitoringManager } from "@/background/monitoring-manager";
 import { handleMessage } from "@/background/message-handler";
 import { getSettings } from "@/store/storage";
 import { json, mockFetch } from "@/test/http";
+import { configurePlatforms, fakePlatforms } from "@/test/platforms";
+import { getCredentials, setCredentials } from "@/platforms/credentials";
+import { LocalApi } from "@/local/local-api";
+import { db } from "@/local/db";
+import type { Streamer } from "@/types/api";
 
 /** Wires runtime messages to the real handler, as the service worker would. */
 function installWorker() {
@@ -37,7 +42,8 @@ describe("popup", () => {
     installWorker();
     render(<Popup />);
     expect(await screen.findByText("Backend not reachable")).toBeInTheDocument();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    // The live count comes from the local monitoring list (empty here), not from the backend.
+    expect(await screen.findByText("0")).toBeInTheDocument();
   });
 
   it("opens the full workspace", async () => {
@@ -174,32 +180,25 @@ describe("full page app", () => {
     expect((await getSettings()).backendUrl).toBe("http://localhost:8000");
   });
 
-  it("shows real search results from the backend", async () => {
-    mockFetch((url) =>
-      url.includes("/api/v1/streamers/search?platform=kick&username=somechannel")
-        ? json([
-            {
-              platform: "kick",
-              platform_user_id: "42",
-              username: "somechannel",
-              display_name: "SomeChannel",
-              profile_image_url: null,
-              is_live: true,
-              current_title: "Late night",
-              current_category: "Just Chatting",
-            },
-          ])
-        : null,
-    );
+  it("shows real search results from Kick, with live discovery before searching", async () => {
+    await configurePlatforms();
+    fakePlatforms({
+      kick: [{ id: "42", login: "somechannel", live: true, viewers: 1234, title: "Late night", game: "Just Chatting" }],
+      twitch: [{ id: "1", login: "toplive", name: "TopLive", live: true, viewers: 50_000, game: "Chess" }],
+    });
     installWorker();
     window.location.hash = "/discover";
     render(<App />);
+    expect(await screen.findByText("TopLive")).toBeInTheDocument(); // live now on Twitch
+    expect(screen.getByText(/50,000 viewers/)).toBeInTheDocument();
     await userEvent.click(await screen.findByRole("radio", { name: "Kick" }));
     await userEvent.type(screen.getByLabelText("Channel name"), "somechannel");
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
-    expect(await screen.findByText("SomeChannel")).toBeInTheDocument();
+    expect(await screen.findByText("somechannel")).toBeInTheDocument();
     expect(screen.getByText("LIVE")).toBeInTheDocument();
-    expect(screen.getByText(/Just Chatting/)).toBeInTheDocument();
+    expect(screen.getByText(/Just Chatting · 1,234 viewers/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Open somechannel's stream" }));
+    expect(fakeChrome.internals.createdTabs).toEqual(["https://kick.com/somechannel"]);
   });
 });
 
@@ -259,101 +258,73 @@ describe("account (Phase 2)", () => {
   it("asks to sign in when the backend answers 401", async () => {
     mockFetch(() => json({ error: { code: "not_authenticated", message: "Authentication required" } }, 401));
     installWorker();
-    window.location.hash = "/streamers";
+    window.location.hash = "/clips"; // clips still live on the old backend until step 6 of the migration
     render(<App />);
     expect(await screen.findByText("Sign-in required")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
   });
 
-  it("treats 'already in watchlist' as added and shows platform-not-configured clearly", async () => {
-    mockFetch((url, init) => {
-      if (url.includes("/streamers/search?platform=twitch")) {
-        return json([{ platform: "twitch", platform_user_id: "1", username: "alpha", display_name: "Alpha", profile_image_url: null, is_live: false, current_title: null, current_category: null }]);
-      }
-      if (url.includes("/streamers/search?platform=kick")) {
-        return json({ error: { code: "platform_not_configured", message: "Kick is not configured on the backend (KICK_CLIENT_ID / KICK_CLIENT_SECRET)." } }, 503);
-      }
-      if (url.endsWith("/api/v1/streamers") && init?.method === "POST") {
-        return json({ error: { code: "already_in_watchlist", message: "already", details: { streamer_id: 1 } } }, 409);
-      }
-      return json({ detail: "Not Found" }, 404);
-    });
+  it("treats 'already on the list' as added and shows platform-not-configured clearly", async () => {
+    await setCredentials("twitch", { clientId: "tw-client", clientSecret: "tw-secret" });
+    fakePlatforms({ twitch: [{ id: "1", login: "alpha", name: "Alpha" }] });
+    await new LocalApi({ baseUrl: "http://localhost:8000" }).post("/api/v1/streamers", { platform: "twitch", username: "alpha" });
     installWorker();
     window.location.hash = "/discover";
     render(<App />);
     await userEvent.type(await screen.findByLabelText("Channel name"), "alpha");
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
     await userEvent.click(await screen.findByRole("button", { name: "Add" }));
-    expect(await screen.findByRole("button", { name: "In watchlist" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Monitoring" })).toBeDisabled();
 
     await userEvent.click(screen.getByRole("radio", { name: "Kick" }));
+    await userEvent.type(screen.getByLabelText("Channel name"), "x");
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(await screen.findByText("Not available yet")).toBeInTheDocument();
-    expect(screen.getByText(/Kick is not configured on the backend/)).toBeInTheDocument();
+    expect(screen.getByText(/Add your Kick app's client ID and secret in Settings/)).toBeInTheDocument();
   });
 });
 
-describe("platform connections & status (Phase 3)", () => {
-  const caps = (configured: boolean) => [
-    { platform: "twitch", configured, connection_status: "not_connected", capabilities: { stream_lookup: configured ? "supported" : "requires_configuration" }, notes: [] },
-  ];
-
-  it("opens the platform consent page in a new tab", async () => {
-    mockFetch((url) => {
-      if (url.endsWith("/api/v1/platforms/capabilities")) return json(caps(true));
-      if (url.endsWith("/api/v1/auth/twitch/status")) return json({ platform: "twitch", configured: true, connection_status: "not_connected", platform_username: null, scopes: [], last_error: null });
-      if (url.endsWith("/api/v1/auth/twitch/authorize")) return json({ authorization_url: "https://id.twitch.tv/oauth2/authorize?client_id=x&state=s", expires_at: "2026-11-15T07:00:00Z" });
-      return json({ detail: "Not Found" }, 404);
-    });
+describe("platforms & status (local-first)", () => {
+  it("saves the editor's own app credentials, tests them, and never shows the secret again", async () => {
+    fakePlatforms({ twitch: [{ id: "1", login: "toplive", live: true }] });
     installWorker();
     window.location.hash = "/settings";
     render(<App />);
-    await userEvent.click(await screen.findByRole("button", { name: "Connect account" }));
-    await waitFor(() => expect(fakeChrome.internals.createdTabs).toEqual(["https://id.twitch.tv/oauth2/authorize?client_id=x&state=s"]));
+    expect(await screen.findAllByText("not configured")).toHaveLength(2);
+    await userEvent.type(screen.getByLabelText("twitch client ID"), "my-id");
+    await userEvent.type(screen.getByLabelText("twitch client secret"), "my-secret");
+    await userEvent.click(screen.getAllByRole("button", { name: "Save and test" })[0]!);
+    expect(await screen.findByText(/Saved and working: Twitch answered/)).toBeInTheDocument();
+    expect(await getCredentials()).toMatchObject({ twitch: { clientId: "my-id", clientSecret: "my-secret" } });
+    expect(screen.getByLabelText("twitch client secret")).toHaveValue("");
+    expect(await screen.findByText("app credentials saved")).toBeInTheDocument();
   });
 
-  it("refuses to open an unexpected authorization host", async () => {
-    mockFetch((url) => {
-      if (url.endsWith("/api/v1/platforms/capabilities")) return json(caps(true));
-      if (url.endsWith("/status")) return json({ platform: "twitch", configured: true, connection_status: "not_connected", platform_username: null, scopes: [], last_error: null });
-      if (url.endsWith("/authorize")) return json({ authorization_url: "https://evil.example/phish", expires_at: "x" });
-      return json({ detail: "Not Found" }, 404);
-    });
+  it("says when the platform rejects the credentials", async () => {
+    const { fetch } = fakePlatforms({});
+    fetch.mockImplementation(async () => json({ status: 403, message: "invalid client secret" }, 403));
     installWorker();
     window.location.hash = "/settings";
     render(<App />);
-    await userEvent.click(await screen.findByRole("button", { name: "Connect account" }));
-    expect(await screen.findByText("Unexpected authorization URL")).toBeInTheDocument();
-    expect(fakeChrome.internals.createdTabs).toEqual([]);
+    await userEvent.type(await screen.findByLabelText("kick client ID"), "id");
+    await userEvent.type(screen.getByLabelText("kick client secret"), "wrong");
+    await userEvent.click(screen.getAllByRole("button", { name: "Save and test" })[1]!);
+    expect(await screen.findByText(/Kick rejected the client ID or secret/)).toBeInTheDocument();
   });
 
-  it("shows the connected account and disables connect when the backend is not configured", async () => {
-    mockFetch((url) => {
-      if (url.endsWith("/api/v1/platforms/capabilities")) return json(caps(false));
-      if (url.endsWith("/status")) return json({ platform: "twitch", configured: false, connection_status: "not_connected", platform_username: null, scopes: [], last_error: null });
-      return json({ detail: "Not Found" }, 404);
-    });
-    installWorker();
-    window.location.hash = "/settings";
-    render(<App />);
-    expect(await screen.findByRole("button", { name: "Connect account" })).toBeDisabled();
-    expect(screen.getByText("not configured")).toBeInTheDocument();
-  });
-
-  it("refreshes watchlist status and reports platform problems", async () => {
-    const page = { items: [], total: 0, limit: 100, offset: 0 };
-    mockFetch((url, init) => {
-      if (url.endsWith("/api/v1/streams/refresh") && init?.method === "POST")
-        return json({ checked: 3, live: 1, skipped_recent: 0, unavailable: { kick: "Kick is not configured on the backend." } });
-      if (url.includes("/api/v1/streamers")) return json(page);
-      return json({ detail: "Not Found" }, 404);
-    });
+  it("refreshes the monitoring list and reports platform problems", async () => {
+    await setCredentials("twitch", { clientId: "tw-client", clientSecret: "tw-secret" });
+    fakePlatforms({ twitch: [{ id: "1", login: "alpha", live: true, viewers: 10 }] });
+    await new LocalApi({ baseUrl: "http://localhost:8000" }).post("/api/v1/streamers", { platform: "twitch", username: "alpha" });
+    await db.put<Partial<Streamer>>("streamers", { platform: "kick", platform_user_id: "9", username: "kk", display_name: "kk", profile_image_url: null, is_live: null,
+      current_title: null, current_category: null, viewer_count: null, stream_started_at: null, status_checked_at: null, monitoring_enabled: true,
+      is_favorite: false, updated_at: "2026-11-17T00:00:00Z" });
     installWorker();
     window.location.hash = "/streamers";
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: "Refresh status" }));
-    expect(await screen.findByText(/Checked 3, 1 live\. kick: Kick is not configured/)).toBeInTheDocument();
+    expect(await screen.findByText(/Checked 1, 1 live\. kick: Add your Kick app's client ID/)).toBeInTheDocument();
   });
 });
 

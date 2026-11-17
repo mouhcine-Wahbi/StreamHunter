@@ -1,15 +1,17 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link2, Plug, Unplug } from "lucide-react";
 import { ApiStateView } from "@/components/ApiStateView";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Field";
+import { getCredentials, setCredentials, type PlatformCredentials } from "@/platforms/credentials";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useAction } from "@/hooks/useAction";
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
 import type { Platform } from "@/types/api";
 
-/** Capability value as reported by the backend adapter (never computed in the UI). */
+/** Capability value as reported by the platform layer (never computed in the UI). */
 type CapabilityValue = boolean | string;
 
 interface PlatformCapabilities {
@@ -18,15 +20,6 @@ interface PlatformCapabilities {
   connection_status: string;
   capabilities: Record<string, CapabilityValue>;
   notes?: string[];
-}
-
-interface ConnectionStatus {
-  platform: Platform;
-  configured: boolean;
-  connection_status: "not_connected" | "connected" | "expired" | "revoked" | "error";
-  platform_username: string | null;
-  scopes: string[];
-  last_error: string | null;
 }
 
 function tone(v: CapabilityValue): BadgeTone {
@@ -41,82 +34,78 @@ function label(v: CapabilityValue): string {
   return v.replace(/_/g, " ");
 }
 
-const STATUS_TONE: Record<ConnectionStatus["connection_status"], BadgeTone> = {
-  connected: "live",
-  not_connected: "neutral",
-  expired: "warn",
-  revoked: "warn",
-  error: "danger",
+const APP_HELP: Record<Platform, { url: string; label: string; redirect: string }> = {
+  twitch: { url: "https://dev.twitch.tv/console/apps", label: "dev.twitch.tv/console", redirect: "OAuth redirect URL: any (e.g. http://localhost)" },
+  kick: { url: "https://kick.com/settings/developer", label: "kick.com/settings/developer", redirect: "Redirect URL: any (e.g. http://localhost)" },
 };
 
-/** Refetch when the user comes back from the platform's consent tab. */
-function useRefetchOnFocus(reload: () => void) {
-  useEffect(() => {
-    const onFocus = () => document.visibilityState === "visible" && reload();
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onFocus);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onFocus);
-    };
-  }, [reload]);
-}
-
-function ConnectionControls({ platform, configured, onChanged }: { platform: Platform; configured: boolean; onChanged: () => void }) {
+/** The editor's own developer-app credentials for one platform (kept on this computer only). */
+function CredentialsForm({ platform, onChanged }: { platform: Platform; onChanged: () => void }) {
   const client = useApiClient();
-  const status = useApiQuery<ConnectionStatus>(`/api/v1/auth/${platform}/status`);
-  const reloadBoth = () => {
-    status.reload();
+  const [creds, setCreds] = useState<PlatformCredentials | null>(null);
+  const [clientId, setClientId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    void getCredentials().then((c) => {
+      setCreds(c);
+      setClientId(c[platform]?.clientId ?? "");
+    });
+  }, [platform]);
+  const saved = creds?.[platform] ?? null;
+
+  const save = useAction(async () => {
+    setNotice(null);
+    if (!clientId.trim() || !secret.trim()) throw new Error("Enter both the client ID and the client secret.");
+    setCreds(await setCredentials(platform, { clientId, clientSecret: secret }));
+    setSecret("");
+    // Prove it works with one cheap call: the most-watched live channel.
+    const live = await client.get<unknown[]>(`/api/v1/discover/live?platform=${platform}&limit=1`);
+    setNotice(`Saved and working: ${platform === "twitch" ? "Twitch" : "Kick"} answered (${live.length} live channel checked).`);
     onChanged();
-  };
-  useRefetchOnFocus(status.reload);
-
-  const connect = useAction(async () => {
-    const { authorization_url } = await client.get<{ authorization_url: string }>(`/api/v1/auth/${platform}/authorize`);
-    // Only ever open the platform's own consent page.
-    const host = new URL(authorization_url).host;
-    if (!["id.twitch.tv", "id.kick.com"].includes(host)) throw new Error("Unexpected authorization URL");
-    await chrome.tabs.create({ url: authorization_url });
   });
-  const disconnect = useAction(async () => {
-    await client.post(`/api/v1/auth/${platform}/disconnect`);
-    reloadBoth();
+  const remove = useAction(async () => {
+    setCreds(await setCredentials(platform, null));
+    setClientId("");
+    setSecret("");
+    setNotice("Removed from this computer.");
+    onChanged();
   });
 
-  const s = status.data;
-  const connected = s?.connection_status === "connected";
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink-700 pt-3">
-      {s && (
-        <Badge tone={STATUS_TONE[s.connection_status]}>
-          {connected && s.platform_username ? `Connected as ${s.platform_username}` : s.connection_status.replace(/_/g, " ")}
-        </Badge>
-      )}
-      <div className="ml-auto flex gap-2">
-        {connected ? (
-          <Button size="sm" variant="ghost" loading={disconnect.pending} icon={<Unplug className="size-3.5" />} onClick={() => void disconnect.run()}>
-            Disconnect
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={!configured}
-            loading={connect.pending}
-            icon={<Plug className="size-3.5" />}
-            onClick={() => void connect.run()}
-            title={configured ? undefined : "The backend has no credentials for this platform"}
-          >
-            {s?.connection_status === "expired" || s?.connection_status === "error" ? "Reconnect" : "Connect account"}
+    <div className="mt-4 space-y-2 border-t border-ink-700 pt-3 text-xs">
+      <p className="text-fg-muted">
+        Your own {platform === "twitch" ? "Twitch" : "Kick"} app, created for free at{" "}
+        <a className="text-accent underline" href={APP_HELP[platform].url} target="_blank" rel="noreferrer">
+          {APP_HELP[platform].label}
+        </a>{" "}
+        ({APP_HELP[platform].redirect}). Stored only in this browser and sent only to {platform === "twitch" ? "Twitch" : "Kick"}.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Input aria-label={`${platform} client ID`} placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" />
+        <Input
+          aria-label={`${platform} client secret`}
+          placeholder={saved ? "Client secret (saved; enter again to change)" : "Client secret"}
+          type="password"
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          autoComplete="off"
+        />
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" variant="primary" loading={save.pending} icon={<Plug className="size-3.5" />} onClick={() => void save.run()}>
+          {saved ? "Update and test" : "Save and test"}
+        </Button>
+        {saved && (
+          <Button size="sm" variant="ghost" loading={remove.pending} icon={<Unplug className="size-3.5" />} onClick={() => void remove.run()}>
+            Remove
           </Button>
         )}
       </div>
-      {(connect.error || disconnect.error || s?.last_error) && (
-        <p className="w-full text-xs text-warn">{connect.error ?? disconnect.error ?? s?.last_error}</p>
-      )}
-      {!connected && configured && (
-        <p className="w-full text-[11px] text-fg-subtle">
-          Opens {platform === "twitch" ? "Twitch" : "Kick"} in a new tab. After approving, come back here.
+      {notice && <p className="text-live">{notice}</p>}
+      {(save.error || remove.error) && (
+        <p role="alert" className="text-danger">
+          {save.error ?? remove.error}
         </p>
       )}
     </div>
@@ -136,7 +125,7 @@ export function PlatformConnections() {
                   <Link2 className="size-4 text-fg-subtle" />
                   <PlatformBadge platform={p.platform} />
                 </div>
-                <Badge tone={p.configured ? "live" : "warn"}>{p.configured ? "configured on backend" : "not configured"}</Badge>
+                <Badge tone={p.configured ? "live" : "warn"}>{p.configured ? "app credentials saved" : "not configured"}</Badge>
               </div>
               <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
                 {Object.entries(p.capabilities).map(([k, v]) => (
@@ -153,7 +142,7 @@ export function PlatformConnections() {
                   {n}
                 </p>
               ))}
-              <ConnectionControls platform={p.platform} configured={p.configured} onChanged={query.reload} />
+              <CredentialsForm platform={p.platform} onChanged={query.reload} />
             </Card>
           ))}
         </div>

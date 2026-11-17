@@ -1,6 +1,9 @@
 import "@testing-library/jest-dom/vitest";
+import "fake-indexeddb/auto";
+import { IDBFactory } from "fake-indexeddb";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
+import { resetDbConnection } from "@/local/db";
 import { createFakeChrome, type FakeChrome } from "./fake-chrome";
 
 declare global {
@@ -9,6 +12,8 @@ declare global {
 }
 
 beforeEach(() => {
+  globalThis.indexedDB = new IDBFactory(); // a fresh, empty database for every test
+  resetDbConnection();
   globalThis.fakeChrome = createFakeChrome();
   globalThis.chrome = globalThis.fakeChrome.chrome;
   window.location.hash = "";

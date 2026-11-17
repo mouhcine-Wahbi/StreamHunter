@@ -37,7 +37,11 @@
   ],
   "host_permissions": [
     "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*"
+    "http://127.0.0.1:8000/*",
+    "https://api.twitch.tv/*",
+    "https://id.twitch.tv/*",
+    "https://api.kick.com/*",
+    "https://id.kick.com/*"
   ],
   "optional_host_permissions": [
     "https://*/*"

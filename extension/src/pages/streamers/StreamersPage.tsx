@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { RefreshCw, Trash2, Users } from "lucide-react";
+import { ExternalLink, RefreshCw, Trash2, Users } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -9,6 +9,7 @@ import { ApiStateView } from "@/components/ApiStateView";
 import { Avatar, LiveBadge, PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
 import { useAction } from "@/hooks/useAction";
+import { streamUrl } from "@/local/streamers";
 import type { Page, Streamer } from "@/types/api";
 import { formatRelative } from "@/utils/format";
 
@@ -72,6 +73,14 @@ function StreamerCard({ s, onChanged }: { s: Streamer; onChanged: () => void }) 
             </Button>
           </div>
         ) : (
+          <div className="flex gap-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={`Open ${s.display_name}'s stream`}
+            onClick={() => void chrome.tabs.create({ url: streamUrl(s) })}
+            icon={<ExternalLink className="size-3.5" />}
+          />
           <Button
             size="sm"
             variant="ghost"
@@ -79,6 +88,7 @@ function StreamerCard({ s, onChanged }: { s: Streamer; onChanged: () => void }) 
             onClick={() => setConfirming(true)}
             icon={<Trash2 className="size-3.5" />}
           />
+          </div>
         )}
       </div>
     </Card>

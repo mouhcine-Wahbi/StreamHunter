@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Check, Plus, Search, UserSearch } from "lucide-react";
+import { Check, ExternalLink, Plus, Radio, Search, UserSearch } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -11,11 +11,14 @@ import { Avatar, LiveBadge, PlatformBadge } from "@/components/streamers/Platfor
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
 import { useAction } from "@/hooks/useAction";
 import { ApiError } from "@/services/api-client";
+import { streamUrl } from "@/local/streamers";
 import { PLATFORMS, type Platform, type StreamerSearchResult } from "@/types/api";
+
+type Result = StreamerSearchResult & { viewer_count?: number | null };
 
 const USERNAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{1,24}$/;
 
-function ResultCard({ r }: { r: StreamerSearchResult }) {
+function ResultCard({ r }: { r: Result }) {
   const client = useApiClient();
   const [added, setAdded] = useState(false);
   const add = useAction(async () => {
@@ -38,10 +41,18 @@ function ResultCard({ r }: { r: StreamerSearchResult }) {
         </div>
         <div className="mt-0.5 truncate text-xs text-fg-muted">
           {r.current_category ?? "No category"}
+          {r.is_live && typeof r.viewer_count === "number" ? ` · ${r.viewer_count.toLocaleString()} viewers` : ""}
           {r.current_title ? ` · ${r.current_title}` : ""}
         </div>
         {add.error && <div className="mt-1 text-xs text-danger">{add.error}</div>}
       </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-label={`Open ${r.display_name}'s stream`}
+        icon={<ExternalLink className="size-3.5" />}
+        onClick={() => void chrome.tabs.create({ url: streamUrl(r) })}
+      />
       <Button
         variant={added ? "secondary" : "primary"}
         size="sm"
@@ -50,7 +61,7 @@ function ResultCard({ r }: { r: StreamerSearchResult }) {
         onClick={() => void add.run()}
         icon={added ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
       >
-        {added ? "In watchlist" : "Add"}
+        {added ? "Monitoring" : "Add"}
       </Button>
     </Card>
   );
@@ -62,7 +73,8 @@ export function DiscoverPage() {
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [validation, setValidation] = useState<string | null>(null);
 
-  const query = useApiQuery<StreamerSearchResult[]>(submitted);
+  const query = useApiQuery<Result[]>(submitted);
+  const live = useApiQuery<Result[]>(submitted === null ? `/api/v1/discover/live?platform=${platform}&limit=24` : null);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -77,9 +89,17 @@ export function DiscoverPage() {
 
   return (
     <>
-      <PageHeader title="Discover" description="Search Twitch and Kick channels and add them to your watchlist." />
+      <PageHeader title="Discover" description="Search Twitch and Kick channels, see who is live, and add them to your monitoring list." />
       <form onSubmit={onSubmit} className="flex flex-wrap items-start gap-3" role="search">
-        <Segmented label="Platform" value={platform} options={PLATFORMS} onChange={setPlatform} />
+        <Segmented
+          label="Platform"
+          value={platform}
+          options={PLATFORMS}
+          onChange={(p) => {
+            setPlatform(p);
+            setSubmitted(null);
+          }}
+        />
         <div className="min-w-64 flex-1">
           <Input
             aria-label="Channel name"
@@ -103,9 +123,26 @@ export function DiscoverPage() {
 
       <div className="mt-6">
         {submitted === null ? (
-          <EmptyState icon={<UserSearch className="size-5" />} title="Search for a streamer">
-            Results come straight from the official Twitch and Kick APIs through your backend.
-          </EmptyState>
+          <section aria-labelledby="live-now">
+            <h2 id="live-now" className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
+              <Radio className="size-4" /> Live now on {platform === "twitch" ? "Twitch" : "Kick"}
+            </h2>
+            <ApiStateView query={live} feature="live channels">
+              {(results) =>
+                results.length === 0 ? (
+                  <EmptyState icon={<UserSearch className="size-5" />} title="Nobody live right now">
+                    Search for a channel above.
+                  </EmptyState>
+                ) : (
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {results.map((r) => (
+                      <ResultCard key={`${r.platform}:${r.platform_user_id}`} r={r} />
+                    ))}
+                  </div>
+                )
+              }
+            </ApiStateView>
+          </section>
         ) : (
           <ApiStateView query={query} feature="search results">
             {(results) =>

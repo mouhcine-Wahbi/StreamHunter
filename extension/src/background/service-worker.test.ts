@@ -3,6 +3,8 @@ import { STORAGE_KEYS, getMonitoringState, updateSettings } from "@/store/storag
 import { json, mockFetch } from "@/test/http";
 import { handleMessage, isTrustedSender } from "./message-handler";
 import { createMonitoringManager } from "./monitoring-manager";
+import { configurePlatforms, fakePlatforms } from "@/test/platforms";
+import { LocalApi } from "@/local/local-api";
 
 const okBackend = (url: string) =>
   /\/(heartbeat|start)$/.test(url)
@@ -28,8 +30,10 @@ describe("service worker wiring", () => {
     expect(stopped).toMatchObject({ ok: true, data: { status: "stopped" } });
   });
 
-  it("runs a heartbeat when the alarm fires", async () => {
-    const fetch = mockFetch(okBackend);
+  it("runs a live-status check (no backend) when the alarm fires", async () => {
+    await configurePlatforms();
+    const { fetch } = fakePlatforms({ twitch: [{ id: "1", login: "alpha", live: true }] });
+    await new LocalApi({ baseUrl: "http://localhost:8000" }).post("/api/v1/streamers", { platform: "twitch", username: "alpha" });
     await loadWorker();
     await chrome.runtime.sendMessage({ type: "monitoring/start" });
     fetch.mockClear();
@@ -39,7 +43,8 @@ describe("service worker wiring", () => {
     fakeChrome.internals.fireAlarm(ALARMS.heartbeat);
     await flush();
     await flush();
-    expect(fetch.mock.calls.some(([u]) => String(u).endsWith("/api/v1/monitoring/heartbeat"))).toBe(true);
+    expect(fetch.mock.calls.some(([u]) => String(u).startsWith("https://api.twitch.tv/helix/streams?user_id=1"))).toBe(true);
+    expect(fetch.mock.calls.some(([u]) => String(u).startsWith("http://localhost:8000"))).toBe(false);
   });
 
   it("re-schedules the alarm when the interval setting changes", async () => {

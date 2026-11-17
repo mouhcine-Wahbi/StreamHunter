@@ -180,6 +180,19 @@ relative to the stream's baseline and can't create a candidate on their own.
 score (the specified weights: chat 25 %, audio 30 %, visual 20 %) and may drop below the minimum.
 The chat-only score stays visible. Re-weighting needs real-stream data.
 
+## Local-first migration (no backend) 🟡 in progress
+
+Plan and API analysis: [docs/LOCAL_FIRST_MIGRATION.md](docs/LOCAL_FIRST_MIGRATION.md).
+
+| Item | Status | Notes |
+|---|---|---|
+| IndexedDB store (streamers, sessions, highlights, clips, clip videos) | ✅ | `src/local/db.ts` |
+| Twitch Helix / Kick public API from the extension, with the editor's own app credentials | ✅ | Settings → Platforms; "Save and test" makes one call. Tokens cached, one retry after 401, 429 waits honoured |
+| Discover: search, Twitch/Kick filter, live now, viewers, category, avatar, Add, Open stream | ✅ | Kick: exact name (no search API) |
+| Background monitoring without a backend | ✅ | Alarm → one batched status request per platform (100 Twitch / 50 Kick) → sessions open/end → go-live notifications. Degraded/offline states with the reason |
+| Discovery-mode chat detection, capture mode, local clips, backend removal | ⏳ | Steps 4–7 |
+| Tested against the real Twitch/Kick APIs | ⏳ | Needs app credentials |
+
 ## Known platform limitations (by design, not bugs)
 
 | Limitation | Handling |

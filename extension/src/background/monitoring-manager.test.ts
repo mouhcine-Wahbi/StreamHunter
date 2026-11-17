@@ -3,12 +3,17 @@ import { ALARMS, syncAlarms } from "./alarm-manager";
 import { ApiClient } from "@/services/api-client";
 import { getMonitoringState, updateSettings } from "@/store/storage";
 import { json, mockFetch } from "@/test/http";
+import { configurePlatforms, fakePlatforms, type FakeChannel } from "@/test/platforms";
+import { LocalApi } from "@/local/local-api";
+import { listSessions } from "@/local/sessions";
+import { refreshStatuses } from "@/local/streamers";
 
 function setup(now = new Date("2026-11-13T10:00:00Z")) {
   let clock = now;
   const manager = createMonitoringManager({
     now: () => clock,
     createClient: (baseUrl) => new ApiClient({ baseUrl }),
+    refresh: (at) => refreshStatuses(undefined, at),
   });
   return {
     manager,
@@ -18,122 +23,137 @@ function setup(now = new Date("2026-11-13T10:00:00Z")) {
   };
 }
 
-const HB = { lease_expires_at: "2026-11-13T10:06:00Z", interval_seconds: 120, started: true, active_sessions: 0, live_count: 0, notifications: [], server_time: "2026-11-13T10:00:00Z" };
-const heartbeatOk = (url: string) =>
-  /\/api\/v1\/monitoring\/(heartbeat|start)$/.test(url)
-    ? json(HB)
-    : url.endsWith("/api/v1/monitoring/stop")
-      ? json({ ok: true })
-      : json({ status: "ok", version: "0.1.0" });
+async function watch(...names: [platform: "twitch" | "kick", username: string][]) {
+  const api = new LocalApi({ baseUrl: "http://localhost:8000" });
+  for (const [platform, username] of names) await api.post("/api/v1/streamers", { platform, username });
+}
 
-describe("monitoring manager", () => {
-  it("start: schedules the heartbeat alarm and becomes active when the backend grants a lease", async () => {
-    const fetch = mockFetch(heartbeatOk);
+describe("monitoring manager (local: no backend)", () => {
+  it("start: schedules the alarm, checks the list and opens a session per live streamer", async () => {
+    await configurePlatforms();
+    const twitch: FakeChannel[] = [{ id: "1", login: "alpha", live: true, viewers: 10, title: "hi", game: "Chess" }, { id: "2", login: "beta" }];
+    const { calls } = fakePlatforms({ twitch });
+    await watch(["twitch", "alpha"], ["twitch", "beta"]);
+    calls.length = 0;
     const { manager } = setup();
     const state = await manager.start();
-    expect(state).toMatchObject({ enabled: true, status: "active", backendStatus: "online", leaseExpiresAt: "2026-11-13T10:06:00Z" });
-    const alarm = fakeChrome.internals.alarms.get(ALARMS.heartbeat);
-    expect(alarm?.periodInMinutes).toBe(2);
-    expect(state.backendVersion).toBe("0.1.0");
-    const hb = fetch.mock.calls.find(([u]) => String(u).endsWith("/api/v1/monitoring/start"))!;
-    expect(JSON.parse(String(hb[1]!.body))).toEqual({ client: "chrome-extension", interval_seconds: 120, since: null });
-    expect(state.lastServerTime).toBe("2026-11-13T10:00:00Z");
+    expect(state).toMatchObject({ enabled: true, status: "active", liveCount: 1, activeSessions: 1, lastError: null });
+    expect(fakeChrome.internals.alarms.get(ALARMS.heartbeat)?.periodInMinutes).toBe(2);
+    expect(calls).toEqual(["twitch /helix/streams?user_id=1&user_id=2&first=100"]); // one batched request, no backend
+    const [session] = await listSessions();
+    expect(session).toMatchObject({ streamer_display_name: "alpha", status: "active", platform: "twitch", broadcast_started_at: "2026-11-17T10:00:00.000Z" });
   });
 
-  it("goes offline with exponential backoff when the backend is unreachable", async () => {
-    mockFetch(() => null);
+  it("ends the session when the streamer goes offline, and notifies go-lives when enabled", async () => {
+    await configurePlatforms();
+    await updateSettings({ notifications: { onStreamerLive: true } });
+    const twitch: FakeChannel[] = [{ id: "1", login: "alpha", name: "Alpha", title: "ranked", game: "Valorant" }];
+    fakePlatforms({ twitch });
+    await watch(["twitch", "alpha"]);
+    const { manager, advance } = setup();
+    await manager.start();
+    expect(await listSessions()).toEqual([]);
+
+    twitch[0]!.live = true;
+    advance(120_000);
+    await manager.tick();
+    expect(fakeChrome.internals.notifications).toEqual([
+      expect.objectContaining({ title: "Alpha is live on Twitch", message: "ranked · Valorant" }),
+    ]);
+    advance(120_000);
+    await manager.tick(); // still live: same session, no second notification
+    expect(fakeChrome.internals.notifications).toHaveLength(1);
+    expect((await listSessions()).map((s) => s.status)).toEqual(["active"]);
+
+    twitch[0]!.live = false;
+    advance(120_000);
+    const state = await manager.tick();
+    expect((await listSessions()).map((s) => s.status)).toEqual(["ended"]);
+    expect(state).toMatchObject({ liveCount: 0, activeSessions: 0 });
+  });
+
+  it("is degraded when one platform can't be checked, and keeps that platform's sessions", async () => {
+    await configurePlatforms();
+    const twitch: FakeChannel[] = [{ id: "1", login: "alpha", live: true }];
+    const kick: FakeChannel[] = [{ id: "7", login: "kk", live: true }];
+    fakePlatforms({ twitch, kick });
+    await watch(["twitch", "alpha"], ["kick", "kk"]);
+    const { manager, advance } = setup();
+    await manager.start();
+    fakePlatforms({ twitch, kick, failWith: { kick: 500 } });
+    advance(120_000);
+    const state = await manager.tick();
+    expect(state).toMatchObject({ status: "degraded", lastError: "Kick: Kick answered HTTP 500.", activeSessions: 2 });
+    expect((await listSessions()).every((s) => s.status === "active")).toBe(true);
+  });
+
+  it("waits as long as the platform asks after a rate limit", async () => {
+    await configurePlatforms();
+    fakePlatforms({ twitch: [{ id: "1", login: "alpha" }] });
+    await watch(["twitch", "alpha"]);
+    const { fetch } = fakePlatforms({});
+    fetch.mockImplementation(async (input) =>
+      String(input).includes("id.twitch.tv")
+        ? json({ access_token: "t", expires_in: 3600 })
+        : new Response("{}", { status: 429, headers: { "Retry-After": "300" } }),
+    );
     const { manager, advance } = setup();
     let state = await manager.start();
-    expect(state).toMatchObject({ status: "offline", backendStatus: "offline", consecutiveFailures: 1 });
-    expect(state.nextAttemptAt).toBe("2026-11-13T10:02:00.000Z");
-
-    // An alarm firing before the backoff elapses does nothing.
-    advance(60_000);
-    state = await manager.tick();
-    expect(state.consecutiveFailures).toBe(1);
-
-    advance(60_000);
-    state = await manager.tick();
-    expect(state.consecutiveFailures).toBe(2);
-    expect(state.nextAttemptAt).toBe("2026-11-13T10:06:00.000Z");
-  });
-
-  it("reports degraded (not active) when the backend lacks the monitoring endpoint", async () => {
-    mockFetch(() => json({ detail: "Not Found" }, 404));
-    const { manager } = setup();
-    const state = await manager.start();
-    expect(state.status).toBe("degraded");
-    expect(state.backendStatus).toBe("online");
-    expect(state.lastError).toMatch(/does not provide the monitoring endpoint/);
-  });
-
-  it("recovers to active and resets failures after the backend comes back", async () => {
-    let up = false;
-    mockFetch((url) => (up ? heartbeatOk(url) : null));
-    const { manager, advance } = setup();
-    await manager.start();
-    up = true;
-    advance(5 * 60_000);
-    const state = await manager.tick();
-    expect(state).toMatchObject({ status: "active", consecutiveFailures: 0, lastError: null, nextAttemptAt: null });
-  });
-
-  it("stop: clears the alarm, resets state and releases the lease", async () => {
-    const fetch = mockFetch(heartbeatOk);
-    const { manager } = setup();
-    await manager.start();
-    const state = await manager.stop();
-    expect(state).toMatchObject({ enabled: false, status: "stopped", leaseExpiresAt: null });
-    expect(fakeChrome.internals.alarms.has(ALARMS.heartbeat)).toBe(false);
-    expect(fetch.mock.calls.some(([u]) => String(u).endsWith("/api/v1/monitoring/stop"))).toBe(true);
-  });
-
-  it("restore after a worker restart resumes from persisted state", async () => {
-    mockFetch(heartbeatOk);
-    await setup().manager.start();
-    // Simulate Chrome restart: alarms are gone, memory is gone, storage survives.
-    fakeChrome.internals.alarms.clear();
-    fakeChrome.internals.dropListeners();
-    const fresh = setup(new Date("2026-11-13T12:00:00Z")).manager;
-    const state = await fresh.restore();
-    expect(state).toMatchObject({ enabled: true, status: "active", lastSuccessAt: "2026-11-13T12:00:00.000Z" });
-    expect(fakeChrome.internals.alarms.has(ALARMS.heartbeat)).toBe(true);
-  });
-
-  it("restore stops monitoring when resume-on-startup is disabled", async () => {
-    mockFetch(heartbeatOk);
-    await setup().manager.start();
-    await updateSettings({ monitoring: { resumeOnStartup: false } });
-    const state = await setup().manager.restore();
-    expect(state.enabled).toBe(false);
-    expect(fakeChrome.internals.alarms.has(ALARMS.heartbeat)).toBe(false);
-  });
-
-  it("restore does nothing when monitoring was off", async () => {
-    const fetch = mockFetch(heartbeatOk);
-    const state = await setup().manager.restore();
-    expect(state.status).toBe("stopped");
+    expect(state).toMatchObject({ status: "offline", consecutiveFailures: 1, nextAttemptAt: "2026-11-13T10:05:00.000Z" });
+    advance(120_000);
+    fetch.mockClear();
+    state = await manager.tick(); // an alarm before the wait is over does nothing
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("concurrent ticks share one request", async () => {
-    const fetch = mockFetch(heartbeatOk);
+  it("explains what to set up when no platform is configured", async () => {
+    fakePlatforms({});
+    await chrome.storage.local.set({});
+    const { db } = await import("@/local/db");
+    await db.put("streamers", { platform: "kick", platform_user_id: "9", username: "kk", display_name: "kk", monitoring_enabled: true, is_live: null } as never);
+    const state = await setup().manager.start();
+    expect(state.status).toBe("offline");
+    expect(state.lastError).toMatch(/Add your Kick app's client ID and secret/);
+  });
+
+  it("stop: clears the alarm and pauses sessions; start resumes them if still the same broadcast", async () => {
+    await configurePlatforms();
+    fakePlatforms({ twitch: [{ id: "1", login: "alpha", live: true }] });
+    await watch(["twitch", "alpha"]);
     const { manager } = setup();
     await manager.start();
-    fetch.mockClear();
+    const stopped = await manager.stop();
+    expect(stopped).toMatchObject({ enabled: false, status: "stopped" });
+    expect(fakeChrome.internals.alarms.has(ALARMS.heartbeat)).toBe(false);
+    expect((await listSessions()).map((s) => s.status)).toEqual(["paused"]);
+    await manager.start();
+    expect((await listSessions()).map((s) => s.status)).toEqual(["active"]);
+  });
+
+  it("restore after a worker restart resumes from persisted state", async () => {
+    await configurePlatforms();
+    fakePlatforms({ twitch: [] });
+    const { manager } = setup();
+    await manager.start();
+    const restored = await createMonitoringManager({ now: () => new Date(), createClient: (u) => new ApiClient({ baseUrl: u }), refresh: (at) => refreshStatuses(undefined, at) }).restore();
+    expect(restored).toMatchObject({ enabled: true, status: "active" });
+  });
+
+  it("restore stops monitoring when resume-on-startup is disabled", async () => {
+    fakePlatforms({});
+    await setup().manager.start();
+    await updateSettings({ monitoring: { resumeOnStartup: false } });
+    expect(await setup().manager.restore()).toMatchObject({ enabled: false, status: "stopped" });
+  });
+
+  it("concurrent ticks share one check", async () => {
+    const refresh = vi.fn(async () => ({ checked: 0, live: 0, skipped_recent: 0, unavailable: {}, retry_after: {}, changes: [], checked_ids: [] }));
+    const manager = createMonitoringManager({ now: () => new Date(), createClient: (u) => new ApiClient({ baseUrl: u }), refresh });
+    await chrome.storage.local.set({ "sh.monitoring": { enabled: true, status: "active" } });
     await Promise.all([manager.tick(true), manager.tick(true), manager.tick(true)]);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("checkBackend updates backend status without enabling monitoring", async () => {
-    mockFetch(heartbeatOk);
-    const state = await setup().manager.checkBackend();
-    expect(state).toMatchObject({ enabled: false, backendStatus: "online", backendVersion: "0.1.0" });
-    expect((await getMonitoringState()).status).toBe("stopped");
-  });
-});
-
-describe("syncAlarms", () => {
   it("re-creates the alarm only when the interval changes", async () => {
     await syncAlarms(true, 2);
     const first = fakeChrome.internals.alarms.get(ALARMS.heartbeat);
@@ -142,40 +162,8 @@ describe("syncAlarms", () => {
     await syncAlarms(true, 5);
     expect(fakeChrome.internals.alarms.get(ALARMS.heartbeat)?.periodInMinutes).toBe(5);
     await syncAlarms(false, 5);
-    expect(fakeChrome.internals.alarms.size).toBe(0);
-  });
-});
-
-
-describe("heartbeat notifications & since", () => {
-  const live = {
-    type: "streamer_live", streamer_id: 7, streamer_display_name: "Alpha", platform: "twitch",
-    title: "Ranked", category: "Valorant", at: "2026-11-13T10:01:00Z",
-  };
-
-  it("sends `since` from the previous heartbeat and shows enabled notifications", async () => {
-    await updateSettings({ notifications: { onStreamerLive: true } });
-    const bodies: unknown[] = [];
-    mockFetch((url, init) => {
-      if (/monitoring\/(heartbeat|start)$/.test(url)) {
-        bodies.push(JSON.parse(String(init?.body)));
-        return json({ ...HB, live_count: 1, active_sessions: 1, notifications: bodies.length === 2 ? [live] : [], server_time: `T${bodies.length}` });
-      }
-      return json({ status: "ok", version: "x" });
-    });
-    const { manager } = setup();
-    await manager.start();
-    const state = await manager.tick(true);
-    expect((bodies[1] as { since: string }).since).toBe("T1");
-    expect(state).toMatchObject({ liveCount: 1, activeSessions: 1, lastServerTime: "T2" });
-    expect(fakeChrome.internals.notifications).toHaveLength(1);
-    expect(fakeChrome.internals.notifications[0]).toMatchObject({ title: "Alpha is live on Twitch", message: "Ranked · Valorant" });
-  });
-
-  it("stays quiet when live notifications are disabled (default)", async () => {
-    mockFetch((url) => (/monitoring\/(heartbeat|start)$/.test(url) ? json({ ...HB, notifications: [live] }) : json({ status: "ok" })));
-    await setup().manager.start();
-    expect(fakeChrome.internals.notifications).toHaveLength(0);
+    expect(fakeChrome.internals.alarms.has(ALARMS.heartbeat)).toBe(false);
+    expect((await getMonitoringState()).enabled).toBe(false);
   });
 });
 
@@ -197,30 +185,3 @@ describe("settings sync", () => {
 });
 
 
-describe("highlight notifications", () => {
-  const hl = (score: number) => ({
-    type: "highlight_detected", streamer_id: 7, streamer_display_name: "Alpha", platform: "twitch",
-    title: "'KEKW' used by 40 chatters", category: "funny_moment", at: `2026-11-13T10:0${score % 9}:00Z`,
-    highlight_id: score, score,
-  });
-
-  it("notifies highlights at or above the minimum score (on by default)", async () => {
-    mockFetch((url) =>
-      /monitoring\/(heartbeat|start)$/.test(url) ? json({ ...HB, notifications: [hl(82), hl(41)] }) : json({ status: "ok" }),
-    );
-    await setup().manager.start();
-    expect(fakeChrome.internals.notifications).toHaveLength(1);
-    expect(fakeChrome.internals.notifications[0]).toMatchObject({
-      id: "sh-hl-82",
-      title: "Funny moment · Alpha (82)",
-      message: "'KEKW' used by 40 chatters",
-    });
-  });
-
-  it("can be turned off", async () => {
-    await updateSettings({ notifications: { onHighlight: false } });
-    mockFetch((url) => (/monitoring\/(heartbeat|start)$/.test(url) ? json({ ...HB, notifications: [hl(90)] }) : json({ status: "ok" })));
-    await setup().manager.start();
-    expect(fakeChrome.internals.notifications).toHaveLength(0);
-  });
-});

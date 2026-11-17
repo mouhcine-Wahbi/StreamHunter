@@ -90,6 +90,8 @@ export interface RefreshResult {
   /** Seconds the platform asked to wait (429), per platform. */
   retry_after: Record<string, number>;
   changes: StatusChange[];
+  /** Streamers whose state was actually checked this time. */
+  checked_ids: number[];
 }
 
 /**
@@ -99,7 +101,7 @@ export interface RefreshResult {
  */
 export async function refreshStatuses(clients: Clients = platformClients(), at: Date = new Date()): Promise<RefreshResult> {
   const streamers = (await db.all<Streamer>("streamers")).filter((s) => s.monitoring_enabled);
-  const result: RefreshResult = { checked: 0, live: 0, skipped_recent: 0, unavailable: {}, retry_after: {}, changes: [] };
+  const result: RefreshResult = { checked: 0, live: 0, skipped_recent: 0, unavailable: {}, retry_after: {}, changes: [], checked_ids: [] };
   for (const platform of ["twitch", "kick"] as const) {
     const group = streamers.filter((s) => s.platform === platform);
     if (group.length === 0) continue;
@@ -127,6 +129,7 @@ export async function refreshStatuses(clients: Clients = platformClients(), at: 
       };
       await db.put("streamers", next);
       result.checked += 1;
+      result.checked_ids.push(s.id);
       if (next.is_live) result.live += 1;
       if (next.is_live && s.is_live !== true) result.changes.push({ streamer: next, change: "went_live" });
       if (!next.is_live && s.is_live === true) result.changes.push({ streamer: next, change: "went_offline" });

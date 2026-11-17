@@ -1,10 +1,10 @@
 /**
  * Monitoring status as shown to the user. These must always reflect reality:
  * - stopped:  the user has not enabled monitoring.
- * - starting: enabled, first heartbeat not answered yet.
- * - active:   the backend accepted the latest heartbeat and holds a monitoring lease.
- * - degraded: the backend is reachable but rejected/failed the heartbeat.
- * - offline:  the backend could not be reached; retrying with backoff.
+ * - starting: enabled, first live-status check not finished yet.
+ * - active:   the latest check reached every platform on the monitoring list.
+ * - degraded: some platform couldn't be checked (not set up, error, rate limit).
+ * - offline:  no platform could be checked; retrying with backoff.
  */
 export type MonitoringStatus = "stopped" | "starting" | "active" | "degraded" | "offline";
 

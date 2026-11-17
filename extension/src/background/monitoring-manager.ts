@@ -5,6 +5,11 @@ import { backoffDelayMs } from "@/utils/backoff";
 import { syncAlarms } from "./alarm-manager";
 import { notifyStreamEvents, type StreamNotification } from "./notifications";
 
+import { db } from "@/local/db";
+import { pauseActiveSessions, resumePausedSessions, syncSessions } from "@/local/sessions";
+import { refreshStatuses, type RefreshResult } from "@/local/streamers";
+import type { MonitoringSession, Streamer } from "@/types/api";
+
 export interface HeartbeatResponse {
   lease_expires_at: string;
   interval_seconds: number;
@@ -18,22 +23,33 @@ export interface HeartbeatResponse {
 export interface MonitoringDeps {
   now: () => Date;
   createClient: (baseUrl: string) => ApiClient;
+  /** One live-status check of the monitoring list against Twitch/Kick. */
+  refresh: (at: Date) => Promise<RefreshResult>;
 }
 
 const defaultDeps: MonitoringDeps = {
   now: () => new Date(),
   createClient: (baseUrl) => new ApiClient({ baseUrl, getToken: getAuthToken }),
+  refresh: (at) => refreshStatuses(undefined, at),
 };
 
+function liveNotification(s: MonitoringSession, streamer: Streamer | undefined): StreamNotification {
+  return {
+    type: "streamer_live",
+    streamer_id: s.streamer_id,
+    streamer_display_name: s.streamer_display_name ?? streamer?.display_name ?? "A streamer",
+    platform: s.platform,
+    title: streamer?.current_title ?? null,
+    category: streamer?.current_category ?? null,
+    at: s.started_at,
+  };
+}
+
 /**
- * Drives browser-based monitoring. All state is persisted after every step so
- * a suspended/restarted service worker continues where it left off.
- *
- * Contract with the backend (see ARCHITECTURE.md §2):
- *   POST /api/v1/monitoring/start     → grants a lease and checks the watchlist right away.
- *   POST /api/v1/monitoring/heartbeat → extends the lease while the browser is alive; returns
- *                                       "went live" notifications since the previous heartbeat.
- *   POST /api/v1/monitoring/stop      → releases the lease immediately (sessions pause).
+ * Drives background monitoring, entirely inside the extension. Each alarm runs one batched
+ * live-status check of the monitoring list against Twitch and Kick (no video, no open tabs),
+ * opens/ends sessions on live/offline transitions and notifies. All state is persisted after
+ * every step, so a suspended/restarted service worker continues where it left off.
  */
 export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
   // Single-flight guard: alarms and UI clicks can overlap within one worker lifetime.
@@ -59,58 +75,57 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
     }
   }
 
-  async function runTick(force: boolean, path = "/api/v1/monitoring/heartbeat"): Promise<MonitoringState> {
+  async function runTick(force: boolean): Promise<MonitoringState> {
     const state = await getMonitoringState();
     if (!state.enabled) return state;
 
     const now = deps.now();
     if (!force && state.nextAttemptAt && new Date(state.nextAttemptAt) > now) {
-      return state; // still backing off
+      return state; // backing off (rate limit or repeated failures)
     }
-
     const settings = await getSettings();
-    const client = deps.createClient(settings.backendUrl);
     const at = now.toISOString();
-
     try {
-      const res = await client.post<HeartbeatResponse>(path, {
-        client: "chrome-extension",
-        interval_seconds: settings.monitoring.intervalMinutes * 60,
-        since: state.lastServerTime,
-      });
-      await notifyStreamEvents(res.notifications ?? [], settings);
+      const r = await deps.refresh(now);
+      const sync = await syncSessions(new Set(r.checked_ids), now);
+      const problems = Object.entries(r.unavailable).map(([p, msg]) => `${p === "twitch" ? "Twitch" : "Kick"}: ${msg}`);
+      const allFailed = r.checked === 0 && problems.length > 0;
+      if (sync.opened.length > 0) {
+        const streamers = await db.all<Streamer>("streamers");
+        await notifyStreamEvents(sync.opened.map((x) => liveNotification(x, streamers.find((s) => s.id === x.streamer_id))), settings);
+      }
+      const waits = Object.values(r.retry_after);
+      const failures = allFailed ? state.consecutiveFailures + 1 : 0;
+      const backoff = allFailed ? backoffDelayMs(failures, { baseMs: settings.monitoring.intervalMinutes * 60_000 }) : 0;
+      const wait = Math.max(backoff, waits.length ? Math.max(...waits) * 1000 : 0);
       return patchMonitoringState({
-        status: "active",
-        backendStatus: "online",
+        status: allFailed ? "offline" : problems.length ? "degraded" : "active",
+        backendStatus: "unknown",
         lastCheckAt: at,
-        lastSuccessAt: at,
-        leaseExpiresAt: res.lease_expires_at ?? null,
-        liveCount: res.live_count ?? null,
-        activeSessions: res.active_sessions ?? null,
-        lastServerTime: res.server_time ?? state.lastServerTime,
-        lastError: null,
-        consecutiveFailures: 0,
-        nextAttemptAt: null,
+        lastSuccessAt: allFailed ? state.lastSuccessAt : at,
+        leaseExpiresAt: null,
+        liveCount: r.live,
+        activeSessions: sync.active,
+        lastError: problems.length ? problems.join(" ") : null,
+        consecutiveFailures: failures,
+        nextAttemptAt: wait > 0 ? new Date(now.getTime() + wait).toISOString() : null,
       });
     } catch (err) {
       const failures = state.consecutiveFailures + 1;
-      const reachable = err instanceof ApiError && err.isHttp;
       const delay = backoffDelayMs(failures, { baseMs: settings.monitoring.intervalMinutes * 60_000 });
       return patchMonitoringState({
-        status: reachable ? "degraded" : "offline",
-        backendStatus: reachable ? "online" : "offline",
+        status: "offline",
         lastCheckAt: at,
-        leaseExpiresAt: null,
-        lastError: describeError(err),
+        lastError: err instanceof Error ? err.message : "Unexpected error",
         consecutiveFailures: failures,
         nextAttemptAt: new Date(now.getTime() + delay).toISOString(),
       });
     }
   }
 
-  function tick(force = false, path?: string): Promise<MonitoringState> {
+  function tick(force = false): Promise<MonitoringState> {
     if (!inFlight) {
-      inFlight = runTick(force, path).finally(() => {
+      inFlight = runTick(force).finally(() => {
         inFlight = null;
       });
     }
@@ -128,8 +143,8 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
       nextAttemptAt: null,
     });
     await syncAlarms(true, settings.monitoring.intervalMinutes);
-    await checkBackend(); // records reachability + backend version for the UI
-    return tick(true, "/api/v1/monitoring/start");
+    await resumePausedSessions();
+    return tick(true);
   }
 
   async function stop(): Promise<MonitoringState> {
@@ -145,11 +160,7 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
       nextAttemptAt: null,
       lastError: null,
     });
-    // Best effort: release the backend lease now instead of waiting for it to expire.
-    deps
-      .createClient(settings.backendUrl)
-      .post("/api/v1/monitoring/stop")
-      .catch(() => undefined);
+    await pauseActiveSessions(deps.now());
     return state;
   }
 
@@ -160,6 +171,7 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
     await syncAlarms(state.enabled, settings.monitoring.intervalMinutes);
     if (!state.enabled) return state;
     await patchMonitoringState({ status: "starting", nextAttemptAt: null });
+    await resumePausedSessions();
     return tick(true);
   }
 

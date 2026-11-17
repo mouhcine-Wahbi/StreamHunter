@@ -40,7 +40,7 @@ export function Popup() {
             <div className="mt-1 text-xl font-semibold text-fg tabular">{live.data?.total ?? state.liveCount ?? "—"}</div>
           </div>
           <div className="rounded-xl border border-ink-700 bg-ink-850 p-3">
-            <div className="text-[11px] text-fg-subtle">Last heartbeat</div>
+            <div className="text-[11px] text-fg-subtle">Last check</div>
             <div className="mt-1 truncate text-sm font-medium text-fg">{formatRelative(state.lastSuccessAt)}</div>
           </div>
         </div>

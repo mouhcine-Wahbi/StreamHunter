@@ -3,6 +3,19 @@
 Status: in progress (started 2026-11-17). This document is the analysis and the plan. Each step
 below lands as its own tested commit, and nothing working is removed until its replacement is tested.
 
+| Step | State |
+|---|---|
+| 1. Local store and platform clients | ✅ done (88096b0) |
+| 2. Discovery page and monitoring list | ✅ done (88096b0) |
+| 3. Background monitoring | ✅ done |
+| 4. Discovery-mode detection (chat) | ⏳ next |
+| 5. Capture mode (rolling buffer, local clips) | ⏳ |
+| 6. Clips and Top Highlights on local data | ⏳ |
+| 7. Retire the backend | ⏳ |
+
+Not verified against the real APIs yet: no Twitch/Kick app credentials on the development machine.
+The clients are tested against a fake that follows the documented request and response shapes.
+
 ## 1. Current architecture (before the migration)
 
 ```text

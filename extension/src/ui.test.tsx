@@ -343,10 +343,9 @@ describe("chat intelligence UI (Phase 5)", () => {
         return json({ chat_state: "connected", chat_reason: null, messages_per_minute: 42, unique_chatters_per_minute: 17, baseline_messages_per_minute: 20.5, warming_up: false, series: [1, 2, 3], active_signals: ["chat_spike"] });
       if (url.endsWith("/api/v1/monitoring/2/activity"))
         return json({ chat_state: "unavailable", chat_reason: "Kick chat needs a public HTTPS webhook URL." });
-      if (url.includes("/api/v1/monitoring?")) return json(sessions);
-      if (url.includes("/api/v1/streams/live")) return json({ items: [], total: 0, limit: 50, offset: 0 });
       return json({ detail: "Not Found" }, 404);
     });
+    for (const x of sessions.items) await db.put("sessions", x); // sessions are local now
     installWorker();
     window.location.hash = "/monitoring";
     render(<App />);
@@ -515,10 +514,8 @@ describe("recordings, VOD and export (Phase 7)", () => {
     mockFetch((url, init) => {
       if (url.endsWith("/api/v1/monitoring/1/vod")) {
         s = { ...s, vod_id: "v1", vod_url: "https://www.twitch.tv/videos/v1" };
-        return json(s);
+        return db.put("sessions", s).then(() => json(s)); // VOD lookup is ported in a later migration step
       }
-      if (url.includes("/api/v1/monitoring?")) return json({ items: [s], total: 1, limit: 50, offset: 0 });
-      if (url.includes("/api/v1/streams/live")) return json({ items: [], total: 0, limit: 50, offset: 0 });
       if (url.endsWith("/api/v1/media/capabilities")) return json(caps);
       if (url.endsWith("/api/v1/media/upload")) {
         uploads.push(init!.body as FormData);
@@ -534,6 +531,7 @@ describe("recordings, VOD and export (Phase 7)", () => {
       }
       return json({ detail: "Not Found" }, 404);
     });
+    await db.put("sessions", session);
     installWorker();
     window.location.hash = "/monitoring";
     render(<App />);

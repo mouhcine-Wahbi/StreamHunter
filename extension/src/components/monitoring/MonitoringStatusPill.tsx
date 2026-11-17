@@ -6,24 +6,24 @@ export const STATUS_META: Record<
   { label: string; tone: BadgeTone; dot: "live" | "warn" | "danger" | "neutral" | "accent"; description: string }
 > = {
   stopped: { label: "Stopped", tone: "neutral", dot: "neutral", description: "Monitoring is off." },
-  starting: { label: "Starting", tone: "accent", dot: "accent", description: "Contacting the backend…" },
+  starting: { label: "Starting", tone: "accent", dot: "accent", description: "Checking your streamers on Twitch and Kick…" },
   active: {
     label: "Active",
     tone: "live",
     dot: "live",
-    description: "The backend holds a monitoring lease while this browser stays open.",
+    description: "Your monitoring list is checked on Twitch and Kick while Chrome is open. No stream has to be open.",
   },
   degraded: {
     label: "Degraded",
     tone: "warn",
     dot: "warn",
-    description: "The backend is reachable but did not accept the heartbeat.",
+    description: "Some streamers couldn't be checked; the reason is shown below.",
   },
   offline: {
-    label: "Backend offline",
+    label: "Not checking",
     tone: "danger",
     dot: "danger",
-    description: "The backend could not be reached. Retrying with backoff.",
+    description: "Twitch/Kick couldn't be checked (setup, network or rate limit). Retrying with backoff.",
   },
 };
 

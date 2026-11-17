@@ -3,6 +3,7 @@ import { getCredentials } from "@/platforms/credentials";
 import { PlatformError } from "@/platforms/http";
 import type { ChannelInfo } from "@/platforms/types";
 import type { Page, Platform, Streamer, StreamerSearchResult } from "@/types/api";
+import { listSessions, syncSessions } from "./sessions";
 import {
   addStreamer,
   LocalError,
@@ -66,10 +67,12 @@ export class LocalApi extends ApiClient {
       ["DELETE", /^\/api\/v1\/streamers\/(\d+)$/, async (m) => void (await removeStreamer(Number(m[1])))],
       ["GET", /^\/api\/v1\/streams\/live$/, async (_m, q) => page((await listStreamers()).filter((s) => s.is_live === true), q)],
       ["POST", /^\/api\/v1\/streams\/refresh$/, async () => {
-        const { changes: _changes, ...r } = await refreshStatuses(this.clients());
-        return r;
+        const r = await refreshStatuses(this.clients());
+        await syncSessions(new Set(r.checked_ids), new Date());
+        return { checked: r.checked, live: r.live, skipped_recent: r.skipped_recent, unavailable: r.unavailable };
       }],
       ["GET", /^\/api\/v1\/platforms\/capabilities$/, () => this.capabilities()],
+      ["GET", /^\/api\/v1\/monitoring$/, async (_m, q) => page(await listSessions(), q)],
     ];
   }
 

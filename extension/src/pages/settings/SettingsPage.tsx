@@ -190,7 +190,7 @@ export function SettingsPage() {
         </Section>
 
         <Section id="monitoring" title="Monitoring" description="Monitoring only runs while Chrome is open. Longer intervals use fewer API requests.">
-          <Field inline label="Check interval" hint={`${LIMITS.intervalMinutes.min}–${LIMITS.intervalMinutes.max} minutes between heartbeats and status checks.`}>
+          <Field inline label="Check interval" hint={`${LIMITS.intervalMinutes.min}–${LIMITS.intervalMinutes.max} minutes between live-status checks (one batched request per platform).`}>
             {({ id, describedBy }) => (
               <NumberField
                 id={id}

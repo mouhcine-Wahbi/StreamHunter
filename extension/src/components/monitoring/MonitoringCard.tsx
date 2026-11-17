@@ -28,12 +28,11 @@ export function MonitoringCard({ monitoring }: { monitoring: ReturnType<typeof u
       <CardBody>
         <dl className="divide-y divide-ink-700/70 border-y border-ink-700/70">
           <Row label="Running for" value={state.enabled ? formatDuration(state.enabledAt) : "—"} />
-          <Row label="Last successful heartbeat" value={formatRelative(state.lastSuccessAt)} />
+          <Row label="Last status check" value={formatRelative(state.lastSuccessAt)} />
           <Row
             label="Live now / active sessions"
             value={state.enabled && state.liveCount !== null ? `${state.liveCount} / ${state.activeSessions ?? 0}` : "—"}
           />
-          <Row label="Lease expires" value={state.leaseExpiresAt ? formatRelative(state.leaseExpiresAt) : "—"} />
           <Row
             label="Next retry"
             value={state.enabled && state.nextAttemptAt ? formatRelative(state.nextAttemptAt) : "—"}

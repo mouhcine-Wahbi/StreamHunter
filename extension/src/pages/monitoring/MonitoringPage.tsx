@@ -67,7 +67,7 @@ function LiveNow({ refreshKey }: { refreshKey: string | null }) {
 }
 
 export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof useMonitoring> }) {
-  // Refetch lists whenever a heartbeat lands (the worker updates lastSuccessAt).
+  // Refetch lists whenever a status check lands (the worker updates lastSuccessAt).
   const refreshKey = monitoring.state.lastSuccessAt;
   const sessions = useApiQuery<Page<MonitoringSession>>("/api/v1/monitoring?limit=50");
   const { reload } = sessions;
@@ -76,7 +76,7 @@ export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof u
     <>
       <PageHeader
         title="Live Monitoring"
-        description="Monitoring runs while Chrome is open. If the browser closes, the backend pauses sessions automatically."
+        description="StreamHunter checks your monitoring list on Twitch and Kick while Chrome is open, without opening the streams. Closing Chrome pauses it."
         actions={<MonitoringToggle monitoring={monitoring} />}
       />
       <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">

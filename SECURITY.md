@@ -30,6 +30,12 @@
   Only these numbers are sent (to the user's own backend); no audio is recorded or uploaded. The
   backend keeps them in memory for about 7 minutes and only uses them for the user's own monitored
   sessions.
+* Live laughter detection is a separate opt-in checkbox, off by default and chosen again for each
+  capture. Only then does the offscreen page also send the tab's audio (16 kHz mono PCM, ≤ 12 s per
+  batch, authenticated) to the user's own backend. The backend classifies it in memory and drops it.
+  It keeps only per-second laughter/cheering/screaming values, which are pruned like the loudness
+  numbers. The audio is never written to disk or logged. The audio worklet (`pcm-worklet.js`) ships
+  with the extension; no remote code.
 * Host access only for `localhost:8000` / `127.0.0.1:8000`. A remote backend
   needs `https://` and an optional host permission that the user grants at runtime.
 * Plain `http://` is rejected for any host other than localhost.

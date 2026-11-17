@@ -3,7 +3,8 @@
 Runs on the CPU through LiteRT (`ai-edge-litert`, an optional dependency). The model file
 (~4 MB) is downloaded once, on first use, into the models folder and checked against a fixed
 SHA-256. Audio is decoded by FFmpeg and streamed through the model in overlapping windows every
-0.5 s (a second keeps the stronger of its two), so a long recording never has to fit in memory. Nothing leaves the backend machine.
+0.5 s (a second keeps the stronger of its two), so a long recording never has to fit in memory. Live tab audio (opt-in) arrives as a few seconds of
+16 kHz samples at a time and is classified in memory, then dropped. Nothing leaves the backend machine.
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ class SoundClassifier(Protocol):
 
     async def classify(self, ffmpeg: str, path: Path, *, timeout: float) -> list[Frame]: ...
 
+    async def classify_pcm(self, samples: Any) -> list[tuple[float, dict[str, float]]]: ...
+
 
 class YamnetClassifier:
     def __init__(self, model_dir: str | Path, *, model_url: str = MODEL_URL, model_sha256: str = MODEL_SHA256):
@@ -45,6 +48,7 @@ class YamnetClassifier:
         self.model_url = model_url
         self.model_sha256 = model_sha256
         self._lock = threading.Lock()
+        self._infer_lock = threading.Lock()  # one interpreter, shared by recordings and live tabs
         self._model: tuple[Any, dict[str, list[int]]] | None = None
 
     @property
@@ -93,24 +97,45 @@ class YamnetClassifier:
                 self._model = (interpreter, groups)
             return self._model
 
+    def _values(self, window: Any) -> dict[str, float]:
+        """One 0.975 s window → {kind: value}. Related classes share the probability (a laugh is
+        "Laughter" *and* "Snicker"), so a kind's value is their sum, capped at 1."""
+        interpreter, groups = self._load()
+        with self._infer_lock:
+            interpreter.set_tensor(interpreter.get_input_details()[0]["index"], window)
+            interpreter.invoke()
+            scores = interpreter.get_tensor(interpreter.get_output_details()[0]["index"])[0]
+        return {k: min(1.0, float(sum(scores[i] for i in ids))) for k, ids in groups.items() if ids}
+
+    def classify_samples(self, samples: Any) -> list[tuple[float, dict[str, float]]]:
+        """16 kHz mono float samples (−1…1) → (window start in seconds, {kind: value}) every 0.5 s.
+
+        For live tab audio: the browser sends a few seconds at a time (each batch starts 1 s before the
+        previous one ended, so no window is lost at the seam). Nothing is kept after the call.
+        """
+        import numpy as np
+
+        x = np.asarray(samples, dtype=np.float32)
+        out = []
+        for start in range(0, max(0, len(x) - WINDOW) + 1, HOP):
+            window = x[start:start + WINDOW]
+            if len(window) < WINDOW:
+                break
+            out.append((start / RATE, {k: round(v, 3) for k, v in self._values(window).items()}))
+        return out
+
     def _run(self, ffmpeg: str, path: Path, timeout: float) -> list[Frame]:
         import numpy as np
 
-        interpreter, groups = self._load()
-        inp = interpreter.get_input_details()[0]["index"]
-        out = interpreter.get_output_details()[0]["index"]
+        self._load()
         cmd = [ffmpeg, "-hide_banner", "-nostats", "-loglevel", "error", "-i", str(path),
                "-vn", "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"]
         deadline = time.monotonic() + timeout
         per_second: dict[int, dict[str, float]] = {}
 
         def infer(window: Any, start: int) -> None:
-            interpreter.set_tensor(inp, window)
-            interpreter.invoke()
-            scores = interpreter.get_tensor(out)[0]
-            # Related classes share the probability (a laugh is "Laughter" *and* "Snicker"), so a kind's
-            # value is their sum, capped at 1. A second keeps the stronger of its two half-second windows.
-            values = {k: min(1.0, float(sum(scores[i] for i in ids))) for k, ids in groups.items() if ids}
+            values = self._values(window)
+            # A second keeps the stronger of its two half-second windows.
             slot = per_second.setdefault(start // RATE, dict.fromkeys(values, 0.0))
             for k, v in values.items():
                 slot[k] = max(slot[k], v)
@@ -149,3 +174,8 @@ class YamnetClassifier:
         if not self.available:
             raise MediaProcessingError("Sound classification is not installed on the backend (ai-edge-litert)")
         return await asyncio.to_thread(self._run, ffmpeg, path, timeout)
+
+    async def classify_pcm(self, samples: Any) -> list[tuple[float, dict[str, float]]]:
+        if not self.available:
+            raise MediaProcessingError("Sound classification is not installed on the backend (ai-edge-litert)")
+        return await asyncio.to_thread(self.classify_samples, samples)

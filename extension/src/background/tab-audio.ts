@@ -1,7 +1,14 @@
 import { ApiClient, ApiError } from "@/services/api-client";
 import { getAuthToken, getSettings, getTabAudioState, patchTabAudioState, setTabAudioState } from "@/store/storage";
 import type { OffscreenRequest } from "@/types/messages";
-import { channelFromUrl, INITIAL_TAB_AUDIO_STATE, type LoudnessSample, type TabAudioState } from "@/types/tab-audio";
+import type { SoundKind } from "@/types/api";
+import {
+  channelFromUrl,
+  INITIAL_TAB_AUDIO_STATE,
+  type LoudnessSample,
+  type PcmChunk,
+  type TabAudioState,
+} from "@/types/tab-audio";
 
 const OFFSCREEN_URL = "offscreen.html";
 
@@ -36,7 +43,8 @@ export const defaultTabAudioDeps: TabAudioDeps = {
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_URL,
       reasons: ["USER_MEDIA" as chrome.offscreen.Reason],
-      justification: "Measure the loudness of the stream tab the editor chose (numbers only; audio is not recorded).",
+      justification:
+        "Measure the loudness of the stream tab the editor chose and, if they turned it on, pass its audio to their backend for laughter detection (never recorded).",
     });
   },
   async closeOffscreen() {
@@ -54,7 +62,8 @@ function describe(err: unknown): string {
  * between batches); the offscreen document does the measuring and wakes the worker every ~5 s.
  */
 export function createTabAudioManager(deps: TabAudioDeps = defaultTabAudioDeps) {
-  async function start(tabId: number, url: string): Promise<TabAudioState> {
+  async function start(tabId: number, url: string, opts: { sounds?: boolean } = {}): Promise<TabAudioState> {
+    const sounds = opts.sounds === true;
     const target = channelFromUrl(url);
     if (!target) throw new Error("Open a Twitch or Kick channel in this tab first");
     const current = await getTabAudioState();
@@ -66,7 +75,7 @@ export function createTabAudioManager(deps: TabAudioDeps = defaultTabAudioDeps) 
       throw new Error(`Chrome didn't allow capturing this tab's audio: ${describe(err)}`);
     }
     await deps.ensureOffscreen();
-    const res = await deps.toOffscreen({ target: "offscreen", type: "meter/start", streamId });
+    const res = await deps.toOffscreen({ target: "offscreen", type: "meter/start", streamId, sounds });
     if (!res?.ok) {
       await deps.closeOffscreen();
       throw new Error(res?.error ?? "The audio meter did not start");
@@ -78,6 +87,7 @@ export function createTabAudioManager(deps: TabAudioDeps = defaultTabAudioDeps) 
       platform: target.platform,
       channel: target.channel,
       startedAt: deps.now().toISOString(),
+      sounds,
       message: "Measuring… the first values arrive within a few seconds.",
     });
   }
@@ -88,15 +98,20 @@ export function createTabAudioManager(deps: TabAudioDeps = defaultTabAudioDeps) 
     return setTabAudioState({ ...INITIAL_TAB_AUDIO_STATE, message });
   }
 
-  async function onSamples(samples: LoudnessSample[]): Promise<TabAudioState> {
+  async function onSamples(samples: LoudnessSample[], pcm?: PcmChunk): Promise<TabAudioState> {
     const s = await getTabAudioState();
-    if (s.status === "off" || !s.platform || !s.channel || samples.length === 0) return s;
-    const levelDb = samples[samples.length - 1]?.db ?? null;
+    if (s.status === "off" || !s.platform || !s.channel || (samples.length === 0 && !pcm)) return s;
+    const levelDb = samples[samples.length - 1]?.db ?? s.levelDb;
     const client = deps.createClient((await getSettings()).backendUrl);
     const at = deps.now().toISOString();
     try {
-      await client.post("/api/v1/monitoring/audio", { platform: s.platform, channel: s.channel, sent_at: at, samples });
-      return patchTabAudioState({ status: "measuring", lastSentAt: at, levelDb, message: null });
+      const body = { platform: s.platform, channel: s.channel, sent_at: at, samples, ...(s.sounds && pcm ? { pcm } : {}) };
+      const res = await client.post<{ sound_state?: string; sounds?: Partial<Record<SoundKind, number>> | null }>(
+        "/api/v1/monitoring/audio",
+        body,
+      );
+      const sound = s.sounds ? { soundState: res?.sound_state ?? null, heard: res?.sounds ?? null } : {};
+      return patchTabAudioState({ status: "measuring", lastSentAt: at, levelDb, message: null, ...sound });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return stop("Sign in to StreamHunter to use tab audio.");
       if (err instanceof ApiError && err.status === 404)

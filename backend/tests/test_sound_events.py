@@ -171,3 +171,15 @@ def test_kinds_match_the_model_labels() -> None:
         labels = set(z.read("yamnet_label_list.txt").decode().splitlines())
     for names in SOUND_KINDS.values():
         assert set(names) <= labels
+
+
+@pytest.mark.skipif(not MODEL_DIR or not (Path(MODEL_DIR) / "yamnet.tflite").exists(), reason="set SOUND_MODEL_DIR to a folder with yamnet.tflite")
+async def test_real_model_classifies_live_samples() -> None:
+    import numpy as np
+
+    c = YamnetClassifier(MODEL_DIR or "")
+    if not c.available:
+        pytest.skip("ai-edge-litert not installed")
+    t = np.arange(48_000) / 16_000
+    got = await c.classify_pcm((0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32))  # 3 s of tone
+    assert [off for off, _ in got] == [0.0, 0.5, 1.0, 1.5, 2.0] and all(v["laughter"] < 0.1 for _, v in got)

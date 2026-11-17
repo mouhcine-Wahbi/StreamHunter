@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.detection.analyzer import StreamAnalyzer
 from app.detection.live_audio import LiveAudioBuffer
 from app.detection.models import CandidateDraft, ChatMessage, Strictness
+from app.detection.sound_events import KIND_CATEGORY, NAMELESS, reason_for, sound_score, strongest
 from app.detection.scoring_engine import DEFAULT_WEIGHTS, calculate_score
 from app.domain.enums import ClipStatus, ConnectionStatus, MonitoringSessionStatus as SS, Platform
 from app.errors import AppError
@@ -99,6 +100,16 @@ class ChatManager:
         if streamer_id not in self.tracked:
             return 0
         return self.audio.setdefault(streamer_id, LiveAudioBuffer()).add(samples, now)
+
+    def ingest_sounds(self, streamer_id: int, values: list[tuple[datetime, dict[str, float]]], now: datetime) -> int:
+        """Sound-classifier values (server clock) for a monitored streamer's tab audio."""
+        if streamer_id not in self.tracked:
+            return 0
+        return self.audio.setdefault(streamer_id, LiveAudioBuffer()).add_sounds(values, now)
+
+    def set_sound_state(self, streamer_id: int, state: str) -> None:
+        if streamer_id in self.tracked:
+            self.audio.setdefault(streamer_id, LiveAudioBuffer()).sound_state = state
 
     def _channel_error(self, platform: Platform, broadcaster_id: str, reason: str) -> None:
         sid = self.by_channel.get((platform, broadcaster_id))
@@ -313,15 +324,23 @@ class ChatManager:
         settings = await self._settings(db, {s.user_id for s in sessions})
         buf = self.audio.get(streamer_id)
         measured = buf.window_score(draft.start_at, draft.end_at) if buf is not None else None
+        heard = buf.window_sounds(draft.start_at, draft.end_at) if buf is not None else None
         score, breakdown, reasons = draft.score, dict(draft.signal_breakdown), list(draft.reasons)
-        if measured is not None:
-            audio, loudest = measured
-            breakdown.update({"audio": audio, "chat_only_score": draft.score, "audio_source": "live_tab",
-                              "active_signals": ["chat", "audio"]})
+        category = draft.category
+        if measured is not None or heard is not None:
+            loud, loudest = measured if measured is not None else (None, None)
+            parts = [x for x in (loud, sound_score(max(heard.values())) if heard else None) if x is not None]
+            audio = max(parts)
+            breakdown.update({"audio": audio, "audio_loudness": loud, "sounds": heard, "chat_only_score": draft.score,
+                              "audio_source": "live_tab", "active_signals": ["chat", "audio"]})
             score = round(calculate_score({"chat": breakdown.get("chat"), "audio": audio, "visual": None, "context": None},
                                           DEFAULT_WEIGHTS), 1)
-            if audio >= 40:
+            if loud is not None and loud >= 40:
                 reasons.append(f"Stream audio {loudest} dB louder than usual")
+            if (top := strongest(heard)) is not None:
+                reasons.append(reason_for(*top))
+                if category in NAMELESS:
+                    category = KIND_CATEGORY[top[0]]
         created = 0
         new_candidates: list[HighlightCandidate] = []
         for s in sessions:
@@ -346,7 +365,7 @@ class ChatManager:
                     end_offset_sec=offset(end),
                     score=score,
                     confidence=draft.confidence,
-                    category=draft.category,
+                    category=category,
                     reasons=reasons,
                     signal_breakdown={
                         **breakdown,

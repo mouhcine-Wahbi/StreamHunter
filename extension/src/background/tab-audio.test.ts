@@ -52,7 +52,7 @@ describe("tab audio manager", () => {
     const { d, offscreen } = deps();
     const s = await createTabAudioManager(d).start(7, "https://www.twitch.tv/StreamerOne");
     expect(d.streamIdFor).toHaveBeenCalledWith(7);
-    expect(offscreen).toEqual([{ target: "offscreen", type: "meter/start", streamId: "stream-123" }]);
+    expect(offscreen).toEqual([{ target: "offscreen", type: "meter/start", streamId: "stream-123", sounds: false }]);
     expect(s).toMatchObject({ status: "measuring", tabId: 7, platform: "twitch", channel: "streamerone", startedAt: NOW.toISOString() });
     expect(await getTabAudioState()).toEqual(s);
   });
@@ -96,6 +96,27 @@ describe("tab audio manager", () => {
     s = await m.onSamples(samples);
     expect(s).toMatchObject({ status: "off", message: "Sign in to StreamHunter to use tab audio." });
     expect(d.closeOffscreen).toHaveBeenCalled();
+  });
+
+  it("sends the tab's audio only when sound detection is on, and keeps what the backend heard", async () => {
+    await setAuthToken("tok");
+    const fetch = mockFetch(() =>
+      json({ session_id: 1, streamer_id: 2, accepted: 2, audio_state: "receiving", sound_state: "receiving", sounds: { laughter: 0.9, cheering: 0.1, screaming: 0 } }),
+    );
+    const pcm = { start: "2026-11-16T11:59:54.000Z", data: "AAEAAQ==" };
+    const { d, offscreen } = deps();
+    const m = createTabAudioManager(d);
+
+    await m.start(7, "https://kick.com/kickstar"); // loudness only
+    await m.onSamples(samples, pcm);
+    expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body)).pcm).toBeUndefined();
+    expect((await getTabAudioState()).heard).toBeNull();
+
+    await m.start(7, "https://kick.com/kickstar", { sounds: true });
+    expect(offscreen.at(-1)).toEqual({ target: "offscreen", type: "meter/start", streamId: "stream-123", sounds: true });
+    const s = await m.onSamples([], pcm); // audio but no new loudness value still goes out
+    expect(JSON.parse(String(fetch.mock.calls[1]![1]?.body)).pcm).toEqual(pcm);
+    expect(s).toMatchObject({ sounds: true, soundState: "receiving", heard: { laughter: 0.9 } });
   });
 
   it("ignores samples when off and stops when the tab closes or the capture ends", async () => {

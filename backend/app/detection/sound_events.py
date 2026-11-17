@@ -33,6 +33,7 @@ MERGE_GAP = 2.0  # seconds between two runs that still make one event
 MIN_EVENT_SECONDS = 2.0  # shorter runs are usually a single misheard sound
 FULL_SCORE_AT = 0.6  # probability that maps to a sound score of 100
 STRONG = 0.45  # enough to name the moment's category and give a reason
+NAMELESS = {"unknown", "other", "audience_reaction"}  # categories a clear sound (or screen event) may replace
 
 Frame = tuple[float, dict[str, float]]  # (second in the file, {kind: probability 0–1})
 

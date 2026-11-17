@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import timedelta
 
 from fastapi import APIRouter, Request, Response, status
@@ -9,7 +11,8 @@ from sqlalchemy import func, select
 
 from app.api.dependencies import ActivityServiceDep, CurrentUser, DbDep, PageDep
 from app.db.types import utcnow
-from app.errors import NotFoundError
+from app.clipping.ffmpeg_processor import MediaProcessingError
+from app.errors import AppError, NotFoundError
 from app.domain.enums import MonitoringSessionStatus
 from app.models import HighlightCandidate, MonitoringLease, MonitoringSession, Streamer, UserStreamer
 from app.monitoring.engine import MonitoringEngine
@@ -163,8 +166,39 @@ async def live_audio(body: LiveAudioIn, request: Request, user: CurrentUser, db:
     skew = now - body.sent_at  # browser clock → server clock
     chat = request.app.state.chat
     accepted = chat.ingest_audio(session.streamer_id, [(s.t + skew, s.db) for s in body.samples], now)
+    sound_state, sounds = "off", None
+    if body.pcm is not None and session.streamer_id in chat.tracked:
+        sound_state, sounds = await _classify_live(request, chat, session.streamer_id, body, skew, now)
     state = chat.audio[session.streamer_id].status(now)["audio_state"] if session.streamer_id in chat.audio else "off"
-    return LiveAudioOut(session_id=session.id, streamer_id=session.streamer_id, accepted=accepted, audio_state=str(state))
+    return LiveAudioOut(session_id=session.id, streamer_id=session.streamer_id, accepted=accepted, audio_state=str(state),
+                        sound_state=sound_state, sounds=sounds)
+
+
+async def _classify_live(request: Request, chat, streamer_id: int, body: LiveAudioIn, skew: timedelta, now) -> tuple[str, dict[str, float] | None]:  # type: ignore[no-untyped-def]
+    """Laughter / cheering / screaming in the tab audio of this batch. The samples are dropped afterwards."""
+    import numpy as np
+
+    assert body.pcm is not None
+    classifier = request.app.state.media_jobs.sound_classifier
+    if not request.app.state.settings.sound_events_enabled or classifier is None or not classifier.available:
+        chat.set_sound_state(streamer_id, "not_installed")
+        return "not_installed", None
+    try:
+        raw = base64.b64decode(body.pcm.data, validate=True)
+    except (binascii.Error, ValueError):
+        raise AppError("The audio data is not valid base64", code="invalid_audio") from None
+    pcm = np.frombuffer(raw[: len(raw) - len(raw) % 2], dtype="<i2").astype(np.float32) / 32768.0
+    try:
+        windows = await classifier.classify_pcm(pcm)
+    except MediaProcessingError as exc:
+        state = f"failed: {exc.message}"
+        chat.set_sound_state(streamer_id, state)
+        return state, None
+    start = body.pcm.start + skew
+    chat.ingest_sounds(streamer_id, [(start + timedelta(seconds=off), v) for off, v in windows], now)
+    if not windows:
+        return "receiving", None
+    return "receiving", {k: round(max(v.get(k, 0.0) for _, v in windows), 3) for k in windows[0][1]}
 
 
 @router.get("", response_model=Page[MonitoringSessionOut], summary="Monitoring session history")

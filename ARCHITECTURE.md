@@ -232,6 +232,8 @@ media_sources ──analyze job──► loudness per second (astats) + scene ch
       │  + YAMNet per second (16 kHz, streamed) → laughter / cheering / screaming probabilities
       │                              ├─ audio = max(loudness, sound); clear sound names the category
       │                              ├─ sound events (≥ 0.3 for ≥ 2 s) and loudness peaks (≥ 6 dB over the 2-min rolling median, ≥ 2 s) → origin "vod"
+      │  + picture 4×/s (signalstats: brightness, motion) → fast action (≥ 2.5× usual motion, ≥ 2 s), flashes
+      │                              ├─ visual = max(cut density, motion vs usual); screen events name "gameplay_highlight"
       │                              └─ merge overlapping pending highlights
       └──export job──► trim [start,end] − offset_in_stream → crop/pad 9:16 | 1:1 | 16:9 → loudnorm → MP4
                          └─ subtitles? window audio → 16 kHz WAV → faster-whisper (local) → .srt → burned in
@@ -255,7 +257,16 @@ backend: active session for (user, platform, channel) → per-streamer buffer (~
           → signal_breakdown.audio (audio_source "live_tab"), score = chat + audio (same weights as post-stream)
 ```
 
-The audio signal needs 30 s of history first; until then highlights stay chat-only.
+With live sound detection (a second, opt-in checkbox), the offscreen page also taps the stream
+through an AudioWorklet (`pcm-worklet.js`, mono), averages it down to 16 kHz and adds the samples
+to each 5 s batch, repeating the last second so no ~1 s classifier window is lost at the seam. The
+backend runs the same YAMNet model on them in memory (one shared interpreter, guarded by a lock),
+stores per-second laughter/cheering/screaming values next to the loudness, and drops the audio.
+A live highlight's audio signal is then the stronger of loudness and sound, and a clear sound
+names an unnamed category, the same as post-stream.
+
+The audio signal needs 30 s of history first; until then highlights stay chat-only (sound values
+count immediately).
 
 ## 6. Clip state machine
 

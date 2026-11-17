@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from app.detection.live_audio import LiveAudioBuffer
-from app.detection.models import ChatMessage
+from app.detection.models import ChatMessage, Strictness
 from app.domain.enums import Platform
 from app.models import HighlightCandidate, MonitoringSession, Streamer, User, UserSettings, UserStreamer
 from tests.chat_sim import ChatSim
@@ -46,7 +46,7 @@ def test_rejects_old_and_future_samples_and_clamps() -> None:
     s = b.status(now)
     assert s["audio_state"] == "receiving" and s["audio_level_db"] == 0.0
     assert b.status(now + timedelta(seconds=30))["audio_state"] == "stale"
-    assert LiveAudioBuffer().status(now) == {"audio_state": "off"}
+    assert LiveAudioBuffer().status(now) == {"audio_state": "off", "sound_state": "off"}
 
 
 # --- live detection with tab audio ----------------------------------------------------------
@@ -128,7 +128,8 @@ async def test_audio_api_resolves_the_session_and_corrects_the_clock(stack) -> N
 
     await app.state.chat.sync()
     ok = (await client.post("/api/v1/monitoring/audio", json=body, headers=h)).json()
-    assert ok == {"session_id": sess_id, "streamer_id": ok["streamer_id"], "accepted": 5, "audio_state": "receiving"}
+    assert ok == {"session_id": sess_id, "streamer_id": ok["streamer_id"], "accepted": 5, "audio_state": "receiving",
+                  "sound_state": "off", "sounds": None}
 
     act = (await client.get(f"/api/v1/monitoring/{sess_id}/activity", headers=h)).json()
     assert act["audio_state"] == "receiving" and act["audio_level_db"] == -30.5 and act["audio_warming_up"] is True
@@ -145,3 +146,84 @@ async def test_audio_api_resolves_the_session_and_corrects_the_clock(stack) -> N
     oh = {"Authorization": f"Bearer {o.json()['access_token']}"}
     assert (await client.post("/api/v1/monitoring/audio", json=body, headers=oh)).status_code == 404
     assert (await client.post("/api/v1/monitoring/audio", json=body)).status_code == 401
+
+
+# --- live laughter / cheering (opt-in: the tab's audio itself is sent) -------------------------
+class FakeLiveClassifier:
+    available = True
+
+    def __init__(self, laugh_from: float | None = None) -> None:
+        self.laugh_from = laugh_from
+        self.seen: list[int] = []
+
+    async def classify_pcm(self, samples):  # type: ignore[no-untyped-def]
+        self.seen.append(len(samples))
+        n = max(0, (len(samples) - 15_600) // 8_000 + 1)
+        return [(k / 2, {"laughter": 0.9 if self.laugh_from is not None and k / 2 >= self.laugh_from else 0.02,
+                         "cheering": 0.01, "screaming": 0.0}) for k in range(n)]
+
+
+def _pcm(start: datetime, seconds: float) -> dict[str, str]:
+    import base64
+
+    return {"start": start.isoformat(), "data": base64.b64encode(b"\x00\x01" * int(16_000 * seconds)).decode()}
+
+
+async def test_live_laughter_names_the_moment(stack) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+    app, client, _, _ = stack
+    r = await client.post("/api/v1/auth/register", json={"email": "l@example.com", "username": "ll", "password": "long password"})
+    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    uid = (await client.get("/api/v1/auth/me", headers=h)).json()["id"]
+    now = datetime.now(UTC)
+    streamer_id, _ = await _watch(app, uid, live_since=now - timedelta(minutes=30))
+    await app.state.chat.sync()
+    fake = FakeLiveClassifier(laugh_from=1.0)
+    app.state.media_jobs.sound_classifier = fake
+
+    body = {"platform": "kick", "channel": "kickstar", "sent_at": now.isoformat(),
+            "samples": [{"t": (now - timedelta(seconds=5 - k)).isoformat(), "db": -30.0} for k in range(5)],
+            "pcm": _pcm(now - timedelta(seconds=6), 6)}
+    out = (await client.post("/api/v1/monitoring/audio", json=body, headers=h)).json()
+    assert out["sound_state"] == "receiving" and out["sounds"] == {"laughter": 0.9, "cheering": 0.01, "screaming": 0.0}
+    assert fake.seen == [96_000]
+    buf = app.state.chat.audio[streamer_id]
+    heard = buf.window_sounds(now - timedelta(seconds=3), now)
+    assert heard is not None and heard["laughter"] == 0.9
+    assert buf.status(now)["sounds_heard"]["laughter"] == 0.9
+
+    # A chat moment over that laugh, which chat itself couldn't name.
+    from app.detection.models import CandidateDraft
+
+    draft = CandidateDraft(platform=Platform.KICK, broadcaster_id="501", start_at=now - timedelta(seconds=4), end_at=now, peak_at=now - timedelta(seconds=2), score=70.0,
+                           confidence=0.7, category="audience_reaction", reasons=["Chat burst"],
+                           signal_breakdown={"chat": 70.0}, strictness=Strictness.LOW, events=[])
+    async with app.state.sessionmaker() as db:
+        assert await app.state.chat._persist(db, draft, streamer_id) == 1
+        await db.commit()
+        [c] = (await db.scalars(select(HighlightCandidate))).all()
+    assert c.category == "funny_moment" and "Laughter in the audio (90% match)" in c.reasons
+    assert c.signal_breakdown["sounds"]["laughter"] == 0.9 and c.signal_breakdown["audio"] == 100.0
+    assert c.signal_breakdown["audio_loudness"] is None  # not enough loudness history yet
+
+
+async def test_live_sound_needs_the_classifier_and_valid_audio(stack) -> None:  # type: ignore[no-untyped-def]  # noqa: F811
+    app, client, _, _ = stack
+    r = await client.post("/api/v1/auth/register", json={"email": "m@example.com", "username": "mm", "password": "long password"})
+    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    uid = (await client.get("/api/v1/auth/me", headers=h)).json()["id"]
+    now = datetime.now(UTC)
+    await _watch(app, uid, live_since=now - timedelta(minutes=30))
+    await app.state.chat.sync()
+    body = {"platform": "kick", "channel": "kickstar", "sent_at": now.isoformat(), "samples": [],
+            "pcm": _pcm(now - timedelta(seconds=5), 5)}
+    app.state.media_jobs.sound_classifier = None
+    assert (await client.post("/api/v1/monitoring/audio", json=body, headers=h)).json()["sound_state"] == "not_installed"
+    cap = (await client.get("/api/v1/media/capabilities", headers=h)).json()
+    assert cap["live_sound_events"] == "requires_configuration"
+
+    app.state.media_jobs.sound_classifier = FakeLiveClassifier()
+    assert (await client.get("/api/v1/media/capabilities", headers=h)).json()["live_sound_events"] == "supported"
+    bad = await client.post("/api/v1/monitoring/audio", json={**body, "pcm": {**body["pcm"], "data": "not base64!"}}, headers=h)
+    assert bad.status_code == 400 and bad.json()["error"]["code"] == "invalid_audio"
+    long = await client.post("/api/v1/monitoring/audio", json={**body, "pcm": _pcm(now, 20)}, headers=h)
+    assert long.status_code == 422  # at most 12 s per batch

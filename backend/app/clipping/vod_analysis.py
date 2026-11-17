@@ -6,8 +6,11 @@
    When the sound classifier is installed, it also says what the audio *sounds like*
    (laughter, cheering, screaming): the stronger of loudness and sound becomes the audio signal,
    and a clear laughter/cheer/scream names the moment's category when chat didn't.
-3. Adds audio-only candidates for laughter/cheering/screaming events and for strong loudness
-   peaks that chat did not flag (loudness alone stays category "unknown").
+   On screen, it also measures motion and brightness: the visual signal is the stronger of
+   scene-cut density and "much more movement than usual", and a burst of fast action or a sudden
+   flash names an otherwise unnamed moment a gameplay highlight.
+3. Adds candidates for laughter/cheering/screaming events, fast action, flashes and strong
+   loudness peaks that chat did not flag (loudness alone stays category "unknown").
 4. Merges overlapping pending candidates.
 """
 
@@ -26,6 +29,7 @@ from app.clipping.sound_classifier import SoundClassifier
 from app.detection.audio_detector import delta_series, detect_audio_peaks, window_audio_score, window_visual_score
 from app.detection.sound_events import (
     KIND_CATEGORY,
+    NAMELESS,
     Frame,
     SoundEvent,
     detect_sound_events,
@@ -34,16 +38,26 @@ from app.detection.sound_events import (
     strongest,
     window_sounds,
 )
+from app.detection.visual_events import (
+    PictureFrame,
+    VisualEvent,
+    baseline,
+    detect_visual_events,
+    motion_per_second,
+    window_events,
+    window_motion_score,
+)
 from app.detection.scoring_engine import DEFAULT_WEIGHTS, calculate_score
 from app.domain.enums import ClipStatus as S
+from app.domain.enums import HighlightCategory as HC
 from app.errors import AppError
 from app.models import Clip, HighlightCandidate, MediaSource, MonitoringSession, StreamEvent
 from app.schemas.settings import UserSettingsModel
 
 AUDIO_ONLY_MIN_SCORE = 60.0
 MAX_WINDOW = 180.0
+VISUAL_NEEDS_AUDIO = 40.0  # a moment found on screen needs at least this much audio signal too
 LEAD = 5.0  # people often laugh a moment before chat reacts
-NAMELESS = {"unknown", "other", "audience_reaction"}  # categories a clear sound may replace
 
 
 def _merge_window(a: HighlightCandidate, b: HighlightCandidate) -> tuple[float, float]:
@@ -64,6 +78,10 @@ async def analyze_recording(
 
     series = await ff.loudness_series(ffmpeg, path, timeout=timeout) if media.has_audio else []
     cuts = await ff.scene_changes(ffmpeg, path, timeout=timeout) if media.has_video else []
+    picture: list[PictureFrame] = await ff.picture_series(ffmpeg, path, timeout=timeout) if media.has_video else []
+    motion = motion_per_second(picture)
+    usual_motion = baseline(motion)
+    seen = detect_visual_events(picture)
     deltas = delta_series(series) if series else []
     peaks = detect_audio_peaks(series)
     frames: list[Frame] = []
@@ -90,7 +108,15 @@ async def analyze_recording(
         return window_sounds(frames, to_file(start), to_file(end)) if frames else None
 
     def visual(start: float, end: float) -> float | None:
-        return window_visual_score(cuts, to_file(start), to_file(end), duration) if media.has_video else None
+        if not media.has_video:
+            return None
+        parts = [window_visual_score(cuts, to_file(start), to_file(end), duration),
+                 window_motion_score(motion, usual_motion, to_file(start), to_file(end)) if motion else None]
+        known = [x for x in parts if x is not None]
+        return max(known) if known else None
+
+    def on_screen(start: float, end: float) -> list[VisualEvent]:
+        return window_events(seen, to_file(start), to_file(end))
 
     cands = list((await db.scalars(
         select(HighlightCandidate).where(HighlightCandidate.session_id == session.id).order_by(HighlightCandidate.start_offset_sec)
@@ -104,6 +130,7 @@ async def analyze_recording(
         loud = audio(c.start_offset_sec, c.end_offset_sec)
         heard = sounds(c.start_offset_sec - LEAD, c.end_offset_sec)
         v = visual(c.start_offset_sec, c.end_offset_sec)
+        shown = on_screen(c.start_offset_sec, c.end_offset_sec)
         if loud is None and heard is None and v is None:
             continue
         top = strongest(heard)
@@ -115,23 +142,29 @@ async def analyze_recording(
                   "active_signals": [k for k, x in (("chat", chat), ("audio", a), ("visual", v)) if x is not None]})
         c.signal_breakdown = b
         c.score = round(calculate_score({"chat": chat, "audio": a, "visual": v, "context": None}, DEFAULT_WEIGHTS), 1)
-        reasons = [r for r in c.reasons if not r.startswith("Audio ") and " in the audio (" not in r]
+        reasons = [r for r in c.reasons if not r.startswith(("Audio ", "Fast on-screen action", "Sudden flash"))
+                   and " in the audio (" not in r]
         if loud is not None and loud >= 40:
             reasons.append(f"Audio {round(loud * 0.15, 1)} dB louder than this recording's usual level")
         if top is not None:
             reasons.append(reason_for(*top))
             if c.category in NAMELESS:
                 c.category = KIND_CATEGORY[top[0]]
+        reasons += _visual_reasons(shown)
+        if shown and top is None and c.category in NAMELESS:
+            c.category = HC.GAMEPLAY.value
         c.reasons = reasons
         enriched += 1
 
     # 3. Sound events and loudness peaks that no existing candidate covers.
     created = 0
     base_time = session.broadcast_started_at or session.started_at
-    found: list[tuple[float, float, float, SoundEvent | None, float | None]] = (
-        [(e.start, e.end, e.peak_t, e, None) for e in events] + [(p.start, p.end, p.peak_t, None, p.delta_db) for p in peaks]
+    found: list[tuple[float, float, float, SoundEvent | None, float | None, bool]] = (
+        [(e.start, e.end, e.peak_t, e, None, False) for e in events]
+        + [(p.start, p.end, p.peak_t, None, p.delta_db, False) for p in peaks]
+        + [(e.start, max(e.end, e.start + 1), e.peak_t, None, None, True) for e in seen]
     )
-    for f0, f1, peak_t, event, delta_db in found:
+    for f0, f1, peak_t, event, delta_db, picture_only in found:
         s0, s1 = f0 + shift, f1 + shift
         if any(c.start_offset_sec is not None and c.start_offset_sec - 10 <= s1 and s0 <= (c.end_offset_sec or 0) + 10 for c in cands):
             continue
@@ -140,6 +173,8 @@ async def analyze_recording(
         score = round(calculate_score({"chat": None, "audio": a, "visual": v, "context": None}, DEFAULT_WEIGHTS), 1)
         if a is None or score < AUDIO_ONLY_MIN_SCORE:
             continue
+        if picture_only and a < VISUAL_NEEDS_AUDIO:
+            continue  # games flash and move all the time; on its own that isn't a moment
         top = strongest(heard)
         start = max(0.0, s0 - settings.clips.preRollSeconds)
         end = min(start + MAX_WINDOW, s1 + settings.clips.postRollSeconds)
@@ -150,13 +185,15 @@ async def analyze_recording(
             reasons.append(f"Audio {delta_db} dB louder than usual for {int(f1 - f0)} s")
         elif loud is not None and loud >= 40:
             reasons.append(f"Audio {round(loud * 0.15, 1)} dB louder than this recording's usual level")
-        if v is not None and v >= 50:
+        shown = on_screen(s0, s1)
+        reasons += _visual_reasons(shown)
+        if v is not None and v >= 50 and not shown:
             reasons.append("Many scene changes at the same time")
         c = HighlightCandidate(
             user_id=media.user_id, session_id=session.id, streamer_id=session.streamer_id, platform=session.platform,
             timestamp=base_time + timedelta(seconds=peak_t + shift), start_offset_sec=round(start, 1),
             end_offset_sec=round(end, 1), score=score, confidence=round(0.5 + (top[1] / 2 if top else 0.0), 3),
-            category=KIND_CATEGORY[top[0]] if top else "unknown", reasons=reasons,
+            category=KIND_CATEGORY[top[0]] if top else (HC.GAMEPLAY.value if shown else "unknown"), reasons=reasons,
             signal_breakdown={"chat": None, "audio": a, "audio_loudness": loud, "sounds": heard, "visual": v, "context": None,
                               "weights": dict(DEFAULT_WEIGHTS),
                               "active_signals": ["audio"] + (["visual"] if v is not None else []),
@@ -170,6 +207,11 @@ async def analyze_recording(
         db.add(StreamEvent(session_id=session.id, streamer_id=session.streamer_id, event_type=e.kind,
                            stream_offset_sec=round(e.peak_t + shift, 1), confidence=min(0.95, e.peak),
                            event_metadata={"start": e.start + shift, "end": e.end + shift, "peak": e.peak, "score": e.score}))
+    for ve in seen:
+        db.add(StreamEvent(session_id=session.id, streamer_id=session.streamer_id, event_type=ve.kind,
+                           stream_offset_sec=round(ve.peak_t + shift, 1),
+                           confidence=round(min(0.95, ve.strength / (5 if ve.kind == "fast_action" else 100)), 3),
+                           event_metadata={"start": ve.start + shift, "end": ve.end + shift, "strength": ve.strength}))
     for p in peaks:
         db.add(StreamEvent(session_id=session.id, streamer_id=session.streamer_id, event_type="audio_peak",
                            stream_offset_sec=round(p.peak_t + shift, 1), confidence=min(0.95, p.score / 100),
@@ -203,11 +245,21 @@ async def analyze_recording(
         "sound_classification": sound_status,
         "sound_events": {k: sum(1 for e in events if e.kind == k) for k in KIND_CATEGORY},
         "scene_changes": len(cuts),
+        "visual_events": {k: sum(1 for e in seen if e.kind == k) for k in ("fast_action", "screen_flash")},
         "candidates_enriched": enriched,
         "candidates_created": created,
         "candidates_merged": merged,
     }
 
+
+
+def _visual_reasons(shown: list[VisualEvent]) -> list[str]:
+    """One reason per kind of visual event (the strongest), so a long fight isn't listed five times."""
+    best: dict[str, VisualEvent] = {}
+    for e in shown:
+        if e.kind not in best or e.strength > best[e.kind].strength:
+            best[e.kind] = e
+    return [e.reason() for e in best.values()]
 
 
 def _audio_signal(loud: float | None, heard: dict[str, float] | None) -> float | None:

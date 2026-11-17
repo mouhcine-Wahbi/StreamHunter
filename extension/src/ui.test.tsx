@@ -78,7 +78,7 @@ describe("popup tab audio (Phase 7)", () => {
     workerWithTabAudio((m) => starts.push(m));
     render(<Popup />);
     await userEvent.click(await screen.findByRole("button", { name: "Measure this tab's audio (streamerone)" }));
-    expect(starts).toEqual([{ type: "tab-audio/start", tabId: 42, url: "https://www.twitch.tv/StreamerOne" }]);
+    expect(starts).toEqual([{ type: "tab-audio/start", tabId: 42, url: "https://www.twitch.tv/StreamerOne", sounds: false }]);
     expect(await screen.findByText("Measuring")).toBeInTheDocument();
     expect(screen.getByText("twitch.tv/streamerone")).toBeInTheDocument();
 
@@ -93,6 +93,23 @@ describe("popup tab audio (Phase 7)", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Stop measuring" }));
     expect(await screen.findByRole("button", { name: "Measure this tab's audio (streamerone)" })).toBeInTheDocument();
+  });
+
+  it("can also listen for laughter (opt-in) and shows what it hears", async () => {
+    mockFetch(() => json({ detail: "Not Found" }, 404));
+    fakeChrome.internals.setActiveTab({ id: 42, url: "https://www.twitch.tv/StreamerOne" });
+    const starts: unknown[] = [];
+    workerWithTabAudio((m) => starts.push(m));
+    render(<Popup />);
+    await userEvent.click(await screen.findByRole("checkbox", { name: /Also detect laughter and cheering/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Measure this tab's audio (streamerone)" }));
+    expect(starts).toEqual([{ type: "tab-audio/start", tabId: 42, url: "https://www.twitch.tv/StreamerOne", sounds: true }]);
+    await act(async () => {
+      await chrome.storage.local.set({ "sh.tabAudio": { status: "measuring", tabId: 42, platform: "twitch", channel: "streamerone",
+        startedAt: "2026-11-16T12:00:00Z", lastSentAt: null, levelDb: -20, message: null, sounds: true, soundState: "receiving",
+        heard: { laughter: 0.8, cheering: 0.1, screaming: 0 } } });
+    });
+    expect(screen.getByText("Hearing laughter 80%")).toBeInTheDocument();
   });
 
   it("explains what to do on other pages", async () => {

@@ -1,4 +1,4 @@
-"""FFmpeg wrappers: loudness series, scene changes, and clip export.
+"""FFmpeg wrappers: loudness series, scene changes, picture brightness/motion, and clip export.
 
 All commands are built as argument lists (never through a shell), run with timeouts, and
 only ever read files from the user's media library.
@@ -17,6 +17,8 @@ from app.errors import AppError
 AspectRatio = str  # "16:9" | "9:16" | "1:1"
 
 _PTS = re.compile(r"pts_time:([0-9.]+)")
+_YAVG = re.compile(r"lavfi\.signalstats\.YAVG=([0-9.]+)")
+_YDIF = re.compile(r"lavfi\.signalstats\.YDIF=([0-9.]+)")
 _RMS = re.compile(r"lavfi\.astats\.Overall\.RMS_level=(-?[0-9.]+|-inf|inf|nan)")
 
 
@@ -76,6 +78,27 @@ async def scene_changes(ffmpeg: str, path: Path, *, threshold: float = 0.35, tim
     vf = f"fps=2,scale=160:-2,select='gt(scene,{threshold})',showinfo"
     res = await run([ffmpeg, "-hide_banner", "-nostats", "-i", str(path), "-an", "-vf", vf, "-f", "null", "-"], timeout=timeout)
     return [float(m.group(1)) for line in res.stderr.splitlines() if "Parsed_showinfo" in line and (m := _PTS.search(line))]
+
+
+async def picture_series(ffmpeg: str, path: Path, *, fps: int = 4, timeout: float) -> list[tuple[float, float, float]]:
+    """(time, brightness, motion) four times a second, from a small downscaled copy (cheap).
+
+    Brightness is the mean luma (0–255); motion is the mean absolute luma change from the previous
+    frame (0–255), i.e. how much of the picture moved.
+    """
+    vf = f"fps={fps},scale=160:-2,signalstats,metadata=print:file=-"
+    res = await run([ffmpeg, "-hide_banner", "-nostats", "-i", str(path), "-an", "-vf", vf, "-f", "null", "-"], timeout=timeout)
+    out: list[tuple[float, float, float]] = []
+    t: float | None = None
+    yavg: float | None = None
+    for line in res.stdout.splitlines():
+        if (m := _PTS.search(line)) is not None:
+            t, yavg = float(m.group(1)), None
+        elif (m := _YAVG.search(line)) is not None:
+            yavg = float(m.group(1))
+        elif (m := _YDIF.search(line)) is not None and t is not None and yavg is not None:
+            out.append((round(t, 3), yavg, float(m.group(1))))
+    return out
 
 
 def aspect_filter(aspect: AspectRatio) -> str:

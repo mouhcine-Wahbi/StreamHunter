@@ -19,6 +19,7 @@ class MediaCapabilitiesOut(Schema):
     subtitles: str
     sound_events: str  # laughter / cheering / screaming in recordings
     live_tab_audio: str
+    live_sound_events: str  # laughter / cheering / screaming in live tab audio (opt-in in the extension)
     platform_vod_download: str
 
 

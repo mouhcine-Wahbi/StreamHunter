@@ -93,14 +93,30 @@ class LiveAudioSample(Schema):
     db: float = Field(ge=-200, le=20)  # RMS loudness of that second, dBFS
 
 
+MAX_PCM_SECONDS = 12
+
+
+class LivePcmIn(Schema):
+    """The tab's audio itself, only when the editor turned on live sound detection (opt-in).
+
+    16 kHz mono signed 16-bit little-endian samples, base64. Classified in memory, never stored.
+    """
+
+    model_config = {"extra": "forbid"}
+    start: datetime  # browser clock of the first sample; corrected with sent_at
+    sample_rate: Literal[16000] = 16000
+    data: str = Field(min_length=4, max_length=(MAX_PCM_SECONDS * 16000 * 2 * 4) // 3 + 4)
+
+
 class LiveAudioIn(Schema):
-    """One batch of tab loudness (about 5 s). Numbers only: audio never leaves the browser."""
+    """One batch of tab loudness (about 5 s), plus the audio itself when sound detection is on."""
 
     model_config = {"extra": "forbid"}
     platform: Platform
     channel: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")  # login / slug from the tab URL
     sent_at: datetime  # browser clock when sent, to correct clock differences
     samples: list[LiveAudioSample] = Field(max_length=120)
+    pcm: LivePcmIn | None = None
 
 
 class LiveAudioOut(Schema):
@@ -108,6 +124,8 @@ class LiveAudioOut(Schema):
     streamer_id: int
     accepted: int
     audio_state: str
+    sound_state: str = "off"  # off | receiving | not_installed | failed: …
+    sounds: dict[str, float] | None = None  # strongest value per kind in this batch (0–1)
 
 
 class HeartbeatRequest(Schema):

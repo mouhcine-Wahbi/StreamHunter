@@ -36,6 +36,8 @@ it into a clip. Nothing is ever published without your approval.
 | Subtitles: local speech-to-text, burned into the MP4 + downloadable .srt | ✅ (needs the optional media extras) |
 | Laughter, cheering and screaming in your recordings (local sound classifier) name and score highlights | ✅ (needs the optional media extras) |
 | Live tab audio: the stream's loudness from your open Twitch/Kick tab joins live highlight detection | ✅ (start it from the popup) |
+| Live laughter and cheering from that tab (opt-in) name and score live highlights | ✅ (needs the optional media extras) |
+| On-screen events in recordings: bursts of fast action and sudden flashes | ✅ (needs FFmpeg) |
 
 ## Technology
 
@@ -187,7 +189,11 @@ attach a recording you own, for example a VOD you downloaded from your own dashb
    missed are added, and overlapping highlights are merged. With the media extras installed,
    StreamHunter also listens for **laughter, cheering and screaming**: a highlight with clear
    laughter becomes a *funny moment* ("Laughter in the audio (80% match)"), and laughs or cheers
-   chat missed become new highlights. The result line says what was heard.
+   chat missed become new highlights. The result line says what was heard. StreamHunter also
+   watches the picture: a burst of much more movement than the recording usually has ("Fast
+   on-screen action (3.2× the usual motion) for 6 s") or a sudden flash (explosions, flashbangs)
+   makes an unnamed highlight a *gameplay highlight*. A screen event on its own only becomes a new
+   highlight when the audio reacts too, because games flash and move all the time.
 3. In the **Clip Library**, choose an aspect ratio and click **Export MP4**, then **Download MP4**.
    Turn on **Subtitles** first to transcribe the speech and burn captions into the video; the
    captions are also available as **Download .srt**.
@@ -230,14 +236,23 @@ new live highlights get a measured audio signal ("Stream audio 12 dB louder than
 * After about 30 seconds StreamHunter knows the stream's normal level. Muting the player on the
   page also silences the measurement.
 
+**Live laughter and cheering (opt-in).** Before clicking **Measure this tab's audio**, tick
+**Also detect laughter and cheering**. The popup then shows what it hears ("Hearing laughter 90%"),
+and a live highlight with clear laughter becomes a *funny moment* ("Laughter in the audio (90% match)").
+This needs the media extras on the backend. Unlike loudness, it sends the tab's audio itself
+(16 kHz mono, about 32 KB per second) to **your own** StreamHunter backend, which classifies it in
+memory and keeps only the laughter/cheering/screaming numbers; the audio is never stored.
+
 ## Known limitations
 
 * Monitoring runs **only while Chrome is open**. Closing the browser pauses it.
 * Kick has **no official clip or VOD API**. Kick clips need a manual step.
 * A Twitch clip is a link on Twitch, not a downloadable video file.
 * Stream offsets are approximate (they come from the platform's `started_at`).
-* Tab audio follows what you see, a few seconds behind the broadcast (like chat). Live, only loudness
-  is measured, which can't tell laughter from shouting; laughter detection runs on recordings.
+* Tab audio follows what you see, a few seconds behind the broadcast (like chat). Without the
+  laughter option, live audio is loudness only, which can't tell laughter from shouting.
+* On-screen detection is generic: it doesn't know the game, so it can't tell a kill or a win from a
+  busy menu animation. Recognising specific game events would need a model per game.
 * Laughter detection hears a stream's sound as a whole: a laugh track, a game's crowd or music with
   cheering can count too. It names a moment only when it is fairly sure (45% or more).
   It hears a laugh best when it's the main sound (the streamer laughing instead of talking); a laugh

@@ -1,6 +1,10 @@
+import type { SoundKind } from "./api";
+
 /**
  * Live tab audio: the editor lets StreamHunter measure the loudness of a Twitch/Kick tab.
- * Only one loudness number per second is sent to the backend; audio never leaves the browser.
+ * By default only one loudness number per second is sent to the backend. With sound detection
+ * on (opt-in), the tab's audio itself (16 kHz mono) also goes to the editor's own StreamHunter
+ * backend, which recognises laughter, cheering and screaming and keeps only those numbers.
  *
  * - off:       not measuring.
  * - measuring: samples are being accepted by the backend.
@@ -22,6 +26,19 @@ export interface TabAudioState {
   /** Loudness of the latest second, dBFS. */
   levelDb: number | null;
   message: string | null;
+  /** Sound detection (laughter, cheering, screaming) is on for this capture. */
+  sounds: boolean;
+  /** Backend's answer: receiving | not_installed | failed: … */
+  soundState: string | null;
+  /** Strongest value per kind in the latest batch (0–1). */
+  heard: Partial<Record<SoundKind, number>> | null;
+}
+
+export interface PcmChunk {
+  /** ISO time of the first sample (browser clock). */
+  start: string;
+  /** 16 kHz mono signed 16-bit little-endian samples, base64. */
+  data: string;
 }
 
 export const INITIAL_TAB_AUDIO_STATE: TabAudioState = {
@@ -33,6 +50,9 @@ export const INITIAL_TAB_AUDIO_STATE: TabAudioState = {
   lastSentAt: null,
   levelDb: null,
   message: null,
+  sounds: false,
+  soundState: null,
+  heard: null,
 };
 
 export interface LoudnessSample {

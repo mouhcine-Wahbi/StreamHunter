@@ -37,7 +37,10 @@ export function useTabAudio() {
     state,
     busy,
     error,
-    start: useCallback((tabId: number, url: string) => run(() => sendRequest({ type: "tab-audio/start", tabId, url })), [run]),
+    start: useCallback(
+      (tabId: number, url: string, sounds = false) => run(() => sendRequest({ type: "tab-audio/start", tabId, url, sounds })),
+      [run],
+    ),
     stop: useCallback(() => run(() => sendRequest({ type: "tab-audio/stop" })), [run]),
   };
 }

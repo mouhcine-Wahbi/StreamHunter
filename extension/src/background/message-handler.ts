@@ -1,6 +1,7 @@
 import { getMonitoringState, getTabAudioState } from "@/store/storage";
 import { isRuntimeRequest, type RuntimeResponse } from "@/types/messages";
 import type { MonitoringManager } from "./monitoring-manager";
+import type { PcmChunk } from "@/types/tab-audio";
 import type { TabAudioManager } from "./tab-audio";
 
 const NO_TAB_AUDIO = "Tab audio is only available in the installed extension";
@@ -33,7 +34,7 @@ export async function handleMessage(
       case "tab-audio/start":
         if (!tabAudio) return { ok: false, error: NO_TAB_AUDIO };
         if (!Number.isInteger(message.tabId) || typeof message.url !== "string") return { ok: false, error: "Invalid tab" };
-        return { ok: true, data: await tabAudio.start(message.tabId, message.url) };
+        return { ok: true, data: await tabAudio.start(message.tabId, message.url, { sounds: message.sounds === true }) };
       case "tab-audio/stop":
         if (!tabAudio) return { ok: false, error: NO_TAB_AUDIO };
         return { ok: true, data: await tabAudio.stop() };
@@ -46,6 +47,7 @@ export async function handleMessage(
             message.samples
               .filter((x) => typeof x?.t === "string" && typeof x?.db === "number" && Number.isFinite(x.db))
               .slice(0, 120),
+            validPcm(message.pcm),
           ),
         };
       case "tab-audio/ended":
@@ -55,6 +57,12 @@ export async function handleMessage(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Unexpected error" };
   }
+}
+
+function validPcm(pcm: unknown): PcmChunk | undefined {
+  const p = pcm as Partial<PcmChunk> | null | undefined;
+  if (!p || typeof p.start !== "string" || typeof p.data !== "string" || p.data.length > 600_000) return undefined;
+  return { start: p.start, data: p.data };
 }
 
 /** Only accept messages from this extension's own pages. */

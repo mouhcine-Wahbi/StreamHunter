@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Volume2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { heardLabel } from "@/components/highlights/HighlightRow";
 import { useTabAudio } from "@/hooks/useTabAudio";
 import { channelFromUrl, type TabAudioStatus } from "@/types/tab-audio";
 
@@ -10,6 +11,17 @@ const STATUS: Record<Exclude<TabAudioStatus, "off">, { label: string; tone: "liv
   waiting: { label: "Not monitored", tone: "warn" },
   error: { label: "Not delivered", tone: "danger" },
 };
+
+/** One line about live sound detection, or null when it is off. */
+export function soundLine(state: { sounds: boolean; soundState: string | null; heard: Parameters<typeof heardLabel>[0] }): string | null {
+  if (!state.sounds) return null;
+  if (state.soundState === "not_installed")
+    return "Laughter detection isn't installed on the backend (pip install -r requirements-media.txt).";
+  if (state.soundState?.startsWith("failed: ")) return `Laughter detection failed: ${state.soundState.slice(8)}`;
+  if (state.soundState !== "receiving") return "Listening for laughter and cheering…";
+  const heard = heardLabel(state.heard);
+  return heard ? `Hearing ${heard}` : "Listening for laughter and cheering: nothing yet";
+}
 
 const PLATFORM_HOST = { twitch: "twitch.tv", kick: "kick.com" } as const;
 
@@ -20,6 +32,7 @@ const PLATFORM_HOST = { twitch: "twitch.tv", kick: "kick.com" } as const;
 export function TabAudioControl() {
   const audio = useTabAudio();
   const [tab, setTab] = useState<{ id: number; url: string } | null>(null);
+  const [sounds, setSounds] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -48,19 +61,33 @@ export function TabAudioControl() {
             {state.levelDb !== null && <span className="text-fg-muted tabular"> · {state.levelDb.toFixed(0)} dB</span>}
           </p>
           {state.message && <p className="text-fg-muted">{state.message}</p>}
+          {soundLine(state) && <p className="text-fg-muted">{soundLine(state)}</p>}
           <Button size="sm" variant="secondary" className="w-full" loading={audio.busy} onClick={() => void audio.stop()}>
             Stop measuring
           </Button>
         </div>
       ) : target && tab ? (
         <div className="space-y-2">
-          <Button size="sm" variant="secondary" className="w-full" loading={audio.busy} onClick={() => void audio.start(tab.id, tab.url)}>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="w-full"
+            loading={audio.busy}
+            onClick={() => void audio.start(tab.id, tab.url, sounds)}
+          >
             Measure this tab's audio ({target.channel})
           </Button>
           <p className="text-fg-subtle">
-            Adds stream loudness to live highlight detection. Only one loudness number per second is sent to your backend; the
-            audio itself stays in the browser, and the tab stays audible.
+            Adds stream loudness to live highlight detection. Only one loudness number per second is sent to your backend, and
+            the tab stays audible.
           </p>
+          <label className="flex items-start gap-2 text-fg-muted">
+            <input type="checkbox" className="mt-0.5" checked={sounds} onChange={(e) => setSounds(e.target.checked)} />
+            <span>
+              Also detect laughter and cheering. This sends the tab's audio to your StreamHunter backend, which listens for
+              them and keeps only the result; the audio is not stored.
+            </span>
+          </label>
         </div>
       ) : (
         <p className="text-fg-subtle">

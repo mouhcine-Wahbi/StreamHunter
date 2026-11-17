@@ -1,5 +1,5 @@
 import type { MonitoringState } from "./monitoring";
-import type { LoudnessSample, TabAudioState } from "./tab-audio";
+import type { LoudnessSample, PcmChunk, TabAudioState } from "./tab-audio";
 
 /** Messages UI surfaces send to the background service worker. */
 export type RuntimeRequest =
@@ -10,15 +10,15 @@ export type RuntimeRequest =
   | { type: "app/open"; route?: string }
   // Live tab audio (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "tab-audio/get" }
-  | { type: "tab-audio/start"; tabId: number; url: string }
+  | { type: "tab-audio/start"; tabId: number; url: string; sounds?: boolean }
   | { type: "tab-audio/stop" }
   // From the offscreen loudness meter to the worker.
-  | { type: "tab-audio/samples"; samples: LoudnessSample[] }
+  | { type: "tab-audio/samples"; samples: LoudnessSample[]; pcm?: PcmChunk }
   | { type: "tab-audio/ended"; reason: string };
 
 /** Messages the worker sends to the offscreen document (never handled by the worker). */
 export type OffscreenRequest =
-  | { target: "offscreen"; type: "meter/start"; streamId: string }
+  | { target: "offscreen"; type: "meter/start"; streamId: string; sounds: boolean }
   | { target: "offscreen"; type: "meter/stop" };
 
 export type RuntimeResponse<T = unknown> = { ok: true; data: T } | { ok: false; error: string };

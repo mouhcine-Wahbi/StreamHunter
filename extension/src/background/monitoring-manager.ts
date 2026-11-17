@@ -1,35 +1,27 @@
-import { ApiClient, ApiError } from "@/services/api-client";
-import { getAuthToken, getMonitoringState, getSettings, patchMonitoringState } from "@/store/storage";
+import { getMonitoringState, getSettings, patchMonitoringState } from "@/store/storage";
 import type { MonitoringState } from "@/types/monitoring";
 import { backoffDelayMs } from "@/utils/backoff";
 import { syncAlarms } from "./alarm-manager";
 import { notifyStreamEvents, type StreamNotification } from "./notifications";
 
 import { db } from "@/local/db";
-import { pauseActiveSessions, resumePausedSessions, syncSessions } from "@/local/sessions";
+import { activeSessionFor, pauseActiveSessions, resumePausedSessions, syncSessions } from "@/local/sessions";
+import { createHighlight, pruneOldData, type LocalHighlight } from "@/local/highlights";
 import { refreshStatuses, type RefreshResult } from "@/local/streamers";
 import type { MonitoringSession, Streamer } from "@/types/api";
 
-export interface HeartbeatResponse {
-  lease_expires_at: string;
-  interval_seconds: number;
-  started: boolean;
-  active_sessions: number;
-  live_count: number;
-  notifications: StreamNotification[];
-  server_time: string;
-}
-
 export interface MonitoringDeps {
   now: () => Date;
-  createClient: (baseUrl: string) => ApiClient;
   /** One live-status check of the monitoring list against Twitch/Kick. */
   refresh: (at: Date) => Promise<RefreshResult>;
+  /** After every check: chat connection sync (Twitch EventSub). */
+  afterCheck?: () => Promise<void>;
+  /** For every stored highlight (notifications, capture). */
+  onHighlight?: (h: LocalHighlight, s: Streamer) => Promise<void>;
 }
 
 const defaultDeps: MonitoringDeps = {
   now: () => new Date(),
-  createClient: (baseUrl) => new ApiClient({ baseUrl, getToken: getAuthToken }),
   refresh: (at) => refreshStatuses(undefined, at),
 };
 
@@ -51,27 +43,20 @@ function liveNotification(s: MonitoringSession, streamer: Streamer | undefined):
  * opens/ends sessions on live/offline transitions and notifies. All state is persisted after
  * every step, so a suspended/restarted service worker continues where it left off.
  */
-export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
+export function createMonitoringManager(overrides: Partial<MonitoringDeps> = {}) {
+  const deps: MonitoringDeps = { ...defaultDeps, ...overrides };
   // Single-flight guard: alarms and UI clicks can overlap within one worker lifetime.
   let inFlight: Promise<MonitoringState> | null = null;
 
-  async function checkBackend(): Promise<MonitoringState> {
-    const settings = await getSettings();
-    const client = deps.createClient(settings.backendUrl);
-    const at = deps.now().toISOString();
+  /** "Check now" while monitoring is off: refresh live status without opening sessions. */
+  async function checkOnce(): Promise<MonitoringState> {
+    const at = deps.now();
     try {
-      const health = await client.health();
-      return patchMonitoringState({
-        backendStatus: "online",
-        backendVersion: typeof health.version === "string" ? health.version : null,
-        lastCheckAt: at,
-      });
+      const r = await deps.refresh(at);
+      const problems = Object.entries(r.unavailable).map(([p, msg]) => `${p === "twitch" ? "Twitch" : "Kick"}: ${msg}`);
+      return patchMonitoringState({ lastCheckAt: at.toISOString(), liveCount: r.live, lastError: problems.length ? problems.join(" ") : null });
     } catch (err) {
-      return patchMonitoringState({
-        backendStatus: err instanceof ApiError && err.isHttp ? "online" : "offline",
-        lastCheckAt: at,
-        lastError: describeError(err),
-      });
+      return patchMonitoringState({ lastCheckAt: at.toISOString(), lastError: err instanceof Error ? err.message : "Unexpected error" });
     }
   }
 
@@ -94,16 +79,34 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
         const streamers = await db.all<Streamer>("streamers");
         await notifyStreamEvents(sync.opened.map((x) => liveNotification(x, streamers.find((s) => s.id === x.streamer_id))), settings);
       }
+      for (const sp of r.spikes) {
+        const session = await activeSessionFor(sp.streamer.id);
+        const ratio = sp.to / sp.from;
+        const h = await createHighlight({
+          streamer: sp.streamer,
+          session: session ?? null,
+          origin: "viewers",
+          peakAt: now.getTime(),
+          startAt: now.getTime() - settings.monitoring.intervalMinutes * 60_000,
+          endAt: now.getTime(),
+          score: Math.round(Math.min(90, 40 + (ratio - 1) * 40)),
+          confidence: Math.round(Math.min(0.8, 0.3 + (ratio - 1) / 4) * 100) / 100,
+          category: "audience_reaction",
+          reasons: [`Viewers jumped from ${sp.from.toLocaleString("en")} to ${sp.to.toLocaleString("en")} (+${Math.round((ratio - 1) * 100)}%)`],
+          breakdown: { chat: null, audio: null, visual: null, context: Math.round(Math.min(100, (ratio - 1) * 100)), active_signals: ["context"], provisional: true },
+        });
+        await deps.onHighlight?.(h, sp.streamer);
+      }
+      await deps.afterCheck?.().catch(() => undefined);
+      await pruneOldData(settings.privacy.retentionDays, now).catch(() => undefined);
       const waits = Object.values(r.retry_after);
       const failures = allFailed ? state.consecutiveFailures + 1 : 0;
       const backoff = allFailed ? backoffDelayMs(failures, { baseMs: settings.monitoring.intervalMinutes * 60_000 }) : 0;
       const wait = Math.max(backoff, waits.length ? Math.max(...waits) * 1000 : 0);
       return patchMonitoringState({
         status: allFailed ? "offline" : problems.length ? "degraded" : "active",
-        backendStatus: "unknown",
         lastCheckAt: at,
         lastSuccessAt: allFailed ? state.lastSuccessAt : at,
-        leaseExpiresAt: null,
         liveCount: r.live,
         activeSessions: sync.active,
         lastError: problems.length ? problems.join(" ") : null,
@@ -154,7 +157,6 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
       enabled: false,
       status: "stopped",
       enabledAt: null,
-      leaseExpiresAt: null,
       activeSessions: null,
       consecutiveFailures: 0,
       nextAttemptAt: null,
@@ -175,25 +177,7 @@ export function createMonitoringManager(deps: MonitoringDeps = defaultDeps) {
     return tick(true);
   }
 
-  return { start, stop, tick, restore, checkBackend };
+  return { start, stop, tick, restore, checkOnce };
 }
 
 export type MonitoringManager = ReturnType<typeof createMonitoringManager>;
-
-export function describeError(err: unknown): string {
-  if (err instanceof ApiError) {
-    switch (err.kind) {
-      case "network":
-        return "Backend unreachable. Is the StreamHunter backend running and is the URL correct?";
-      case "timeout":
-        return "Backend did not respond in time.";
-      case "parse":
-        return "Backend returned an unexpected response.";
-      case "http":
-        if (err.status === 401) return "Not signed in to StreamHunter (401).";
-        if (err.status === 404) return "This backend does not provide the monitoring endpoint (404).";
-        return `Backend error ${err.status}: ${err.message}`;
-    }
-  }
-  return err instanceof Error ? err.message : "Unknown error";
-}

@@ -1,26 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiClient, ApiError } from "@/services/api-client";
 import { LocalApi } from "@/local/local-api";
-import { getAuthToken, onStorageKeyChange, STORAGE_KEYS } from "@/store/storage";
-import { useSettings } from "./useSettings";
 
-/** Increments whenever the session token changes (sign in / sign out in any extension page). */
-function useAuthVersion(): number {
-  const [version, setVersion] = useState(0);
-  useEffect(() => onStorageKeyChange(STORAGE_KEYS.authToken, () => setVersion((v) => v + 1)), []);
-  return version;
-}
+const shared = new LocalApi();
 
-/** A client for the configured backend. A new instance after sign-in/out makes queries refetch. */
+/** StreamHunter's local API (IndexedDB + Twitch/Kick). One instance for the whole page. */
 export function useApiClient(): ApiClient {
-  const { settings } = useSettings();
-  const authVersion = useAuthVersion();
-  return useMemo(
-    // Local-first: answered inside the extension; paths not migrated yet still reach the old backend.
-    (): ApiClient => new LocalApi({ baseUrl: settings.backendUrl, getToken: getAuthToken }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings.backendUrl, authVersion],
-  );
+  return shared;
 }
 
 export interface QueryState<T> {
@@ -31,7 +17,7 @@ export interface QueryState<T> {
 }
 
 /**
- * Fetches `path` from the backend. Pass `null` to skip (e.g. until a search is submitted).
+ * Loads `path` from the local API. Pass `null` to skip (e.g. until a search is submitted).
  * Stale responses from earlier paths are discarded.
  */
 export function useApiQuery<T>(path: string | null): QueryState<T> {

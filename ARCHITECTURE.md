@@ -1,296 +1,112 @@
-# StreamHunter — Architecture
+# Architecture
 
-> Find the moment. Create the clip.
+StreamHunter is a single Chrome extension (Manifest V3, React 19, TypeScript, Vite, Tailwind). There
+is no server. Until v1.0 a FastAPI backend existed; it was retired in the local-first migration
+([docs/LOCAL_FIRST_MIGRATION.md](docs/LOCAL_FIRST_MIGRATION.md)) and is in git history before that.
 
-This document describes how StreamHunter is put together and — just as important —
-what the Twitch and Kick platforms do and do **not** allow. Everything in the
-"Platform capabilities" section is the basis for the capability flags the product
-reports to the user. Nothing in the product may claim more than is listed here.
-
----
-
-## 1. System overview
+## 1. Pieces
 
 ```text
-┌──────────────────────────── Chrome (Manifest V3) ────────────────────────────┐
-│                                                                              │
-│  Popup (control center)   Full page / Side panel (editor workspace)          │
-│          │                         │                                         │
-│          └──── chrome.runtime messages ────┐                                 │
-│                                            ▼                                 │
-│                     Background service worker (ephemeral)                    │
-│                     • alarm-manager   (chrome.alarms)                        │
-│                     • monitoring-manager (state in chrome.storage.local)     │
-│                     • message-handler (typed request/response)               │
-│                     • heartbeat → backend lease                              │
-└────────────────────────────────────────┬─────────────────────────────────────┘
-                                         │ HTTPS REST /api/v1 + WS /ws/monitoring
-                                         ▼  (bearer token of the StreamHunter user)
-┌──────────────────────────────── FastAPI backend ─────────────────────────────┐
-│  api/routes ── services ── models (SQLAlchemy 2, SQLite → PostgreSQL)        │
-│        │                                                                     │
-│        ├── integrations/  (platform adapters, capability reporting)          │
-│        │      ├── twitch/  Helix REST + EventSub WebSocket (chat, online)    │
-│        │      └── kick/    Public API v1/v2 + signed webhooks (chat, status) │
-│        ├── monitoring/   lease manager, scheduler, session lifecycle         │
-│        ├── detection/    chat window aggregator + detectors + scoring        │
-│        └── clipping/     clip state machine, platform clip requests,         │
-│                          (future) authorized media export via FFmpeg         │
-└──────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────── Chrome extension ─────────────────────────────┐
+│ Pages (popup, workspace, side panel)                                       │
+│   └─ useApiQuery / useApiClient → LocalApi ("/api/v1/..." paths, in-page)   │
+│                                                                            │
+│ Service worker (alarms, messages, notifications)                           │
+│   ├─ monitoring-manager: alarm → status check → sessions → notifications   │
+│   ├─ chat-manager: Twitch EventSub WebSocket → StreamAnalyzer → highlights │
+│   └─ capture-manager: start/stop capture, forward clip requests            │
+│                                                                            │
+│ Offscreen document (needed for tab media)                                  │
+│   └─ capture engine: tab video/audio → WebCodecs → rolling buffer → MP4    │
+│                                                                            │
+│ Storage: IndexedDB "streamhunter" (data, clip videos)                      │
+│          chrome.storage.local (settings, credentials, tokens, live state)  │
+└────────────────────────────────────────────────────────────────────────────┘
+        │ HTTPS (host permissions)                 │ WSS
+        ▼                                          ▼
+  api.twitch.tv / id.twitch.tv               eventsub.wss.twitch.tv
+  api.kick.com  / id.kick.com
 ```
 
-### Responsibilities
+* **LocalApi** (`src/local/local-api.ts`) keeps the `/api/v1/...` paths and response shapes the pages
+  were built on, but answers them from IndexedDB and the platform clients. Unknown paths are a local 404.
+* **Platform clients** (`src/platforms/`): `createTwitchClient` (Helix: Search Channels, Get Streams,
+  Get Users) and `createKickClient` (public API: channels by slug, users, livestreams). Both use an app
+  access token from the editor's own app (client credentials), cached in storage, refreshed once on 401.
+  Status checks are batched: 100 Twitch ids or 50 Kick slugs per request. A 429 records the wait the
+  platform asked for (Retry-After / Ratelimit-Reset).
 
-| Layer | Owns | Never does |
-|---|---|---|
-| Extension | UI, user intent (start/stop), scheduling heartbeats, showing truthful status | Hold platform client secrets or platform OAuth tokens |
-| Backend | Platform API calls, OAuth token exchange & encrypted storage, chat ingestion, detection, persistence, clip requests | Monitor after the browser lease has expired |
-| Detection engine | Platform-independent scoring from normalized `ChatMessage`/`StreamEvent` objects | Import platform-specific code |
+## 2. Discovery mode (background)
 
----
+```text
+chrome.alarms (every N min, default 2)
+  → refreshStatuses(): one request per platform per 100/50 streamers
+      → streamers updated (live, title, category, viewers, viewer history)
+      → went live / went offline, viewer spikes (≥ 1.5× and +100 over this broadcast's median)
+  → syncSessions(): open a session per live monitored streamer, end it when offline
+  → notifications (go-live opt-in), viewer-spike highlights (provisional)
+  → chat-manager.sync()
+```
 
-## 2. Browser-based monitoring model (lease)
+**Chat (Twitch).** With "Sign in with Twitch" (`chrome.identity.launchWebAuthFlow`, implicit grant,
+scope `user:read:chat`), the worker opens one EventSub WebSocket (`keepalive_timeout_seconds=10`;
+Chrome 116+ keeps a worker alive while a WebSocket is active) and subscribes to
+`channel.chat.message` for every live Twitch streamer in an active session. Messages go into a
+per-stream `StreamAnalyzer`, which is evaluated every 5 s:
 
-Manifest V3 service workers are suspended after ~30 s of inactivity, so the extension
-cannot run a permanent loop. The design:
+```text
+messages → RollingChatWindow (5 s buckets, ≤ 2 counted messages per chatter per bucket,
+           bots/commands/broadcaster ignored, 5-minute baseline per stream)
+         → detectors: chat spike (z-score + ratio vs baseline), emote wave, repeated phrase,
+           clip requests, reactions (8 language packs + custom phrases), mood shift
+         → moments (open on first event, close after 10 s quiet or 90 s; 20 s cooldown)
+         → score (renormalized weights: only signals that exist count), category from evidence
+         → sensitivity filter (low / medium / high) → highlight (provisional) → notification
+```
 
-1. **State lives in `chrome.storage.local`** (`monitoring` key): enabled flag, last
-   heartbeat result, last error, consecutive failures, next backoff time.
-2. **`chrome.alarms`** drives work. `sh-heartbeat` fires every *N* minutes
-   (configurable, minimum 1 — Chrome enforces ≥30 s for packed extensions).
-3. Every alarm tick the worker re-reads state from storage (it may have been
-   restarted) and calls `POST /api/v1/monitoring/heartbeat`.
-4. The backend grants a **lease** (`expires_at = now + lease_ttl`, default 3× the
-   heartbeat interval). While the lease is valid the backend polls live status for
-   the user's watchlist and keeps chat collectors open.
-5. When the lease expires (browser closed, laptop asleep, extension disabled) the
-   backend **stops** chat collectors and marks sessions `paused`. It does not keep
-   monitoring in the cloud.
-6. `chrome.runtime.onStartup` / `onInstalled` re-create alarms and resume if
-   monitoring was enabled. Failed heartbeats back off exponentially
-   (1, 2, 4 … capped at 15 min) and the UI shows `degraded`/`offline` truthfully.
+Kick's official API delivers chat only via webhooks to a public HTTPS server, so Kick sessions report
+chat as unavailable and rely on live status and viewer spikes.
 
-**Implemented (Phase 4):** `backend/app/monitoring/`. `engine.py` handles the lease, poll cycle and
-per-platform backoff, `reconciler.py` holds the session rules, `scheduler.py` is an asyncio loop in the
-API process, and `retention.py` is the sweep. The extension sends `since` (the backend clock at the
-previous heartbeat) so "went live" notifications are delivered once. A Redis/Celery worker can replace
-the in-process scheduler without changing the engine API.
+## 3. Capture mode
 
-Monitoring states shown to the user: `stopped`, `starting`, `active`, `degraded`
-(backend reachable but errors), `offline` (backend unreachable), `paused`.
+The editor clicks **Capture this stream** in the popup on a stream tab. That click lets
+`chrome.tabCapture.getMediaStreamId` work; the worker creates the offscreen document (reason
+`USER_MEDIA`) and starts the engine there:
 
----
+```text
+getUserMedia(tab video ≤ 1280×720 ≤ 30 fps + tab audio)
+  ├─ audio → AudioContext → speakers (capturing would otherwise mute the tab)
+  ├─ video → MediaStreamTrackProcessor → VideoEncoder (H.264, keyframe every 2 s, 3 Mbit/s)
+  │          + every 250 ms a 64×36 sample → motion (mean |Δluma|) and brightness
+  ├─ audio → MediaStreamTrackProcessor → AudioEncoder (AAC 128 kbit/s, Opus fallback)
+  │          + RMS loudness per second
+  └─ ChunkRing: encoded chunks of the last 120 s (wall-clock timestamps)
 
-## 3. Platform capabilities (verified research, 2026-11-13)
+every second: LiveSignals (2-minute rolling median per stream)
+  → loud (≥ 6 dB over normal for 2 s), fast action (≥ 2.5× usual motion for 2 s),
+    flash (brightness +50 and back)
+  → score = calculateScore({audio, visual}); ≥ minimum score → highlight (origin "capture")
+clip requests (capture moments, chat/viewer highlights of the captured streamer, Save last N s)
+  → wait for the post-roll → ChunkRing.select(from keyframe ≤ start … end)
+  → mp4-muxer (no re-encode, tracks aligned) → IndexedDB clips + clipBlobs → notification
+```
 
-### How this was verified
+A clip covers `[moment − pre-roll, moment + post-roll]` (Settings → Clips, default 20 s / 10 s), within
+what the buffer still holds.
 
-* **Kick**: read from the official `KickEngineering/KickDevDocs` repository on
-  GitHub (source of docs.kick.com). `docs.kick.com` and `api.kick.com` were not
-  reachable from the development container, so request/response field names that
-  only exist in the OpenAPI spec (`https://api.kick.com/swagger/doc.yaml`) are
-  **unverified** and must be confirmed when credentials and network access exist.
-* **Twitch**: `dev.twitch.tv` was not reachable from the development container.
-  The Twitch facts below come from established Helix/EventSub documentation as
-  known before this session and are marked *unverified this session*. They must
-  be re-checked against https://dev.twitch.tv/docs before enabling each feature.
+## 4. Data
 
-### Kick (official public API)
+See [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md). Retention (Settings → Privacy, default 30 days) deletes
+provisional highlights and ended sessions after each status check; highlights with a clip stay until
+the clip is deleted.
 
-| Item | Finding |
+## 5. Chrome constraints and how they are handled
+
+| Constraint | Handling |
 |---|---|
-| OAuth server | `https://id.kick.com` — `GET /oauth/authorize`, `POST /oauth/token`, `POST /oauth/revoke`, `POST /oauth/token/introspect` |
-| Flow | Authorization code **with PKCE (S256)**; `state` required |
-| Client secret | **Required** for code exchange and refresh → exchange must happen on the backend |
-| App token | `client_credentials` grant exists (needs secret) |
-| Scopes | `user:read`, `channel:read`, `channel:write`, `channel:rewards:read/write`, `chat:write`, `streamkey:read`, `events:subscribe`, `moderation:ban`, `moderation:chat_message:manage`, `kicks:read`, `ads:read/write` |
-| API base | `https://api.kick.com/public/v1/…` and `/public/v2/…` |
-| Channel lookup | `GET /public/v1/channels` (lookup by slug added 2025-04-08; param name unverified) |
-| Livestreams | `GET /public/v2/livestreams`, `GET /public/v1/livestreams`, `/public/v1/livestreams/stats` |
-| Users / categories | `GET /public/v1/users`, `GET /public/v1/categories[/{id}]`, `/public/v2/categories` |
-| **Reading chat** | Only via **webhook** event `chat.message.sent` (subscribe with `POST /public/v1/events/subscriptions`). No official WebSocket or polling read API |
-| Status events | `livestream.status.updated`, `livestream.metadata.updated` (webhook) |
-| Webhook delivery | Kick POSTs to a **public HTTPS URL** configured in the Kick app settings. Local development needs a tunnel (e.g. Cloudflare Tunnel / ngrok) |
-| Webhook security | RSA PKCS#1 v1.5 + SHA-256 over `message_id.timestamp.body`, base64 in `Kick-Event-Signature`; public key from `GET /public/v1/public-key` (do not hardcode) |
-| **Clip creation** | **No official API** → `requires_manual_action` |
-| **VOD / video** | **No official endpoint** → `unsupported` |
-| Rate limits | Not documented |
-
-**Phase 3 verification update (2026-11-15):** the Kick OAuth parameters above were re-read from
-the docs source (`getting-started/generating-tokens-oauth2-flow.md`). Kick's per-endpoint field names
-live only in the OpenAPI spec, which was still unreachable, so `app/integrations/kick/schemas.py`
-parses them defensively and documents them as unverified. Twitch `Get Users` / `Get Streams` fields
-were checked against the official `twitchdev/twitch-cli` mock API source. The opt-in tests in
-`tests/integration/` confirm everything against the live APIs once credentials exist.
-
-### Twitch (Helix + EventSub) — *partially verified (see above)*
-
-| Item | Finding |
-|---|---|
-| OAuth | `https://id.twitch.tv/oauth2/authorize`, `/token`, `/validate`, `/revoke`. Authorization-code flow needs the client secret → backend exchange. Tokens must be validated hourly via `/validate` |
-| App token | Client credentials — enough for Search Channels, Get Users, Get Streams |
-| Search | `GET /helix/search/channels?query=` → `id`, `broadcaster_login`, `display_name`, `is_live`, `game_name`, `title`, `thumbnail_url`, `started_at` |
-| Users / Streams | `GET /helix/users?login=`, `GET /helix/streams?user_id=` (`viewer_count`, `started_at`, `game_name`, `title`, `type`) |
-| Chat read | EventSub **WebSocket** (`wss://eventsub.wss.twitch.tv/ws`) subscription `channel.chat.message` v1, user token with `user:read:chat`, condition `{broadcaster_user_id, user_id}`. Messages include emote fragments. IRC remains as legacy |
-| Online/offline | EventSub `stream.online` / `stream.offline` (or Get Streams polling) |
-| Clip creation | `POST /helix/clips?broadcaster_id=` with `clips:edit`; asynchronous — returns `id` + `edit_url`, then confirm with `GET /helix/clips?id=`. Only while live and if the channel allows clips |
-| Clip download | Not guaranteed. Any official download endpoint is restricted to broadcaster/editor roles → `video_download: not_guaranteed` |
-| VODs | `GET /helix/videos?user_id=` gives metadata/URL; no general media download → `vod_analysis: conditional` (metadata only) |
-| Rate limits | Token-bucket, reported in `Ratelimit-*` headers; honour them |
-
-### Resulting capability matrix (defaults before authorization)
-
-| Capability | Twitch | Kick |
-|---|---|---|
-| stream_lookup | requires app credentials | requires app credentials |
-| live_detection | yes (poll / EventSub) | yes (poll / webhook) |
-| category_lookup | yes | yes |
-| chat_monitoring | yes, with user OAuth (`user:read:chat`) | **requires public webhook URL** + `events:subscribe` |
-| official_clip_creation | yes, with `clips:edit`, live only | **requires_manual_action** |
-| vod_analysis | conditional (metadata only) | unsupported |
-| video_download | not_guaranteed | unsupported |
-
-Capabilities are computed at runtime by each adapter from configuration and the
-user's connection state (`GET /api/v1/platforms/capabilities`), not hardcoded in the UI.
-
-### Explicitly out of bounds
-
-* Kick's undocumented Pusher WebSocket for chat, scraping channel pages, or any
-  unofficial clip/VOD downloader (e.g. yt-dlp against platform media).
-* Capturing tab audio/video without an explicit user gesture and Chrome's
-  `tabCapture`/`offscreen` permission flow (live tab audio is opt-in per tab, started from the popup).
-
----
-
-## 4. Timestamps
-
-* All stored timestamps are UTC. API boundaries use timezone-aware ISO 8601.
-* `stream_offset_sec` is computed as `event_time − stream.started_at` **only** when
-  the platform reports `started_at`; it is labelled *approximate* because broadcast
-  delay and ingestion latency are unknown. If `started_at` is missing, the offset
-  is `null` — never guessed.
-
----
-
-## 5. Detection engine (platform-independent)
-
-```text
-ChatMessage stream ─► RollingWindow (e.g. 10 s buckets, 5 min baseline)
-                       │   per-window: messages, unique users (per-user cap),
-                       │   emote counts, keyword hits, clip requests
-                       ▼
-     Detectors: chat_spike · emote · keyword · reaction  ──► DetectorEvent
-                       ▼
-               event_aggregator (merge events within a cooldown window)
-                       ▼
-               scoring_engine (renormalized weights over available signals)
-                       ▼
-               HighlightCandidate {score 0–100, confidence, reasons,
-                                   signal_breakdown, category, suggested window}
-```
-
-**Implemented (Phase 5):** `backend/app/detection/` (platform independent) and
-`backend/app/monitoring/chat_manager.py` (collectors + persistence).
-
-* 5 s buckets, a 15 s analysis window, and a 5 min baseline per stream. Relative detection
-  needs at least 30 s of history ("warming up" before that).
-* Detectors: `chat_spike` (z-score and ratio vs the stream's own baseline), `emote_wave` and
-  `repeated_phrase` (both must be ≥ 2× their usual rate), `clip_request` ("clip it", multilingual),
-  `reaction` (8 language packs + custom phrases) and `sentiment_shift`. Repeated phrases and
-  sentiment shifts only *support* a moment; one of the first four must fire.
-* Every detection records the strictest sensitivity level it passes (low / medium / high). Each
-  user only gets candidates that pass their own sensitivity, while one shared analyzer serves
-  all users watching the same streamer.
-* Aggregator: a moment extends while events keep coming (≤ 10 s gaps, ≤ 90 s total), then
-  becomes one candidate (score floor 35); there is a 20 s cooldown after it.
-* Candidate window = moment ± the user's pre-roll / post-roll. Offsets are relative to the
-  platform's broadcast start, labelled approximate, and `null` when the start is unknown.
-* Chat collection: Twitch EventSub WebSocket (one connection per authorizing user;
-  keepalive, reconnect, revocation handled). Kick signed webhooks (RSA verified, ±5 min, replay
-  protected), subscribed and unsubscribed per channel with the app token. When chat can't be
-  collected, the reason is written to the session and shown in the UI.
-
-Rules carried over from the design:
-
-* Spikes are measured as a z-score / ratio against the stream's own rolling
-  baseline, not a global threshold.
-* Each user's contribution per window is capped so one spammer ≠ an audience.
-* Keyword/reaction lists are configurable per language.
-* Missing audio/visual signals are excluded and the remaining weights renormalized.
-
----
-
-## 5b. Post-stream analysis and export (Phase 7)
-
-```text
-user-provided recording (upload / register, rights confirmed)
-      │ ffprobe
-      ▼
-media_sources ──analyze job──► loudness per second (astats) + scene changes (select/showinfo)
-      │                              │
-      │                              ├─ enrich covered highlights: score = renormalized(chat, audio, visual)
-      │  + YAMNet per second (16 kHz, streamed) → laughter / cheering / screaming probabilities
-      │                              ├─ audio = max(loudness, sound); clear sound names the category
-      │                              ├─ sound events (≥ 0.3 for ≥ 2 s) and loudness peaks (≥ 6 dB over the 2-min rolling median, ≥ 2 s) → origin "vod"
-      │  + picture 4×/s (signalstats: brightness, motion) → fast action (≥ 2.5× usual motion, ≥ 2 s), flashes
-      │                              ├─ visual = max(cut density, motion vs usual); screen events name "gameplay_highlight"
-      │                              └─ merge overlapping pending highlights
-      └──export job──► trim [start,end] − offset_in_stream → crop/pad 9:16 | 1:1 | 16:9 → loudnorm → MP4
-                         └─ subtitles? window audio → 16 kHz WAV → faster-whisper (local) → .srt → burned in
-Twitch Get Videos (archive) ──► session.vod_url ──► highlight.vod_url_at (?t=…, approximate)
-```
-
-`offset_in_stream_sec` maps file time to stream time (0 for a full VOD). Audio "excitement" is
-loudness relative to the recording's own baseline; it can't tell laughter from shouting, so
-loudness-only highlights are categorized `unknown`. The sound classifier (YAMNet, AudioSet classes
-grouped into laughter / cheering / screaming) tells them apart and names the moment when it is
-fairly sure. Subtitles use faster-whisper on the CPU (int8);
-the model is loaded once and reused, and captions are wrapped to short lines for vertical video.
-Live tab audio (opt-in per tab):
-
-```text
-popup (user click on the stream tab) ─tab-audio/start─► worker ─tabCapture.getMediaStreamId─► offscreen page
-offscreen: getUserMedia(tab) → speakers (stays audible) + AnalyserNode → RMS dBFS per second
-        ─tab-audio/samples (every 5 s)─► worker ─POST /api/v1/monitoring/audio {platform, channel, sent_at, samples}─► backend
-backend: active session for (user, platform, channel) → per-streamer buffer (~7 min, clock-corrected via sent_at)
-        → each new live highlight: loudest second in [start − 15 s, end] vs the 2-min rolling median
-          → signal_breakdown.audio (audio_source "live_tab"), score = chat + audio (same weights as post-stream)
-```
-
-With live sound detection (a second, opt-in checkbox), the offscreen page also taps the stream
-through an AudioWorklet (`pcm-worklet.js`, mono), averages it down to 16 kHz and adds the samples
-to each 5 s batch, repeating the last second so no ~1 s classifier window is lost at the seam. The
-backend runs the same YAMNet model on them in memory (one shared interpreter, guarded by a lock),
-stores per-second laughter/cheering/screaming values next to the loudness, and drops the audio.
-A live highlight's audio signal is then the stronger of loudness and sound, and a clear sound
-names an unnamed category, the same as post-stream.
-
-The audio signal needs 30 s of history first; until then highlights stay chat-only (sound values
-count immediately).
-
-## 6. Clip state machine
-
-```text
-detected → pending_review → approved → creation_requested → created → exporting → ready → published
-                │              │              │                 │            │
-                └→ rejected    └→ unsupported └→ failed ←───────┴────────────┘
-failed → creation_requested (retry)
-```
-
-`published` is reachable only from `ready`/`created` through an explicit user
-confirmation endpoint. StreamHunter never publishes anywhere by itself; “published”
-is a manual flag the editor sets.
-
----
-
-## 7. Security
-
-* Platform secrets only in backend environment variables.
-* Platform tokens encrypted at rest (Fernet, key from `TOKEN_ENCRYPTION_KEY`).
-* Extension stores only the StreamHunter session token and non-secret settings.
-* All resources are scoped to the authenticated user; ownership is checked in
-  the service layer.
-* Kick webhooks are rejected unless the RSA signature verifies and the timestamp
-  is recent; duplicate message IDs are ignored.
-
-See `SECURITY.md` (Phase 2) for the full policy.
+| The service worker can stop at any time | All state in storage; alarms drive checks; single-flight ticks; restore on startup |
+| Alarms fire at most every 30 s | Interval in minutes (1–60) |
+| Tab media needs a document | Offscreen document (one per extension) hosts the capture engine |
+| Tab capture needs a user gesture on that tab | Capture starts only from the popup; detections notify with Open stream |
+| A WebSocket keeps the worker alive only while active | Twitch keepalive every 10 s; the socket closes when no Twitch session is active |
+| Storage quota | Clips are ~0.4 MB/s at 720p; delete from the Clip Library |

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "StreamHunter",
   "short_name": "StreamHunter",
-  "description": "Find the moment. Create the clip. Highlight detection for Twitch and Kick livestreams.",
-  "version": "0.6.0",
+  "description": "Find the moment. Capture the clip. Search-first highlight detection for Twitch and Kick, entirely in your browser.",
+  "version": "1.0.0",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon-16.png",
@@ -33,17 +33,13 @@
     "notifications",
     "activeTab",
     "tabCapture",
-    "offscreen"
+    "offscreen",
+    "identity"
   ],
   "host_permissions": [
-    "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*",
     "https://api.twitch.tv/*",
     "https://id.twitch.tv/*",
     "https://api.kick.com/*",
     "https://id.kick.com/*"
-  ],
-  "optional_host_permissions": [
-    "https://*/*"
   ]
 }

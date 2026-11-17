@@ -1,64 +1,15 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Check, RotateCcw, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { RotateCcw, X } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { Switch } from "@/components/ui/Switch";
 import { Segmented } from "@/components/ui/Segmented";
 import { useSettings } from "@/hooks/useSettings";
-import { sendRequest } from "@/services/runtime";
-import { LIMITS, SUPPORTED_KEYWORD_LANGUAGES, type AspectRatio, type Sensitivity } from "@/types/settings";
-import { normalizeBackendUrl } from "@/utils/settings";
+import { LIMITS, SUPPORTED_KEYWORD_LANGUAGES, type Sensitivity } from "@/types/settings";
 import { cn } from "@/utils/cn";
 import { NumberField, Section } from "./sections";
 import { PlatformConnections } from "./PlatformConnections";
-import { AccountSection } from "./AccountSection";
-
-function BackendUrlForm({ value, onSave }: { value: string; onSave: (url: string) => Promise<unknown> }) {
-  const [draft, setDraft] = useState(value);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  useEffect(() => setDraft(value), [value]);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setSaved(false);
-    const url = normalizeBackendUrl(draft);
-    if (!url) {
-      setError("Use https://… (http is only allowed for localhost / 127.0.0.1).");
-      return;
-    }
-    const origin = new URL(url).origin;
-    const isLocal = ["http://localhost:8000", "http://127.0.0.1:8000"].includes(origin);
-    if (!isLocal) {
-      // Remote backends need an optional host permission, granted by the user from this click.
-      const granted = await chrome.permissions.request({ origins: [`${origin}/*`] }).catch(() => false);
-      if (!granted) {
-        setError(`Chrome permission to contact ${origin} was not granted.`);
-        return;
-      }
-    }
-    setError(null);
-    await onSave(url);
-    setSaved(true);
-    void sendRequest({ type: "monitoring/check-now" }).catch(() => undefined);
-  }
-
-  return (
-    <form onSubmit={submit}>
-      <Field label="Backend URL" hint={!error ? "The StreamHunter API server. Platform credentials live there, never in the extension." : undefined} error={error}>
-        {({ id, describedBy }) => (
-          <div className="flex gap-2">
-            <Input id={id} aria-describedby={describedBy} value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} className="font-mono" />
-            <Button type="submit" variant="secondary" icon={saved ? <Check className="size-4 text-live" /> : undefined}>
-              {saved ? "Saved" : "Save"}
-            </Button>
-          </div>
-        )}
-      </Field>
-    </form>
-  );
-}
 
 function KeywordEditor({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   const [draft, setDraft] = useState("");
@@ -121,11 +72,6 @@ const SENSITIVITY_OPTIONS: readonly { id: Sensitivity; label: string }[] = [
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
 ];
-const RATIO_OPTIONS: readonly { id: AspectRatio; label: string }[] = [
-  { id: "9:16", label: "9:16 Vertical" },
-  { id: "16:9", label: "16:9 Landscape" },
-  { id: "1:1", label: "1:1 Square" },
-];
 
 export function SettingsPage() {
   const { settings: s, loaded, update, reset } = useSettings();
@@ -173,14 +119,6 @@ export function SettingsPage() {
       />
 
       <div className="border-t border-ink-700">
-        <Section id="backend" title="Backend" description="Where the extension sends requests. Use HTTPS for anything that is not your own machine.">
-          <BackendUrlForm value={s.backendUrl} onSave={(backendUrl) => update({ backendUrl })} />
-        </Section>
-
-        <Section id="account" title="Account" description="Your StreamHunter account on this backend. Your watchlist, highlights and clips belong to it.">
-          <AccountSection />
-        </Section>
-
         <Section
           id="connections"
           title="Platforms"
@@ -260,7 +198,7 @@ export function SettingsPage() {
           <KeywordEditor value={s.detection.customKeywords} onChange={(customKeywords) => void update({ detection: { customKeywords } })} />
         </Section>
 
-        <Section id="clips" title="Clips" description="Defaults for clip windows and exports. Exports only run when StreamHunter has authorized access to the media.">
+        <Section id="clips" title="Clips" description="How much of the stream a clip keeps around a detected moment, while you capture it (the buffer holds the last 2 minutes).">
           <Field inline label="Seconds before the moment">
             {({ id }) => (
               <NumberField id={id} value={s.clips.preRollSeconds} min={LIMITS.rollSeconds.min} max={LIMITS.rollSeconds.max} suffix="s" onCommit={(preRollSeconds) => void update({ clips: { preRollSeconds } })} />
@@ -269,34 +207,6 @@ export function SettingsPage() {
           <Field inline label="Seconds after the moment">
             {({ id }) => (
               <NumberField id={id} value={s.clips.postRollSeconds} min={LIMITS.rollSeconds.min} max={LIMITS.rollSeconds.max} suffix="s" onCommit={(postRollSeconds) => void update({ clips: { postRollSeconds } })} />
-            )}
-          </Field>
-          <Field inline label="Default aspect ratio">
-            {({ id }) => (
-              <Select id={id} className="w-44" value={s.clips.defaultAspectRatio} onChange={(e) => void update({ clips: { defaultAspectRatio: e.target.value as AspectRatio } })}>
-                {RATIO_OPTIONS.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-        </Section>
-
-        <Section id="clip-capture" title="Clip capture" description="Twitch clips capture what is on stream at the moment of the request, so waiting for your review would clip the wrong moment.">
-          <Field
-            inline
-            label="Capture Twitch clips automatically"
-            hint="When a highlight scores at least your minimum, request the official Twitch clip right away. It is only a clip on Twitch: nothing is approved or published for you. Needs a connected Twitch account."
-          >
-            {({ id }) => (
-              <Switch
-                id={id}
-                label="Capture Twitch clips automatically"
-                checked={s.clips.autoCreatePlatformClips}
-                onChange={(autoCreatePlatformClips) => void update({ clips: { autoCreatePlatformClips } })}
-              />
             )}
           </Field>
         </Section>
@@ -332,8 +242,8 @@ export function SettingsPage() {
           </Field>
         </Section>
 
-        <Section id="privacy" title="Privacy & data" description="StreamHunter keeps chat statistics, not chat logs. Raw messages are processed in memory and discarded.">
-          <Field inline label="Keep events and statistics for" hint="Older detection events are deleted by the backend.">
+        <Section id="privacy" title="Privacy & data" description="Everything stays in this browser. Chat messages are analysed in memory and discarded; only highlights are kept.">
+          <Field inline label="Keep provisional highlights for" hint="Highlights without video and ended sessions older than this are deleted. Clips are kept until you delete them.">
             {({ id, describedBy }) => (
               <NumberField
                 id={id}

@@ -1,5 +1,4 @@
 export type Sensitivity = "low" | "medium" | "high";
-export type AspectRatio = "16:9" | "9:16" | "1:1";
 
 export const SUPPORTED_KEYWORD_LANGUAGES = [
   { code: "en", label: "English" },
@@ -13,10 +12,8 @@ export const SUPPORTED_KEYWORD_LANGUAGES = [
 ] as const;
 
 export interface Settings {
-  /** Base URL of the StreamHunter backend, without trailing slash. */
-  backendUrl: string;
   monitoring: {
-    /** Heartbeat / status poll interval in minutes (Chrome alarms enforce >= 30 s). */
+    /** Live-status check interval in minutes (Chrome alarms enforce >= 30 s). */
     intervalMinutes: number;
     /** Resume monitoring automatically when Chrome starts, if it was on before. */
     resumeOnStartup: boolean;
@@ -35,9 +32,6 @@ export interface Settings {
     preRollSeconds: number;
     /** Seconds included after the detected moment. */
     postRollSeconds: number;
-    defaultAspectRatio: AspectRatio;
-    /** Request the official Twitch clip as soon as a highlight is detected (it is not published). */
-    autoCreatePlatformClips: boolean;
   };
   notifications: {
     onHighlight: boolean;
@@ -49,13 +43,12 @@ export interface Settings {
     language: string;
   };
   privacy: {
-    /** Days to keep aggregated chat statistics and events. Raw messages are never kept. */
+    /** Days to keep provisional highlights and ended sessions. Chat messages are never kept; clips stay until deleted. */
     retentionDays: number;
   };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  backendUrl: "http://localhost:8000",
   monitoring: { intervalMinutes: 2, resumeOnStartup: true },
   detection: {
     sensitivity: "medium",
@@ -63,7 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
     keywordLanguages: ["en"],
     customKeywords: [],
   },
-  clips: { preRollSeconds: 20, postRollSeconds: 10, defaultAspectRatio: "9:16", autoCreatePlatformClips: true },
+  clips: { preRollSeconds: 20, postRollSeconds: 10 },
   notifications: { onHighlight: true, onStreamerLive: false },
   locale: { timeZone: "auto", language: "en" },
   privacy: { retentionDays: 30 },

@@ -81,6 +81,26 @@ export interface StatusChange {
   change: "went_live" | "went_offline";
 }
 
+/** Viewer numbers of the current broadcast, newest last (kept on the streamer, max 8). */
+export type WithHistory = Streamer & { viewer_history?: number[] };
+
+export interface ViewerSpike {
+  streamer: Streamer;
+  from: number;
+  to: number;
+}
+
+/**
+ * A sudden jump in viewers (raids, hosts, a clip going viral): at least 1.5× and +100 over the
+ * median of the previous checks of this broadcast. A weak, provisional signal; it works on Kick too.
+ */
+export function viewerSpike(history: number[], current: number): { from: number; to: number } | null {
+  if (history.length < 3) return null;
+  const sorted = [...history].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)]!;
+  return median >= 30 && current >= median * 1.5 && current - median >= 100 ? { from: median, to: current } : null;
+}
+
 export interface RefreshResult {
   checked: number;
   live: number;
@@ -92,6 +112,7 @@ export interface RefreshResult {
   changes: StatusChange[];
   /** Streamers whose state was actually checked this time. */
   checked_ids: number[];
+  spikes: ViewerSpike[];
 }
 
 /**
@@ -101,7 +122,7 @@ export interface RefreshResult {
  */
 export async function refreshStatuses(clients: Clients = platformClients(), at: Date = new Date()): Promise<RefreshResult> {
   const streamers = (await db.all<Streamer>("streamers")).filter((s) => s.monitoring_enabled);
-  const result: RefreshResult = { checked: 0, live: 0, skipped_recent: 0, unavailable: {}, retry_after: {}, changes: [], checked_ids: [] };
+  const result: RefreshResult = { checked: 0, live: 0, skipped_recent: 0, unavailable: {}, retry_after: {}, changes: [], checked_ids: [], spikes: [] };
   for (const platform of ["twitch", "kick"] as const) {
     const group = streamers.filter((s) => s.platform === platform);
     if (group.length === 0) continue;
@@ -116,7 +137,13 @@ export async function refreshStatuses(clients: Clients = platformClients(), at: 
     const byId = new Map(live.map((c) => [c.platform_user_id, c]));
     for (const s of group) {
       const c = byId.get(s.platform_user_id);
-      const next: Streamer = {
+      const prev = s as WithHistory;
+      const sameBroadcast = c && prev.is_live && prev.stream_started_at === c.stream_started_at;
+      const history = sameBroadcast ? (prev.viewer_history ?? []) : [];
+      const viewers = c?.viewer_count ?? null;
+      const spike = viewers !== null ? viewerSpike(history, viewers) : null;
+      const next: WithHistory = {
+        viewer_history: viewers !== null ? [...history, viewers].slice(-8) : [],
         ...s,
         is_live: Boolean(c),
         viewer_count: c?.viewer_count ?? null,
@@ -132,6 +159,7 @@ export async function refreshStatuses(clients: Clients = platformClients(), at: 
       result.checked_ids.push(s.id);
       if (next.is_live) result.live += 1;
       if (next.is_live && s.is_live !== true) result.changes.push({ streamer: next, change: "went_live" });
+      if (spike) result.spikes.push({ streamer: next, ...spike });
       if (!next.is_live && s.is_live === true) result.changes.push({ streamer: next, change: "went_offline" });
     }
   }

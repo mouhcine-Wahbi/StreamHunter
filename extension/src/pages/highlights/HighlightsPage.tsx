@@ -21,24 +21,37 @@ export function HighlightsPage() {
   const { settings, loaded } = useSettings();
   const [platform, setPlatform] = useState<Platform | "all">("all");
   const [status, setStatus] = useState<CandidateStatus | "all">("all");
+  const [sort, setSort] = useState<"recent" | "score">("score");
+  const [video, setVideo] = useState<"all" | "true" | "false">("all");
 
   const path = useMemo(() => {
     if (!loaded) return null;
     const p = new URLSearchParams({ limit: "50", min_score: String(settings.detection.minHighlightScore) });
     if (platform !== "all") p.set("platform", platform);
     if (status !== "all") p.set("status", status);
+    if (sort === "score") p.set("sort", "score");
+    if (video !== "all") p.set("has_video", video);
     return `/api/v1/highlights?${p.toString()}`;
-  }, [loaded, platform, status, settings.detection.minHighlightScore]);
+  }, [loaded, platform, status, sort, video, settings.detection.minHighlightScore]);
 
   const query = useApiQuery<Page<HighlightCandidate>>(path);
 
   return (
     <>
       <PageHeader
-        title="Highlights"
-        description={`Detected moments scoring at least ${settings.detection.minHighlightScore}. Nothing is published without your approval.`}
+        title="Top Highlights"
+        description={`Detected moments scoring at least ${settings.detection.minHighlightScore}, ranked. "Provisional" moments were found from chat or viewers while nobody captured the stream: they have no video.`}
         actions={
           <>
+            <Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "recent" | "score")} className="w-36">
+              <option value="score">Top score</option>
+              <option value="recent">Most recent</option>
+            </Select>
+            <Select aria-label="Video" value={video} onChange={(e) => setVideo(e.target.value as "all" | "true" | "false")} className="w-40">
+              <option value="all">With or without video</option>
+              <option value="true">With a clip</option>
+              <option value="false">Provisional only</option>
+            </Select>
             <Select aria-label="Platform" value={platform} onChange={(e) => setPlatform(e.target.value as Platform | "all")} className="w-36">
               <option value="all">All platforms</option>
               <option value="twitch">Twitch</option>
@@ -60,7 +73,7 @@ export function HighlightsPage() {
             {(page) =>
               page.items.length === 0 ? (
                 <EmptyState icon={<Sparkles className="size-5" />} title="No highlights match">
-                  Candidates are created from chat activity while monitoring is active.
+                  Highlights come from chat and viewer spikes while monitoring is on, and from captured streams.
                 </EmptyState>
               ) : (
                 <div className="divide-y divide-ink-700/70">

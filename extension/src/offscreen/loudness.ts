@@ -1,4 +1,9 @@
-import type { LoudnessSample } from "@/types/tab-audio";
+/** One second of loudness. */
+export interface LoudnessSample {
+  /** ISO time of the second. */
+  t: string;
+  db: number;
+}
 
 export const FLOOR_DB = -90;
 

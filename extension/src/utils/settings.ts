@@ -2,14 +2,12 @@ import {
   DEFAULT_SETTINGS,
   LIMITS,
   SUPPORTED_KEYWORD_LANGUAGES,
-  type AspectRatio,
   type DeepPartial,
   type Sensitivity,
   type Settings,
 } from "@/types/settings";
 
 const SENSITIVITIES: readonly Sensitivity[] = ["low", "medium", "high"];
-const RATIOS: readonly AspectRatio[] = ["16:9", "9:16", "1:1"];
 const LANG_CODES = new Set<string>(SUPPORTED_KEYWORD_LANGUAGES.map((l) => l.code));
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -28,21 +26,6 @@ function bool(v: unknown, fallback: boolean): boolean {
 
 function oneOf<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
   return typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
-}
-
-export function normalizeBackendUrl(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim().replace(/\/+$/, "");
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    if (url.username || url.password) return null; // never store credentials in URLs
-    // Plain http is only acceptable for a local development backend.
-    if (url.protocol === "http:" && !["localhost", "127.0.0.1"].includes(url.hostname)) return null;
-    return `${url.protocol}//${url.host}${url.pathname === "/" ? "" : url.pathname}`;
-  } catch {
-    return null;
-  }
 }
 
 export function isValidTimeZone(tz: string): boolean {
@@ -92,7 +75,6 @@ export function sanitizeSettings(input: unknown): Settings {
   const tz = typeof loc.timeZone === "string" && isValidTimeZone(loc.timeZone) ? loc.timeZone : d.locale.timeZone;
 
   return {
-    backendUrl: normalizeBackendUrl(s.backendUrl) ?? d.backendUrl,
     monitoring: {
       intervalMinutes: clampInt(
         mon.intervalMinutes,
@@ -121,8 +103,6 @@ export function sanitizeSettings(input: unknown): Settings {
         LIMITS.rollSeconds.max,
         d.clips.postRollSeconds,
       ),
-      defaultAspectRatio: oneOf(clips.defaultAspectRatio, RATIOS, d.clips.defaultAspectRatio),
-      autoCreatePlatformClips: bool(clips.autoCreatePlatformClips, d.clips.autoCreatePlatformClips),
     },
     notifications: {
       onHighlight: bool(notif.onHighlight, d.notifications.onHighlight),

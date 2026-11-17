@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
-import { CloudOff, KeyRound, Loader2, PlugZap, TriangleAlert } from "lucide-react";
+import { KeyRound, Loader2, PlugZap, TriangleAlert } from "lucide-react";
 import { ApiError } from "@/services/api-client";
 import type { QueryState } from "@/hooks/useApiQuery";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { sendRequest } from "@/services/runtime";
 
-/** Opens Settings → Account: in place inside the workspace, otherwise in a workspace tab. */
-function openAccountSettings() {
+/** Opens Settings: in place inside the workspace, otherwise in a workspace tab. */
+function openSettings() {
   if (document.querySelector('[data-surface="workspace"]')) {
     location.hash = "/settings";
     return;
@@ -16,7 +16,7 @@ function openAccountSettings() {
 }
 
 /**
- * Renders loading / error states of a backend query truthfully, and the
+ * Renders loading / error states of a local query truthfully, and the
  * children only when real data is available. Never substitutes sample data.
  */
 export function ApiStateView<T>({
@@ -47,27 +47,20 @@ export function ApiStateView<T>({
         Retry
       </Button>
     );
-    if (error instanceof ApiError && error.kind === "http" && error.status === 404) {
-      return (
-        <EmptyState compact={compact} icon={<PlugZap className="size-5" />} title="Not available on this backend">
-          The connected backend does not provide {feature} yet. Update the backend to a version that supports it.
-        </EmptyState>
-      );
-    }
-    if (error instanceof ApiError && error.kind === "http" && error.status === 401) {
+    if (error instanceof ApiError && error.code === "platform_not_configured") {
       return (
         <EmptyState
           compact={compact}
           tone="warn"
           icon={<KeyRound className="size-5" />}
-          title="Sign-in required"
+          title="Not available yet"
           action={
-            <Button size="sm" variant="primary" onClick={openAccountSettings}>
-              Sign in
+            <Button size="sm" variant="primary" onClick={openSettings}>
+              Open Settings
             </Button>
           }
         >
-          Sign in to your StreamHunter account to load {feature}.
+          {error.message}
         </EmptyState>
       );
     }
@@ -75,20 +68,6 @@ export function ApiStateView<T>({
       return (
         <EmptyState compact={compact} tone="warn" icon={<PlugZap className="size-5" />} title="Not available yet">
           {error.message}
-        </EmptyState>
-      );
-    }
-    if (error instanceof ApiError && (error.kind === "network" || error.kind === "timeout")) {
-      return (
-        <EmptyState
-          compact={compact}
-          tone="warn"
-          icon={<CloudOff className="size-5" />}
-          title="Backend not reachable"
-          action={retry}
-        >
-          StreamHunter needs its backend to load {feature}. Start it locally (see README) or check the backend URL in
-          Settings.
         </EmptyState>
       );
     }

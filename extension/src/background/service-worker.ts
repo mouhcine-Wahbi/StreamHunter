@@ -13,12 +13,31 @@ import { ALARMS, syncAlarms } from "./alarm-manager";
 import { renderBadge } from "./badge";
 import { handleMessage, isTrustedSender } from "./message-handler";
 import { createMonitoringManager } from "./monitoring-manager";
-import { HIGHLIGHT_PREFIX, NOTIFICATION_PREFIX } from "./notifications";
-import { syncSettingsToBackend } from "./settings-sync";
-import { createTabAudioManager } from "./tab-audio";
+import { HIGHLIGHT_PREFIX, NOTIFICATION_PREFIX, notifyHighlight } from "./notifications";
+import { createChatManager } from "./chat-manager";
+import { db } from "@/local/db";
+import { streamUrl } from "@/local/streamers";
+import { TWITCH_USER_KEY } from "@/platforms/twitch-user";
+import { getSettings } from "@/store/storage";
+import type { LocalHighlight } from "@/local/highlights";
+import type { Streamer } from "@/types/api";
+import { createCaptureManager } from "./capture-manager";
 
-const manager = createMonitoringManager();
-const tabAudio = createTabAudioManager();
+const capture = createCaptureManager();
+
+/** Every stored highlight: clip it if that stream is being captured, then notify. */
+async function onHighlight(h: LocalHighlight, s: Streamer): Promise<void> {
+  const clipping = await capture.onHighlight(h, s);
+  await notifyHighlight({ ...h, has_video: clipping }, s, await getSettings());
+}
+
+const chat = createChatManager({
+  now: () => Date.now(),
+  createSocket: (url) => new WebSocket(url),
+  fetchImpl: (...a) => fetch(...a),
+  onHighlight,
+});
+const manager = createMonitoringManager({ afterCheck: () => chat.sync(), onHighlight });
 
 function log(event: string, data?: Record<string, unknown>) {
   console.info(JSON.stringify({ src: "streamhunter.sw", event, ...data }));
@@ -28,7 +47,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   log("installed", { reason: details.reason });
   void (async () => {
     await manager.restore();
-    await tabAudio.reset();
+    await capture.reset();
     if (details.reason === "install") {
       await chrome.tabs.create({ url: chrome.runtime.getURL("app.html#/overview") });
     }
@@ -38,11 +57,22 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.runtime.onStartup.addListener(() => {
   log("browser_startup");
   void manager.restore();
-  void tabAudio.reset();
+  void capture.reset();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARMS.heartbeat) void manager.tick();
+});
+
+/** Notification buttons: 0 = Open stream, 1 = Review. */
+chrome.notifications?.onButtonClicked?.addListener((id, button) => {
+  void chrome.notifications.clear(id);
+  if (!id.startsWith(HIGHLIGHT_PREFIX)) return;
+  void (async () => {
+    const h = await db.get<LocalHighlight>("highlights", Number(id.slice(HIGHLIGHT_PREFIX.length)));
+    const url = button === 0 && h?.streamer_username ? streamUrl({ platform: h.platform, username: h.streamer_username }) : chrome.runtime.getURL("app.html#/highlights");
+    await chrome.tabs.create({ url });
+  })();
 });
 
 chrome.notifications?.onClicked.addListener((id) => {
@@ -56,24 +86,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedSender(sender)) return false;
   // Messages addressed to the offscreen document are not for the worker.
   if ((message as { target?: unknown } | null)?.target === "offscreen") return false;
-  handleMessage(message, manager, tabAudio).then(sendResponse);
+  handleMessage(message, manager, capture).then(sendResponse);
   return true; // keep the channel open for the async response
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => void tabAudio.onTabRemoved(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => void capture.onTabRemoved(tabId));
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   const monitoring = changes[STORAGE_KEYS.monitoring];
   if (monitoring?.newValue) void renderBadge(monitoring.newValue as MonitoringState);
 
+  if (changes[TWITCH_USER_KEY]) void chat.sync(); // signed in or out of Twitch
+
   const settings = changes[STORAGE_KEYS.settings];
   if (settings) {
     const next = sanitizeSettings(settings.newValue);
     void getMonitoringState().then((s) => syncAlarms(s.enabled, next.monitoring.intervalMinutes));
   }
-  // Keep the backend copy of settings in step (it uses retention and score thresholds).
-  if (settings || changes[STORAGE_KEYS.authToken]?.newValue) void syncSettingsToBackend();
 });
 
 // The toolbar icon opens the popup; the side panel is opened explicitly from the popup.

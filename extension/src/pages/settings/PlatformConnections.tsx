@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Field";
 import { getCredentials, setCredentials, type PlatformCredentials } from "@/platforms/credentials";
+import { getTwitchUser, redirectUrl, signInWithTwitch, signOutOfTwitch, TWITCH_USER_KEY, type TwitchUser } from "@/platforms/twitch-user";
+import { onStorageKeyChange } from "@/store/storage";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useAction } from "@/hooks/useAction";
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
@@ -112,6 +114,50 @@ function CredentialsForm({ platform, onChanged }: { platform: Platform; onChange
   );
 }
 
+/** Twitch chat needs the editor's own Twitch sign-in (user:read:chat), on top of the app credentials. */
+function TwitchChatSignIn({ configured }: { configured: boolean }) {
+  const [user, setUser] = useState<TwitchUser | null>(null);
+  useEffect(() => {
+    void getTwitchUser().then(setUser);
+    return onStorageKeyChange(TWITCH_USER_KEY, () => void getTwitchUser().then(setUser));
+  }, []);
+  const signIn = useAction(async () => setUser(await signInWithTwitch()));
+  const signOut = useAction(async () => {
+    await signOutOfTwitch();
+    setUser(null);
+  });
+  return (
+    <div className="mt-4 space-y-2 border-t border-ink-700 pt-3 text-xs">
+      <p className="font-medium text-fg">Chat (for chat-based highlights)</p>
+      {user ? (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-fg-muted">
+            Signed in as <span className="text-fg">{user.login}</span>. StreamHunter reads chat of your live Twitch streamers.
+          </span>
+          <Button size="sm" variant="ghost" loading={signOut.pending} onClick={() => void signOut.run()}>
+            Sign out
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p className="text-fg-muted">
+            Twitch only shares chat with a signed-in account. Add this redirect URL to your Twitch app first:{" "}
+            <code className="rounded bg-ink-800 px-1 py-0.5 text-fg">{redirectUrl()}</code>
+          </p>
+          <Button size="sm" variant="secondary" disabled={!configured} loading={signIn.pending} onClick={() => void signIn.run()}>
+            Sign in with Twitch
+          </Button>
+        </>
+      )}
+      {(signIn.error || signOut.error) && (
+        <p role="alert" className="text-danger">
+          {signIn.error ?? signOut.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function PlatformConnections() {
   const query = useApiQuery<PlatformCapabilities[]>("/api/v1/platforms/capabilities");
   return (
@@ -143,6 +189,7 @@ export function PlatformConnections() {
                 </p>
               ))}
               <CredentialsForm platform={p.platform} onChanged={query.reload} />
+              {p.platform === "twitch" && <TwitchChatSignIn configured={p.configured} />}
             </Card>
           ))}
         </div>

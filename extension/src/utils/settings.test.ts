@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS } from "@/types/settings";
-import { mergeSettings, normalizeBackendUrl, sanitizeSettings } from "./settings";
+import { mergeSettings, sanitizeSettings } from "./settings";
 import { backoffDelayMs } from "./backoff";
 
 describe("sanitizeSettings", () => {
@@ -21,7 +21,6 @@ describe("sanitizeSettings", () => {
     expect(s.detection.sensitivity).toBe("medium");
     expect(s.detection.keywordLanguages).toEqual(["en", "fr"]);
     expect(s.clips.preRollSeconds).toBe(0);
-    expect(s.clips.defaultAspectRatio).toBe("9:16");
     expect(s.privacy.retentionDays).toBe(7);
   });
 
@@ -33,20 +32,6 @@ describe("sanitizeSettings", () => {
   it("rejects invalid time zones", () => {
     expect(sanitizeSettings({ locale: { timeZone: "Mars/Olympus" } }).locale.timeZone).toBe("auto");
     expect(sanitizeSettings({ locale: { timeZone: "Europe/Paris" } }).locale.timeZone).toBe("Europe/Paris");
-  });
-});
-
-describe("normalizeBackendUrl", () => {
-  it("accepts https and local http, strips trailing slashes", () => {
-    expect(normalizeBackendUrl("https://api.example.com/")).toBe("https://api.example.com");
-    expect(normalizeBackendUrl("http://localhost:8000//")).toBe("http://localhost:8000");
-    expect(normalizeBackendUrl("https://example.com/sh/")).toBe("https://example.com/sh");
-  });
-  it("refuses plain http to remote hosts, credentials and other schemes", () => {
-    expect(normalizeBackendUrl("http://example.com")).toBeNull();
-    expect(normalizeBackendUrl("https://user:pw@example.com")).toBeNull();
-    expect(normalizeBackendUrl("javascript:alert(1)")).toBeNull();
-    expect(normalizeBackendUrl("not a url")).toBeNull();
   });
 });
 

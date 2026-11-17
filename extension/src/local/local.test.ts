@@ -15,7 +15,7 @@ const TWITCH: FakeChannel[] = [
 ];
 const KICK: FakeChannel[] = [{ id: "77", login: "kickstar", live: true, viewers: 900, title: "IRL", game: "IRL" }];
 
-const api = () => new LocalApi({ baseUrl: "http://localhost:8000" }, () => ({ twitch: createTwitchClient(), kick: createKickClient() }));
+const api = () => new LocalApi(() => ({ twitch: createTwitchClient(), kick: createKickClient() }));
 
 describe("platform clients (official APIs, editor's own app)", () => {
   it("explains what to set up when no credentials are saved", async () => {
@@ -167,9 +167,10 @@ describe("local API (no backend)", () => {
     expect(live).toEqual([expect.objectContaining({ username: "shroud", viewer_count: 25_000, profile_image_url: "https://img/shroud.png" })]);
   });
 
-  it("still sends paths that aren't local yet to the old backend", async () => {
-    const { fetch } = fakePlatforms({}, (url) => (url.startsWith("http://localhost:8000/api/v1/clips") ? json({ items: [], total: 0, limit: 1, offset: 0 }) : null));
-    expect(await api().get("/api/v1/clips?limit=1")).toMatchObject({ total: 0 });
-    expect(String(fetch.mock.calls[0]![0])).toBe("http://localhost:8000/api/v1/clips?limit=1");
+  it("has no server: unknown paths are a local 404 and nothing is fetched", async () => {
+    const { fetch } = fakePlatforms({});
+    const err = await api().get("/api/v1/auth/me").catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 404, code: "not_found" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

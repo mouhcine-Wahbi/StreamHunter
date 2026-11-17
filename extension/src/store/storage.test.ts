@@ -1,10 +1,8 @@
 import {
-  getAuthToken,
   getMonitoringState,
   getSettings,
   onStorageKeyChange,
   patchMonitoringState,
-  setAuthToken,
   STORAGE_KEYS,
   updateSettings,
 } from "./storage";
@@ -29,7 +27,7 @@ describe("storage", () => {
   it("re-sanitizes corrupted stored settings", async () => {
     await chrome.storage.local.set({ [STORAGE_KEYS.settings]: { backendUrl: "ftp://x", monitoring: { intervalMinutes: "abc" } } });
     const s = await getSettings();
-    expect(s.backendUrl).toBe(DEFAULT_SETTINGS.backendUrl);
+    expect(s).not.toHaveProperty("backendUrl"); // old settings from the backend era are dropped
     expect(s.monitoring.intervalMinutes).toBe(DEFAULT_SETTINGS.monitoring.intervalMinutes);
   });
 
@@ -51,11 +49,5 @@ describe("storage", () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
-  it("stores and clears the session token", async () => {
-    expect(await getAuthToken()).toBeNull();
-    await setAuthToken("abc");
-    expect(await getAuthToken()).toBe("abc");
-    await setAuthToken(null);
-    expect(await getAuthToken()).toBeNull();
-  });
+
 });

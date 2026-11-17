@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Activity, Clapperboard, Radio, Server, Sparkles, Users } from "lucide-react";
+import { Activity, Clapperboard, Plug, Radio, Sparkles, Users } from "lucide-react";
+import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge, Dot } from "@/components/ui/Badge";
@@ -8,8 +9,7 @@ import { HighlightRow } from "@/components/highlights/HighlightRow";
 import { ApiStateView } from "@/components/ApiStateView";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import type { useMonitoring } from "@/hooks/useMonitoring";
-import { useSettings } from "@/hooks/useSettings";
-import type { HighlightCandidate, Page, Streamer } from "@/types/api";
+import type { HighlightCandidate, Page, Platform, Streamer } from "@/types/api";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiError } from "@/services/api-client";
 
@@ -21,10 +21,32 @@ function startOfTodayIso(): string {
 
 function unavailableReason(error: Error | null): string {
   if (!error) return "";
-  if (error instanceof ApiError && error.kind === "http") {
-    return error.status === 404 ? "Not provided by this backend yet" : error.status === 401 ? "Sign-in required" : "Backend error";
-  }
-  return "Unavailable: backend not connected";
+  return error instanceof ApiError && error.code === "platform_not_configured" ? "Set up Twitch/Kick in Settings" : "Couldn't load";
+}
+
+/** Whether Twitch and Kick are set up (the editor's own app credentials). */
+function PlatformsCard() {
+  const caps = useApiQuery<{ platform: Platform; configured: boolean }[]>("/api/v1/platforms/capabilities");
+  return (
+    <Card>
+      <CardHeader icon={<Plug className="size-4" />} title="Platforms" description="Checked directly from this browser, with your own apps." />
+      <CardBody className="space-y-2 text-xs">
+        {(caps.data ?? []).map((p) => (
+          <div key={p.platform} className="flex items-center justify-between">
+            <PlatformBadge platform={p.platform} />
+            <Badge tone={p.configured ? "live" : "warn"} icon={<Dot tone={p.configured ? "live" : "warn"} />}>
+              {p.configured ? "Ready" : "Not set up"}
+            </Badge>
+          </div>
+        ))}
+        {caps.data?.some((p) => !p.configured) && (
+          <a href="#/settings" className="block text-accent underline">
+            Add your app credentials in Settings → Platforms
+          </a>
+        )}
+      </CardBody>
+    </Card>
+  );
 }
 
 function StatTile({ label, icon, value, error }: { label: string; icon: ReactNode; value: number | null; error: Error | null }) {
@@ -41,7 +63,6 @@ function StatTile({ label, icon, value, error }: { label: string; icon: ReactNod
 }
 
 export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof useMonitoring> }) {
-  const { settings } = useSettings();
   const streamers = useApiQuery<Page<Streamer>>("/api/v1/streamers?limit=1");
   const live = useApiQuery<Page<Streamer>>("/api/v1/streams/live?limit=1");
   const today = useApiQuery<Page<HighlightCandidate>>(
@@ -49,7 +70,6 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
   );
   const clips = useApiQuery<Page<unknown>>("/api/v1/clips?limit=1");
   const recent = useApiQuery<Page<HighlightCandidate>>("/api/v1/highlights?limit=5");
-  const { state } = monitoring;
 
   return (
     <>
@@ -86,24 +106,7 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
 
         <div className="space-y-6">
           <MonitoringCard monitoring={monitoring} />
-          <Card>
-            <CardHeader
-              icon={<Server className="size-4" />}
-              title="Backend"
-              actions={
-                <Badge
-                  tone={state.backendStatus === "online" ? "live" : state.backendStatus === "offline" ? "danger" : "neutral"}
-                  icon={<Dot tone={state.backendStatus === "online" ? "live" : state.backendStatus === "offline" ? "danger" : "neutral"} />}
-                >
-                  {state.backendStatus === "unknown" ? "Not checked" : state.backendStatus === "online" ? "Online" : "Offline"}
-                </Badge>
-              }
-            />
-            <CardBody className="space-y-1 text-xs text-fg-muted">
-              <div className="truncate font-mono text-fg">{settings.backendUrl}</div>
-              <div>Version: {state.backendVersion ?? "—"}</div>
-            </CardBody>
-          </Card>
+          <PlatformsCard />
         </div>
       </div>
     </>

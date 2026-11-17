@@ -1,20 +1,26 @@
 # Local-first, search-first migration
 
-Status: in progress (started 2026-11-17). This document is the analysis and the plan. Each step
+Status: complete (2026-11-17, v1.0). This document is the analysis and the plan. Each step
 below lands as its own tested commit, and nothing working is removed until its replacement is tested.
 
 | Step | State |
 |---|---|
 | 1. Local store and platform clients | ✅ done (88096b0) |
 | 2. Discovery page and monitoring list | ✅ done (88096b0) |
-| 3. Background monitoring | ✅ done |
-| 4. Discovery-mode detection (chat) | ⏳ next |
-| 5. Capture mode (rolling buffer, local clips) | ⏳ |
-| 6. Clips and Top Highlights on local data | ⏳ |
-| 7. Retire the backend | ⏳ |
+| 3. Background monitoring | ✅ done (fb2eaba) |
+| 4. Discovery-mode detection (chat, viewer spikes) | ✅ done |
+| 5. Capture mode (rolling buffer, local clips) | ✅ done, verified in Chrome |
+| 6. Clips and Top Highlights on local data | ✅ done |
+| 7. Retire the backend | ✅ done |
 
 Not verified against the real APIs yet: no Twitch/Kick app credentials on the development machine.
 The clients are tested against a fake that follows the documented request and response shapes.
+Capture mode was verified end to end in Chrome (see IMPLEMENTATION_STATUS.md).
+
+Changes from the plan: capture uses `mp4-muxer` (MIT) for MP4 output; the old "live tab audio"
+feature (loudness sent to the backend) was replaced by capture mode, which measures loudness locally;
+the chat WebSocket lives in the service worker (Chrome 116+ keeps it alive while the socket is
+active) rather than the offscreen document, which is used only for capture.
 
 ## 1. Current architecture (before the migration)
 

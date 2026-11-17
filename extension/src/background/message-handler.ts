@@ -1,15 +1,14 @@
-import { getMonitoringState, getTabAudioState } from "@/store/storage";
+import { getMonitoringState } from "@/store/storage";
 import { isRuntimeRequest, type RuntimeResponse } from "@/types/messages";
 import type { MonitoringManager } from "./monitoring-manager";
-import type { PcmChunk } from "@/types/tab-audio";
-import type { TabAudioManager } from "./tab-audio";
+import { getCaptureState, type CaptureManager } from "./capture-manager";
 
-const NO_TAB_AUDIO = "Tab audio is only available in the installed extension";
+const NO_CAPTURE = "Capture is only available in the installed extension";
 
 export async function handleMessage(
   message: unknown,
   manager: MonitoringManager,
-  tabAudio?: TabAudioManager,
+  capture?: CaptureManager,
 ): Promise<RuntimeResponse> {
   if (!isRuntimeRequest(message)) return { ok: false, error: "Unknown message" };
   try {
@@ -22,47 +21,43 @@ export async function handleMessage(
         return { ok: true, data: await manager.stop() };
       case "monitoring/check-now": {
         const state = await getMonitoringState();
-        return { ok: true, data: state.enabled ? await manager.tick(true) : await manager.checkBackend() };
+        return { ok: true, data: state.enabled ? await manager.tick(true) : await manager.checkOnce() };
       }
       case "app/open": {
         const route = message.route && /^\/[a-z-]*$/.test(message.route) ? message.route : "/overview";
         await chrome.tabs.create({ url: chrome.runtime.getURL(`app.html#${route}`) });
         return { ok: true, data: null };
       }
-      case "tab-audio/get":
-        return { ok: true, data: await getTabAudioState() };
-      case "tab-audio/start":
-        if (!tabAudio) return { ok: false, error: NO_TAB_AUDIO };
+      case "capture/get":
+        return { ok: true, data: await getCaptureState() };
+      case "capture/start":
+        if (!capture) return { ok: false, error: NO_CAPTURE };
         if (!Number.isInteger(message.tabId) || typeof message.url !== "string") return { ok: false, error: "Invalid tab" };
-        return { ok: true, data: await tabAudio.start(message.tabId, message.url, { sounds: message.sounds === true }) };
-      case "tab-audio/stop":
-        if (!tabAudio) return { ok: false, error: NO_TAB_AUDIO };
-        return { ok: true, data: await tabAudio.stop() };
-      case "tab-audio/samples":
-        if (!tabAudio) return { ok: false, error: NO_TAB_AUDIO };
-        if (!Array.isArray(message.samples)) return { ok: false, error: "Invalid samples" };
-        return {
-          ok: true,
-          data: await tabAudio.onSamples(
-            message.samples
-              .filter((x) => typeof x?.t === "string" && typeof x?.db === "number" && Number.isFinite(x.db))
-              .slice(0, 120),
-            validPcm(message.pcm),
-          ),
-        };
-      case "tab-audio/ended":
-        if (!tabAudio) return { ok: false, error: NO_TAB_AUDIO };
-        return { ok: true, data: await tabAudio.onEnded(String(message.reason)) };
+        return { ok: true, data: await capture.start(message.tabId, message.url) };
+      case "capture/stop":
+        if (!capture) return { ok: false, error: NO_CAPTURE };
+        return { ok: true, data: await capture.stop() };
+      case "capture/save-last": {
+        if (!capture) return { ok: false, error: NO_CAPTURE };
+        const seconds = Math.max(5, Math.min(110, Number(message.seconds) || 30));
+        return { ok: true, data: await capture.saveLast(seconds) };
+      }
+      case "capture/status":
+        await capture?.onStatus(Number(message.bufferedSeconds) || 0, typeof message.levelDb === "number" ? message.levelDb : null);
+        return { ok: true, data: null };
+      case "capture/clip-saved":
+        await capture?.onClipSaved(Number(message.clipId), Number(message.highlightId), Number(message.durationSec) || 0);
+        return { ok: true, data: null };
+      case "capture/clip-failed":
+        await capture?.onClipFailed(String(message.reason));
+        return { ok: true, data: null };
+      case "capture/ended":
+        await capture?.onEnded(String(message.reason));
+        return { ok: true, data: null };
     }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Unexpected error" };
   }
-}
-
-function validPcm(pcm: unknown): PcmChunk | undefined {
-  const p = pcm as Partial<PcmChunk> | null | undefined;
-  if (!p || typeof p.start !== "string" || typeof p.data !== "string" || p.data.length > 600_000) return undefined;
-  return { start: p.start, data: p.data };
 }
 
 /** Only accept messages from this extension's own pages. */

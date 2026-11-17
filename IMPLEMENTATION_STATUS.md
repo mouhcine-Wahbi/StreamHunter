@@ -1,8 +1,45 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-16_
+_Last updated: 2026-11-17_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
+
+## v1.0 — Local-first, search-first ✅ (current)
+
+No backend: one Chrome extension, data in IndexedDB, Twitch/Kick called directly with the editor's
+own developer apps. Plan and API analysis: [docs/LOCAL_FIRST_MIGRATION.md](docs/LOCAL_FIRST_MIGRATION.md).
+
+| Item | Status | Notes |
+|---|---|---|
+| Local store (IndexedDB) + local API with the pages' existing paths | ✅ | `src/local/`. Unknown paths are a local 404; nothing is fetched from a server |
+| Twitch Helix / Kick public API clients, editor's own app credentials | ✅ tested against a fake | Settings → Platforms, Save and test. Token cache, one retry after 401, 429 waits honoured, batching 100 / 50 |
+| Discover: search, Twitch/Kick filter, live now, viewers, category, avatar, Add, Open stream | ✅ | Kick: exact channel name (no search API) |
+| Background monitoring: alarm → batched status check → sessions → notifications | ✅ | Degraded/offline states name the platform and reason. Pause on stop, resume the same broadcast |
+| Chat detection ported to TypeScript (same rules and scenarios as the backend's tests) | ✅ | 17 tests on a seeded chat simulator |
+| Twitch chat via EventSub WebSocket + Sign in with Twitch | ✅ tested against a fake socket | Subscribe per live streamer, unsubscribe when offline, refusal reported. **Not yet run against real Twitch** (needs credentials) |
+| Kick chat | 🚫 | Official delivery is webhooks to a public server only |
+| Viewer-spike highlights (Twitch and Kick) | ✅ | ≥ 1.5× and +100 over the broadcast's median |
+| Provisional highlights with Open stream notifications | ✅ | Labelled "provisional · no video" everywhere |
+| Capture mode: tab video/audio → WebCodecs → 2-min rolling buffer → MP4 clips in IndexedDB | ✅ verified in Chrome | See below |
+| Live capture signals: loudness, fast action, flashes → automatic clips; chat/viewer highlights of the captured streamer clip too; Save last 30 s | ✅ | |
+| Top Highlights (ranked, video filter) and Clip Library (preview, rename, download MP4, delete) | ✅ | |
+| Retention of provisional highlights and ended sessions | ✅ | Clips are kept until deleted |
+| Backend removed | ✅ | `backend/` deleted; in git history before the v1.0 commit |
+| Tests | ✅ | Extension 92 (local API, platform clients, monitoring, chat manager, detection, capture buffer/mux/signals, capture manager, UI) |
+| Real-Chrome check | ✅ | Chrome 157, built extension loaded unpacked, a tab playing a test video (moving test pattern, quiet tone, a real laugh at 40 s). **Save last 12 s** → a 12.1 s MP4, H.264 1280×720 302 frames + AAC 48 kHz stereo, decodes cleanly with FFmpeg, frame shows the tab. **Automatic**: after 30 s of learning, the laugh was detected ("Stream audio 21 dB louder than usual") and a 30.0 s clip saved by itself, the laugh at 18–27 s of it. The pan and the flash alone stayed below the minimum score, as designed |
+
+**Found and fixed during the check:** capturing a static tab gives no video frames (Chrome only
+produces frames when the page changes); the test harness had picked the blank start tab.
+
+**Not verified yet:** real Twitch and Kick API responses and real Twitch chat (no app credentials on
+the development machine). The request and response shapes follow the platform documentation.
+
+## History: backend era (Phases 0–7, retired in v1.0)
+
+Everything below was built with a FastAPI backend, which v1.0 replaced. Features that have no
+in-browser equivalent were removed: accounts, Twitch clip creation through the API, uploading
+recordings for analysis, FFmpeg exports with 9:16 reframing, burned-in subtitles (faster-whisper)
+and YAMNet laughter detection.
 
 ## Phase 0 — Inspection & planning ✅
 
@@ -180,26 +217,12 @@ relative to the stream's baseline and can't create a candidate on their own.
 score (the specified weights: chat 25 %, audio 30 %, visual 20 %) and may drop below the minimum.
 The chat-only score stays visible. Re-weighting needs real-stream data.
 
-## Local-first migration (no backend) 🟡 in progress
-
-Plan and API analysis: [docs/LOCAL_FIRST_MIGRATION.md](docs/LOCAL_FIRST_MIGRATION.md).
-
-| Item | Status | Notes |
-|---|---|---|
-| IndexedDB store (streamers, sessions, highlights, clips, clip videos) | ✅ | `src/local/db.ts` |
-| Twitch Helix / Kick public API from the extension, with the editor's own app credentials | ✅ | Settings → Platforms; "Save and test" makes one call. Tokens cached, one retry after 401, 429 waits honoured |
-| Discover: search, Twitch/Kick filter, live now, viewers, category, avatar, Add, Open stream | ✅ | Kick: exact name (no search API) |
-| Background monitoring without a backend | ✅ | Alarm → one batched status request per platform (100 Twitch / 50 Kick) → sessions open/end → go-live notifications. Degraded/offline states with the reason |
-| Discovery-mode chat detection, capture mode, local clips, backend removal | ⏳ | Steps 4–7 |
-| Tested against the real Twitch/Kick APIs | ⏳ | Needs app credentials |
-
 ## Known platform limitations (by design, not bugs)
 
 | Limitation | Handling |
 |---|---|
-| 🚫 Kick has no official clip-creation API | `requires_manual_action` |
-| 🚫 Kick has no official VOD/media API | `unsupported` |
-| Kick chat only arrives through webhooks to a public HTTPS URL | `requires_configuration` until a tunnel or deployment exists |
-| A Twitch clip is a link, not a downloadable file | `video_download: not_guaranteed` |
-| Monitoring only runs while Chrome is open | Lease expires and sessions pause |
-
+| 🚫 Kick delivers chat only via webhooks to a public HTTPS server | Kick chat shown as unavailable; Kick uses live status and viewer spikes |
+| 🚫 Kick has no search API | Exact channel name lookup |
+| Tab capture needs the editor's click on that tab | Detections notify with Open stream; capture is started from the popup |
+| Video exists only for captured streams | Provisional highlights are labelled and never offered as clips |
+| Monitoring only runs while Chrome is open | Sessions pause on stop and resume within the same broadcast |

@@ -1,9 +1,12 @@
-import { ApiClient, ApiError, type ApiClientOptions } from "@/services/api-client";
+import { ApiClient, ApiError, type Method } from "@/services/api-client";
 import { getCredentials } from "@/platforms/credentials";
 import { PlatformError } from "@/platforms/http";
 import type { ChannelInfo } from "@/platforms/types";
-import type { Page, Platform, Streamer, StreamerSearchResult } from "@/types/api";
-import { listSessions, syncSessions } from "./sessions";
+import type { CandidateStatus, Page, Platform, Streamer, StreamerSearchResult } from "@/types/api";
+import { getSession, listSessions, syncSessions } from "./sessions";
+import { deleteHighlight, getHighlight, listHighlights, setHighlightStatus, type LocalHighlight } from "./highlights";
+import { deleteClip, listClips, renameClip, type LocalClip } from "./clips";
+import { ACTIVITY_KEY, type ChatActivity } from "@/background/chat-manager";
 import {
   addStreamer,
   LocalError,
@@ -16,13 +19,37 @@ import {
   type Clients,
 } from "./streamers";
 
-type Method = "GET" | "POST" | "PATCH" | "DELETE";
 type Handler = (m: RegExpMatchArray, q: URLSearchParams, body: unknown) => Promise<unknown>;
 
 function page<T>(items: T[], q: URLSearchParams): Page<T> {
   const limit = Math.max(1, Math.min(500, Number(q.get("limit") ?? 50) || 50));
   const offset = Math.max(0, Number(q.get("offset") ?? 0) || 0);
   return { items: items.slice(offset, offset + limit), total: items.length, limit, offset };
+}
+
+function notFound(what: string): never {
+  throw new LocalError("not_found", `${what} not found`, 404);
+}
+
+/** Filters: platform, status, min_score, date_from, streamer_id, has_video; sort=score for "top". */
+export function filterHighlights(all: LocalHighlight[], q: URLSearchParams): LocalHighlight[] {
+  const minScore = Number(q.get("min_score") ?? 0) || 0;
+  const from = q.get("date_from");
+  let out = all.filter(
+    (h) =>
+      h.score >= minScore &&
+      (!q.get("platform") || h.platform === q.get("platform")) &&
+      (!q.get("status") || h.status === q.get("status")) &&
+      (!q.get("streamer_id") || h.streamer_id === Number(q.get("streamer_id"))) &&
+      (!q.get("has_video") || h.has_video === (q.get("has_video") === "true")) &&
+      (!from || h.timestamp >= from),
+  );
+  if (q.get("sort") === "score") out = [...out].sort((a, b) => b.score - a.score || b.timestamp.localeCompare(a.timestamp));
+  return out;
+}
+
+function sortClips(all: LocalClip[], q: URLSearchParams): LocalClip[] {
+  return q.get("sort") === "score" ? [...all].sort((a, b) => b.score - a.score) : all;
 }
 
 function platformParam(v: string | null): Platform {
@@ -45,19 +72,14 @@ function searchResult(c: ChannelInfo): StreamerSearchResult & { viewer_count: nu
 }
 
 /**
- * StreamHunter's API, answered inside the extension (IndexedDB + the platform APIs) instead of by
- * a server. It keeps the `/api/v1/...` paths and response shapes the pages already use.
- *
- * During the migration, paths that aren't local yet still go to the old backend (`super.request`).
+ * StreamHunter's API, answered inside the extension (IndexedDB + the Twitch/Kick APIs). There is no
+ * server: the `/api/v1/...` paths are only an internal address scheme the pages use.
  */
 export class LocalApi extends ApiClient {
   private readonly routes: [Method, RegExp, Handler][];
 
-  constructor(
-    opts: ApiClientOptions,
-    private readonly clients: () => Clients = platformClients,
-  ) {
-    super(opts);
+  constructor(private readonly clients: () => Clients = platformClients) {
+    super();
     this.routes = [
       ["GET", /^\/api\/v1\/streamers\/search$/, (_m, q) => this.search(q)],
       ["GET", /^\/api\/v1\/discover\/live$/, (_m, q) => this.discoverLive(q)],
@@ -73,6 +95,16 @@ export class LocalApi extends ApiClient {
       }],
       ["GET", /^\/api\/v1\/platforms\/capabilities$/, () => this.capabilities()],
       ["GET", /^\/api\/v1\/monitoring$/, async (_m, q) => page(await listSessions(), q)],
+      ["GET", /^\/api\/v1\/monitoring\/(\d+)\/activity$/, (m) => this.activity(Number(m[1]))],
+      ["GET", /^\/api\/v1\/highlights$/, async (_m, q) => page(filterHighlights(await listHighlights(), q), q)],
+      ["GET", /^\/api\/v1\/highlights\/(\d+)$/, async (m) => (await getHighlight(Number(m[1]))) ?? notFound("Highlight")],
+      ["POST", /^\/api\/v1\/highlights\/(\d+)\/approve$/, (m) => setHighlightStatus(Number(m[1]), "approved")],
+      ["POST", /^\/api\/v1\/highlights\/(\d+)\/reject$/, (m) => setHighlightStatus(Number(m[1]), "rejected")],
+      ["PATCH", /^\/api\/v1\/highlights\/(\d+)$/, (m, _q, b) => setHighlightStatus(Number(m[1]), ((b ?? {}) as { status: CandidateStatus }).status)],
+      ["DELETE", /^\/api\/v1\/highlights\/(\d+)$/, async (m) => void (await deleteHighlight(Number(m[1])))],
+      ["GET", /^\/api\/v1\/clips$/, async (_m, q) => page(sortClips(await listClips(), q), q)],
+      ["PATCH", /^\/api\/v1\/clips\/(\d+)$/, (m, _q, b) => renameClip(Number(m[1]), String(((b ?? {}) as { title?: unknown }).title ?? ""))],
+      ["DELETE", /^\/api\/v1\/clips\/(\d+)$/, async (m) => void (await deleteClip(Number(m[1])))],
     ];
   }
 
@@ -87,7 +119,7 @@ export class LocalApi extends ApiClient {
         throw toApiError(e);
       }
     }
-    return super.request<T>(method, path, body); // not migrated yet: the old backend
+    throw new ApiError("http", `Not found: ${method} ${url.pathname}`, 404, { error: { code: "not_found", message: "Not found" } });
   }
 
   private async search(q: URLSearchParams) {
@@ -109,6 +141,14 @@ export class LocalApi extends ApiClient {
     const username = typeof b.username === "string" ? b.username.trim() : "";
     if (!username) throw new LocalError("invalid_query", "Enter a channel name", 422);
     return addStreamer(await resolveChannel(this.clients(), platform, username));
+  }
+
+  private async activity(sessionId: number) {
+    const session = (await getSession(sessionId)) ?? notFound("Session");
+    const all = ((await chrome.storage.local.get(ACTIVITY_KEY))[ACTIVITY_KEY] ?? {}) as ChatActivity;
+    const a = all[String(session.streamer_id)];
+    const base = a ?? { chat_state: "connecting", chat_reason: null };
+    return { session_id: session.id, streamer_id: session.streamer_id, ...base, ...(session.status !== "active" ? { chat_state: "not_monitored" } : {}) };
   }
 
   private async capabilities() {

@@ -1,6 +1,5 @@
 /**
- * Response shapes of the StreamHunter backend (/api/v1). They mirror the Pydantic
- * schemas defined in backend/app/schemas and API_DOCUMENTATION.md.
+ * StreamHunter's data model (stored in IndexedDB, served by LocalApi under /api/v1/... paths).
  */
 export type Platform = "twitch" | "kick";
 
@@ -81,7 +80,7 @@ export interface HighlightCandidate {
   streamer_display_name?: string;
   streamer_username?: string | null;
   clip?: ClipSummary | null;
-  origin?: "chat" | "vod" | "merged";
+  origin?: "chat" | "viewers" | "capture" | "vod" | "merged";
   vod_url_at?: string | null;
   platform: Platform;
   timestamp: string;
@@ -125,43 +124,4 @@ export interface Clip {
   published_at: string | null;
   published_url: string | null;
   created_at: string;
-}
-
-export interface MediaSource {
-  id: number;
-  session_id: number | null;
-  kind: "upload" | "registered";
-  original_name: string;
-  size_bytes: number;
-  duration_sec: number | null;
-  has_audio: boolean;
-  has_video: boolean;
-  width: number | null;
-  height: number | null;
-  offset_in_stream_sec: number;
-  status: string;
-  error_message: string | null;
-  created_at: string;
-}
-
-export interface MediaJob {
-  id: number;
-  kind: "analyze" | "export";
-  media_source_id: number;
-  clip_id: number | null;
-  status: "queued" | "running" | "succeeded" | "failed";
-  result: Record<string, unknown>;
-  error_message: string | null;
-}
-
-export interface MediaCapabilities {
-  ffmpeg_available: boolean;
-  max_upload_mb: number;
-  media_folder: string;
-  supported_extensions: string[];
-  /** "supported" when the backend has FFmpeg and local speech recognition. */
-  subtitles: string;
-  /** "supported" when the backend can hear laughter, cheering and screaming in recordings. */
-  sound_events: string;
-  live_tab_audio: string;
 }

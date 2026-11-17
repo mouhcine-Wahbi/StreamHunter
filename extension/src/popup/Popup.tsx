@@ -3,7 +3,7 @@ import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/Button";
 import { MonitoringStatusPill, STATUS_META } from "@/components/monitoring/MonitoringStatusPill";
 import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
-import { TabAudioControl } from "@/components/monitoring/TabAudioControl";
+import { CaptureControl } from "@/components/monitoring/CaptureControl";
 import { HighlightRow } from "@/components/highlights/HighlightRow";
 import { ApiStateView } from "@/components/ApiStateView";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -53,7 +53,7 @@ export function Popup() {
         <MonitoringToggle monitoring={monitoring} size="lg" className="w-full" />
       </section>
 
-      <TabAudioControl />
+      <CaptureControl />
 
       <section className="flex-1 border-t border-ink-700 px-4 py-3" aria-labelledby="recent-title">
         <h2 id="recent-title" className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-fg-muted">

@@ -1,8 +1,7 @@
 import { createMonitoringManager } from "./monitoring-manager";
 import { ALARMS, syncAlarms } from "./alarm-manager";
-import { ApiClient } from "@/services/api-client";
 import { getMonitoringState, updateSettings } from "@/store/storage";
-import { json, mockFetch } from "@/test/http";
+import { json } from "@/test/http";
 import { configurePlatforms, fakePlatforms, type FakeChannel } from "@/test/platforms";
 import { LocalApi } from "@/local/local-api";
 import { listSessions } from "@/local/sessions";
@@ -12,7 +11,6 @@ function setup(now = new Date("2026-11-13T10:00:00Z")) {
   let clock = now;
   const manager = createMonitoringManager({
     now: () => clock,
-    createClient: (baseUrl) => new ApiClient({ baseUrl }),
     refresh: (at) => refreshStatuses(undefined, at),
   });
   return {
@@ -24,7 +22,7 @@ function setup(now = new Date("2026-11-13T10:00:00Z")) {
 }
 
 async function watch(...names: [platform: "twitch" | "kick", username: string][]) {
-  const api = new LocalApi({ baseUrl: "http://localhost:8000" });
+  const api = new LocalApi();
   for (const [platform, username] of names) await api.post("/api/v1/streamers", { platform, username });
 }
 
@@ -135,7 +133,7 @@ describe("monitoring manager (local: no backend)", () => {
     fakePlatforms({ twitch: [] });
     const { manager } = setup();
     await manager.start();
-    const restored = await createMonitoringManager({ now: () => new Date(), createClient: (u) => new ApiClient({ baseUrl: u }), refresh: (at) => refreshStatuses(undefined, at) }).restore();
+    const restored = await createMonitoringManager({ now: () => new Date(), refresh: (at) => refreshStatuses(undefined, at) }).restore();
     expect(restored).toMatchObject({ enabled: true, status: "active" });
   });
 
@@ -147,8 +145,8 @@ describe("monitoring manager (local: no backend)", () => {
   });
 
   it("concurrent ticks share one check", async () => {
-    const refresh = vi.fn(async () => ({ checked: 0, live: 0, skipped_recent: 0, unavailable: {}, retry_after: {}, changes: [], checked_ids: [] }));
-    const manager = createMonitoringManager({ now: () => new Date(), createClient: (u) => new ApiClient({ baseUrl: u }), refresh });
+    const refresh = vi.fn(async () => ({ checked: 0, live: 0, skipped_recent: 0, unavailable: {}, retry_after: {}, changes: [], checked_ids: [], spikes: [] }));
+    const manager = createMonitoringManager({ now: () => new Date(), refresh });
     await chrome.storage.local.set({ "sh.monitoring": { enabled: true, status: "active" } });
     await Promise.all([manager.tick(true), manager.tick(true), manager.tick(true)]);
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -166,22 +164,3 @@ describe("monitoring manager (local: no backend)", () => {
     expect((await getMonitoringState()).enabled).toBe(false);
   });
 });
-
-describe("settings sync", () => {
-  it("pushes settings (without backendUrl) only when signed in", async () => {
-    const { syncSettingsToBackend } = await import("./settings-sync");
-    const fetch = mockFetch(() => json({}));
-    expect(await syncSettingsToBackend()).toBe(false);
-    expect(fetch).not.toHaveBeenCalled();
-    await chrome.storage.local.set({ "sh.authToken": "tok" });
-    await updateSettings({ privacy: { retentionDays: 9 } });
-    expect(await syncSettingsToBackend()).toBe(true);
-    const [url, init] = fetch.mock.calls.at(-1)!;
-    expect(url).toBe("http://localhost:8000/api/v1/settings");
-    const body = JSON.parse(String(init!.body));
-    expect(body.privacy.retentionDays).toBe(9);
-    expect(body).not.toHaveProperty("backendUrl");
-  });
-});
-
-

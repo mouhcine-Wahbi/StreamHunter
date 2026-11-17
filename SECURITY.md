@@ -2,108 +2,50 @@
 
 ## Principles
 
-1. **No secrets in the extension.** Twitch/Kick client secrets and platform OAuth
-   tokens only exist on the backend. The extension stores non-secret settings and,
-   from Phase 2 on, a StreamHunter session token.
-2. **Encrypted at rest.** Platform access/refresh tokens are encrypted with Fernet
-   (`TOKEN_ENCRYPTION_KEY`) before being written to the database.
-3. **No token logging.** Structured logs never contain tokens, auth headers or
-   OAuth codes.
-4. **Ownership checks.** Every resource query is scoped to the authenticated user
-   in the service layer, so one user cannot read another user's data.
-5. **Minimal data.** Raw chat messages are processed in memory and discarded. Only
-   aggregated window statistics and detection events are stored, and they expire after
-   the configured retention period.
-6. **Explicit consent.** Monitoring status is always visible (badge, popup, side
-   panel). Tab-audio measurement only starts when the user clicks it in the popup on
-   that tab, shows Chrome's sharing indicator while it runs, and stops with the tab.
-   Publishing always needs an explicit confirmation.
-7. **Official APIs only.** No scraping, no unofficial chat sockets, no downloaders,
-   no DRM or restriction bypasses.
+1. **Local-first.** There is no StreamHunter server and no account. The monitoring list, highlights,
+   clips, settings and credentials stay in the browser profile where the extension is installed.
+2. **Your own platform apps.** Twitch/Kick client IDs and secrets belong to the editor's own developer
+   apps. They are stored in `chrome.storage.local` and sent only to that platform's token endpoint
+   (`id.twitch.tv`, `id.kick.com`). They are never logged or shown again after saving (the secret
+   field stays empty).
+3. **Least privilege for chat.** Sign in with Twitch asks for one scope, `user:read:chat`. The state
+   parameter is checked, the token is validated with Twitch, and Sign out revokes it.
+4. **Minimal data.** Chat messages are analysed in memory and discarded; only highlights (time, score,
+   reasons) are kept, and provisional highlights expire after the retention period.
+5. **Explicit consent for capture.** Recording a tab only starts when the editor clicks **Capture this
+   stream** in the popup on that tab (Chrome requires that click). Chrome shows its sharing indicator
+   while it runs, the tab stays audible, and capture stops with **Stop capture** or when the tab closes.
+   The video is encoded in memory and only the clips are saved, locally. Nothing is uploaded.
+6. **Official APIs only.** Twitch Helix, Twitch EventSub and Kick's public API. No scraping, no
+   unofficial chat sockets, no stream downloaders, no DRM or restriction bypasses. Nothing is
+   published anywhere.
 
-## Extension specifics (implemented in Phase 1)
+## Extension permissions
 
-* Manifest V3 with the minimum permissions: `storage`, `alarms`, `sidePanel`, `notifications`,
-  and for live tab audio (Phase 7) `activeTab` (read the channel URL of the tab the popup was
-  opened on), `tabCapture` and `offscreen` (measure that tab's loudness in an offscreen page).
-* Tab audio: the offscreen page turns the captured audio into one RMS loudness value per second.
-  Only these numbers are sent (to the user's own backend); no audio is recorded or uploaded. The
-  backend keeps them in memory for about 7 minutes and only uses them for the user's own monitored
-  sessions.
-* Live laughter detection is a separate opt-in checkbox, off by default and chosen again for each
-  capture. Only then does the offscreen page also send the tab's audio (16 kHz mono PCM, ≤ 12 s per
-  batch, authenticated) to the user's own backend. The backend classifies it in memory and drops it.
-  It keeps only per-second laughter/cheering/screaming values, which are pruned like the loudness
-  numbers. The audio is never written to disk or logged. The audio worklet (`pcm-worklet.js`) ships
-  with the extension; no remote code.
-* Host access only for `localhost:8000` / `127.0.0.1:8000`. A remote backend
-  needs `https://` and an optional host permission that the user grants at runtime.
-* Plain `http://` is rejected for any host other than localhost.
-* Runtime messages are accepted only from this extension's own pages
-  (`sender.id === chrome.runtime.id`) and validated against a fixed set of types.
-* Requests use `credentials: "omit"`; authentication is an explicit bearer header.
-* Navigation routes and outbound links are allow-listed (only `https:` clip URLs are rendered as links).
-* No remote code, no `eval`, and the default MV3 content security policy.
+| Permission | Why |
+|---|---|
+| `storage` | Settings, credentials, cached tokens, live state |
+| `alarms` | Scheduled live-status checks |
+| `notifications` | Go-live, highlight and clip-saved notifications |
+| `sidePanel` | Highlight feed beside the stream |
+| `activeTab` | Read the URL of the tab the popup was opened on (which channel to capture) |
+| `tabCapture`, `offscreen` | Capture that tab in an offscreen document |
+| `identity` | Sign in with Twitch (`launchWebAuthFlow`) |
+| Host access: `api.twitch.tv`, `id.twitch.tv`, `api.kick.com`, `id.kick.com` | The official APIs. The Twitch chat WebSocket (`eventsub.wss.twitch.tv`) needs no host permission |
 
-## Backend specifics
+No `tabs`, `<all_urls>`, `downloads`, `cookies` or content scripts.
 
-Implemented in Phase 2:
+## Other measures
 
-* Passwords hashed with Argon2id (rehashed transparently when parameters change). Plaintext is never stored.
-* Sessions are random 256-bit bearer tokens. Only their SHA-256 is stored, and they can be revoked (logout) and expire.
-* Login gives the same response and similar timing for unknown accounts and wrong passwords.
-* Register and login are rate-limited per client (in-process; use a shared store when running multiple instances).
-* Every resource query is filtered by owner. Another user's record answers 404, exactly like a missing one.
-* Logs are JSON with bearer tokens, OAuth codes, secrets and passwords redacted.
-* In production, the backend refuses to start without `TOKEN_ENCRYPTION_KEY` or with SQLite.
+* Messages to the worker are accepted only from this extension's own pages (`isTrustedSender`), are
+  type-checked (`isRuntimeRequest`) and their inputs validated (tab ids, seconds clamped to 5–110).
+* The page that opens a stream only builds `https://www.twitch.tv/<login>` / `https://kick.com/<slug>`
+  from validated names.
+* Platform errors are shown without credentials or tokens in them.
+* Clip downloads are blob URLs created in the extension page; they are revoked when the card unmounts.
 
-Implemented in Phase 3:
+## What the editor should know
 
-* Platform OAuth: random `state`, stored only as a hash, single use, bound to user + platform, 10-minute expiry.
-  Replayed, forged, cross-platform and expired callbacks are rejected. Kick uses PKCE (S256); the verifier is encrypted at rest.
-* Platform tokens are stored Fernet-encrypted. Connecting is refused while `TOKEN_ENCRYPTION_KEY` is missing.
-  Disconnecting revokes the tokens at the platform and deletes them.
-* The OAuth callback page has no scripts (`Content-Security-Policy: default-src 'none'`), escapes all
-  values, and is sent with `no-store` and `no-referrer`.
-* The extension only opens authorization URLs on `id.twitch.tv` / `id.kick.com`.
-* Platform error bodies are never echoed to clients; only status codes are logged.
-
-Implemented in Phase 5:
-
-* Kick webhooks are rejected unless the RSA-SHA256 signature verifies against Kick's published key
-  (refetched once on mismatch, for key rotation), the timestamp is within ±5 minutes, and the
-  message id is new. Bodies are capped at 64 KiB.
-* Chat messages are processed in memory only. The database stores aggregated detector metadata
-  (counts, shares, emote names, a ≤ 40-character repeated phrase) and never message logs or chatter identities.
-* Known bots, `!commands` and the broadcaster's own messages are ignored. Each chatter counts at
-  most twice per 5 s, so one person can't fake an audience reaction.
-
-Implemented in Phase 6:
-
-* Publishing needs `confirm: true` in the request *and* a confirmation step in the UI. StreamHunter
-  never posts content; "published" is a record of what the editor did.
-* Auto-capture only creates an unpublished Twitch clip, with the user's own token and only if they opted in
-  (on by default, can be switched off). It never approves or publishes.
-* Manually entered clip URLs must be https on the platform's own domains. The extension only renders
-  https links.
-
-Implemented in Phase 7:
-
-* Media is processed only after the user confirms they have the rights to it (required in the API and the UI).
-  StreamHunter never downloads from Twitch or Kick.
-* Every file lives in a per-user folder. Registered paths must be relative, contain no `..`, resolve
-  inside that folder, and have an allow-listed media extension. Upload file names are sanitized,
-  uploads are streamed with a size limit, and partial or invalid files are deleted.
-* FFmpeg/ffprobe run as argument lists (no shell) with timeouts and bounded concurrency. Exports are written
-  under a temporary name and then moved into place. Error messages show file names only, never server paths.
-* Exported files are downloadable only by their owner.
-* Speech-to-text and sound classification run locally. Model files are downloaded only from fixed
-  HTTPS URLs; the sound model is checked against a pinned SHA-256 before it is used.
-
-Planned:
-
-* HTTPS required in production; CORS restricted to the extension origin.
-
-## Reporting
-
-Report vulnerabilities privately to the project owner. Do not open public issues for them.
+* Anyone with access to this Chrome profile can see the saved app credentials and clips. Use a
+  profile you control, and **Remove** credentials in Settings → Platforms when you're done.
+* Clips and highlights are deleted when the extension is removed or its site data is cleared.

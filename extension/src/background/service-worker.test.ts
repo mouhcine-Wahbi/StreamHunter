@@ -5,6 +5,7 @@ import { handleMessage, isTrustedSender } from "./message-handler";
 import { createMonitoringManager } from "./monitoring-manager";
 import { configurePlatforms, fakePlatforms } from "@/test/platforms";
 import { LocalApi } from "@/local/local-api";
+import { db } from "@/local/db";
 
 const okBackend = (url: string) =>
   /\/(heartbeat|start)$/.test(url)
@@ -33,7 +34,7 @@ describe("service worker wiring", () => {
   it("runs a live-status check (no backend) when the alarm fires", async () => {
     await configurePlatforms();
     const { fetch } = fakePlatforms({ twitch: [{ id: "1", login: "alpha", live: true }] });
-    await new LocalApi({ baseUrl: "http://localhost:8000" }).post("/api/v1/streamers", { platform: "twitch", username: "alpha" });
+    await new LocalApi().post("/api/v1/streamers", { platform: "twitch", username: "alpha" });
     await loadWorker();
     await chrome.runtime.sendMessage({ type: "monitoring/start" });
     fetch.mockClear();
@@ -94,10 +95,13 @@ describe("message handler", () => {
     ]);
   });
 
-  it("check-now without monitoring only checks backend health", async () => {
-    mockFetch(okBackend);
+  it("check-now without monitoring refreshes live status but opens no session", async () => {
+    await configurePlatforms();
+    fakePlatforms({ twitch: [{ id: "1", login: "alpha", live: true }] });
+    await new LocalApi().post("/api/v1/streamers", { platform: "twitch", username: "alpha" });
     const res = await handleMessage({ type: "monitoring/check-now" }, manager());
-    expect(res).toMatchObject({ ok: true, data: { enabled: false, backendStatus: "online" } });
+    expect(res).toMatchObject({ ok: true, data: { enabled: false, liveCount: 1, lastError: null } });
+    expect(await db.all("sessions")).toEqual([]);
   });
 
   it("trusts only this extension as sender", () => {

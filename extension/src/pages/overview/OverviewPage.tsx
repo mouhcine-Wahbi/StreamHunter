@@ -8,6 +8,7 @@ import { MonitoringCard } from "@/components/monitoring/MonitoringCard";
 import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
 import { STATUS_META } from "@/components/monitoring/MonitoringStatusPill";
 import { PipelineStatus, type ClipStats } from "@/components/monitoring/PipelineStatus";
+import { SystemCard } from "@/components/monitoring/SystemCard";
 import { useCapture } from "@/hooks/useCapture";
 import { useSettings } from "@/hooks/useSettings";
 import { ClipCard } from "@/pages/clips/ClipCard";
@@ -58,7 +59,8 @@ function StatTile({ label, icon, value, sub }: { label: string; icon: ReactNode;
 }
 
 export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof useMonitoring> }) {
-  const { state: capture } = useCapture();
+  const { state: capture, slots } = useCapture();
+  const recordingNames = slots.filter((x) => x.recording).map((x) => x.channel ?? "?");
   const streamers = useApiQuery<Page<Streamer>>("/api/v1/streamers?limit=500");
   const stats = useApiQuery<ClipStats>(`/api/v1/clips/stats?_=${capture.clips}:${capture.lastClipAt ?? ""}`);
   const recent = useApiQuery<Page<LocalClip>>(`/api/v1/clips?limit=4&_=${capture.lastClipAt ?? ""}`);
@@ -77,7 +79,7 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
       />
 
       <section aria-label="Statistics" className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-6">
-        <StatTile label="Monitoring" icon={<Activity className="size-4" />} value={status.label} sub={capture.recording ? `Recording ${capture.channel ?? ""}` : "Not recording"} />
+        <StatTile label="Monitoring" icon={<Activity className="size-4" />} value={status.label} sub={recordingNames.length ? `Recording ${recordingNames.join(", ")}` : "Not recording"} />
         <StatTile
           label="Monitored streamers"
           icon={<Users className="size-4" />}
@@ -114,7 +116,7 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
                   page.items.length === 0 ? (
                     <EmptyState icon={<Sparkles className="size-5" />} title="No clips yet">
                       1. Turn on Auto-record for a streamer in My Streamers. 2. Open twitch.tv or kick.com in a tab, click the StreamHunter icon and
-                      choose Use this tab as the recorder. 3. Start monitoring and leave Chrome running.
+                      choose Use this tab as a recorder (one tab per stream you want recorded at the same time). 3. Start monitoring and leave Chrome running.
                     </EmptyState>
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -131,6 +133,7 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
 
         <div className="space-y-6">
           <PipelineStatus monitoring={monitoring} />
+          <SystemCard />
           <MonitoringCard monitoring={monitoring} />
           <PlatformsCard />
         </div>

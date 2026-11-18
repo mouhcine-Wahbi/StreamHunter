@@ -43,6 +43,16 @@ export interface Settings {
     /** Also create a clip on Twitch itself (needs Sign in with Twitch with the clips:edit permission). */
     twitchNativeClips: boolean;
   };
+  recording: {
+    /** How many streams may be recorded at the same time (one recorder tab each). */
+    maxStreams: number;
+    /** 720p30 at 3 Mbit/s, or 480p30 at 1.5 Mbit/s (lighter on CPU, RAM and storage). */
+    quality: "720p" | "480p";
+    /** Whose sound plays through the speakers: the first recorded stream, or none (recording is unaffected). */
+    audio: "first" | "none";
+    /** Lower frame rate, then pause the lowest-priority stream, when the Mac is overloaded. */
+    protectResources: boolean;
+  };
   storage: {
     /** Clips are deleted, oldest first (favourites never), when they take more than this (MB). */
     maxTotalMb: number;
@@ -75,6 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
     clipThreshold: 40,
   },
   clips: { preRollSeconds: 20, postRollSeconds: 20, bufferSeconds: 120, maxClipSeconds: 90, twitchNativeClips: false },
+  recording: { maxStreams: 1, quality: "720p", audio: "first", protectResources: true },
   storage: { maxTotalMb: 5120, maxAgeDays: 0 },
   notifications: { onHighlight: true, onStreamerLive: false },
   locale: { timeZone: "auto", language: "en" },
@@ -91,6 +102,7 @@ export const LIMITS = {
   maxClipSeconds: { min: 30, max: 180 },
   maxTotalMb: { min: 200, max: 102_400 },
   maxAgeDays: { min: 0, max: 365 },
+  maxStreams: { min: 1, max: 8 },
   customKeywords: { maxItems: 50, maxLength: 40 },
 } as const;
 

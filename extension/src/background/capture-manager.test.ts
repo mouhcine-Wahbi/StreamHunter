@@ -59,7 +59,7 @@ describe("capture manager (worker side)", () => {
     await expect(createCaptureManager(refused.d).start(1, "https://kick.com/a")).rejects.toThrow(/didn't allow capturing.*not been invoked/);
     const failing = deps({ toOffscreen: vi.fn(async () => ({ ok: false, error: "This browser can't encode H.264 video (WebCodecs)." })) });
     await expect(createCaptureManager(failing.d).start(1, "https://kick.com/a")).rejects.toThrow("H.264");
-    expect(await getCaptureState()).toMatchObject({ status: "error", message: "This browser can't encode H.264 video (WebCodecs)." });
+    expect(await getCaptureState()).toMatchObject({ status: "off", message: "This browser can't encode H.264 video (WebCodecs)." });
   });
 
   it("turns chat highlights of the recorded streamer into fusion signals, and saves the last 30 s on request", async () => {
@@ -72,7 +72,7 @@ describe("capture manager (worker side)", () => {
       confidence: 0.9, category: "funny_moment", reasons: ["40 chatters laughing"], breakdown: { chat: 72 } });
     expect(await m.onHighlight(h, streamer)).toBe(true);
     expect(sent.at(-1)).toEqual({
-      target: "offscreen", type: "capture/signal",
+      target: "offscreen", type: "capture/signal", slot: 1,
       signal: { kind: "chat", at: NOW, start: NOW - 5000, end: NOW + 5000, intensity: 72, reasons: ["40 chatters laughing"], highlightIds: [h.id] },
     });
     expect(await m.onHighlight(h, { ...streamer, id: 99 })).toBe(false); // another streamer: no clip
@@ -82,13 +82,13 @@ describe("capture manager (worker side)", () => {
     expect(manual).toMatchObject({ origin: "capture", window_start_ms: NOW - 30_000, window_end_ms: NOW });
     expect(sent.at(-1)).toMatchObject({ type: "capture/clip", request: { highlightId: manual.id, start: NOW - 30_000, end: NOW } });
 
-    await m.onClipSaved(5, h.id, 30.2);
+    await m.onClipSaved(1, 5, h.id, 30.2);
     expect(await getCaptureState()).toMatchObject({ clips: 1, message: "Clip saved (30 s)." });
     expect(notes).toEqual(["Clip saved: alpha: 40 chatters laughing (30 s)"]);
 
     await m.onTabRemoved(1);
     expect(await getCaptureState()).toMatchObject({ status: "off", message: "The captured tab was closed.", clips: 1 });
-    expect(sent.at(-1)).toEqual({ target: "offscreen", type: "capture/stop" });
+    expect(sent.at(-1)).toEqual({ target: "offscreen", type: "capture/stop", slot: 1 });
   });
 });
 

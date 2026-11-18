@@ -253,6 +253,41 @@ export function SettingsPage() {
           </Field>
         </Section>
 
+        <Section id="recording" title="Recording" description="How many streams are recorded at once. Each one needs its own recorder tab, armed with one click. Measured on an Apple M5: each stream costs about 0.1–0.15 of a CPU core to record plus the Twitch player itself (roughly 0.15–0.3 core and 300–600 MB), and 6–8 Mbit/s of download.">
+          <Field inline label="Simultaneous streams" hint="1 keeps today's single-recorder behaviour. 3 is comfortable on a 16 GB Mac; 5 works if little else runs.">
+            {({ id, describedBy }) => (
+              <Select id={id} aria-describedby={describedBy} className="w-40" value={String(s.recording.maxStreams)} onChange={(e) => void update({ recording: { maxStreams: Number(e.target.value) } })}>
+                {[1, 2, 3, 4, 5, 6, 8].map((n) => (
+                  <option key={n} value={n}>
+                    {n} {n === 1 ? "stream" : "streams"}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field inline label="Recording quality" hint="Applies to recordings started after the change.">
+            {({ id }) => (
+              <Select id={id} className="w-56" value={s.recording.quality} onChange={(e) => void update({ recording: { quality: e.target.value as "720p" | "480p" } })}>
+                <option value="720p">720p, 3 Mbit/s (≈ 22 MB/min)</option>
+                <option value="480p">480p, 1.5 Mbit/s (≈ 11 MB/min)</option>
+              </Select>
+            )}
+          </Field>
+          <Field inline label="Sound" hint="Recording captures every stream's sound either way; this only decides what you hear.">
+            {({ id }) => (
+              <Select id={id} className="w-56" value={s.recording.audio} onChange={(e) => void update({ recording: { audio: e.target.value as "first" | "none" } })}>
+                <option value="first">Play the first stream's sound</option>
+                <option value="none">Silent</option>
+              </Select>
+            )}
+          </Field>
+          <Field inline label="Overload protection" hint="When CPU stays above 90%, free memory drops below 1.5 GB or a stream falls behind: no new streams, then the lowest-priority stream drops to half frame rate, then pauses. Undone after a minute of normal load.">
+            {({ id }) => (
+              <Switch id={id} label="Overload protection" checked={s.recording.protectResources} onChange={(protectResources) => void update({ recording: { protectResources } })} />
+            )}
+          </Field>
+        </Section>
+
         <Section id="storage" title="Storage" description="Clips are stored in this browser. When they take more space than allowed, the oldest are deleted automatically. Favourites are never deleted automatically.">
           <Field inline label="Maximum clip storage">
             {({ id }) => (

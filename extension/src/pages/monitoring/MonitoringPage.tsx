@@ -9,6 +9,8 @@ import { ApiStateView } from "@/components/ApiStateView";
 import { MonitoringCard } from "@/components/monitoring/MonitoringCard";
 import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
 import { PipelineStatus } from "@/components/monitoring/PipelineStatus";
+import { StreamsGrid } from "@/components/monitoring/StreamsGrid";
+import { SystemCard } from "@/components/monitoring/SystemCard";
 import { SessionActivity } from "@/components/monitoring/SessionActivity";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useApiQuery } from "@/hooks/useApiQuery";
@@ -82,9 +84,12 @@ export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof u
       <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="space-y-6">
           <PipelineStatus monitoring={monitoring} />
+          <SystemCard />
           <MonitoringCard monitoring={monitoring} />
           <LiveNow refreshKey={refreshKey} />
         </div>
+        <div className="space-y-6">
+        <StreamsGrid />
         <Card>
           <CardHeader icon={<History className="size-4" />} title="Sessions" description="One session per streamer broadcast." />
           <CardBody>
@@ -118,6 +123,7 @@ export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof u
             </ApiStateView>
           </CardBody>
         </Card>
+        </div>
       </div>
     </>
   );

@@ -15,9 +15,34 @@ export type CaptureStatus = "off" | "starting" | "capturing" | "error";
  */
 export type CaptureMode = "manual" | "recorder";
 
+/** Why a slot is paused: by the editor, by Pause monitoring, or by overload/storage protection. */
+export type PauseReason = "you" | "monitoring" | "overload" | "storage";
+
+/** Encoder health of one slot (from the engine, every 3 s). */
+export interface SlotHealth {
+  /** Encoded video frames per second over the last report. */
+  fps: number;
+  /** Frames dropped because the encoder was behind, since the slot started. */
+  dropped: number;
+  /** Encoder queue at the last report. */
+  queue: number;
+  /** Recording at half frame rate to save CPU (overload protection). */
+  throttled: boolean;
+}
+
+/**
+ * One recording slot = one captured tab with its own engine, buffer, detection and clips.
+ * Several slots can run at once (Settings → Recording → simultaneous streams).
+ */
 export interface CaptureState {
   status: CaptureStatus;
   mode: CaptureMode;
+  pauseReason: PauseReason | null;
+  /** This slot's sound plays through the speakers. */
+  listening: boolean;
+  health: SlotHealth | null;
+  /** When the slot was armed/started (ordering). */
+  armedAt: string | null;
   /** Encoding into the buffer right now (false while the recorder waits for a streamer or is paused). */
   recording: boolean;
   paused: boolean;
@@ -45,6 +70,10 @@ export interface CaptureState {
 export const INITIAL_CAPTURE_STATE: CaptureState = {
   status: "off",
   mode: "manual",
+  pauseReason: null,
+  listening: false,
+  health: null,
+  armedAt: null,
   recording: false,
   paused: false,
   waitingReason: null,
@@ -63,7 +92,27 @@ export const INITIAL_CAPTURE_STATE: CaptureState = {
   message: null,
 };
 
+/** Legacy single-slot key (v1.1); replaced by CAPTURES_KEY. */
 export const CAPTURE_KEY = "sh.capture";
+/** All recording slots: { [tabId]: CaptureState }. */
+export const CAPTURES_KEY = "sh.captures";
+/** Machine and storage load as last measured (overload protection). */
+export const SYSTEM_KEY = "sh.system";
+
+export interface SystemLoad {
+  at: string;
+  /** Whole-machine CPU use, 0–100 (null when Chrome can't tell). */
+  cpuPercent: number | null;
+  memAvailableBytes: number | null;
+  memCapacityBytes: number | null;
+  storageUsedBytes: number | null;
+  storageQuotaBytes: number | null;
+  /** New slots are refused and streams are throttled/paused while true. */
+  overloaded: boolean;
+  reason: string | null;
+  /** What the protection did last ("Lowered alpha to 15 fps", …). */
+  lastAction: string | null;
+}
 /** Lifetime totals: { recordedSeconds } (shown on the Overview). */
 export const STATS_KEY = "sh.stats";
 
@@ -78,7 +127,12 @@ export interface CaptureTarget {
   category?: string | null;
 }
 
+export type RecordingQuality = "720p" | "480p";
+
 export interface CaptureOptions {
+  quality?: RecordingQuality;
+  /** Play this slot's sound through the speakers. */
+  listen?: boolean;
   bufferSeconds: number;
   preRollSeconds: number;
   postRollSeconds: number;

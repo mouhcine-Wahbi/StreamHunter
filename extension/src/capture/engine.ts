@@ -14,7 +14,7 @@
 import type { Signal } from "@/detection/fusion";
 import { createHighlight, deleteHighlight, updateHighlight } from "@/local/highlights";
 import { saveClip, updateClip, type DetectionType } from "@/local/clips";
-import type { CaptureOptions, CaptureTarget, ClipRequest } from "@/types/capture";
+import type { CaptureOptions, CaptureTarget, ClipRequest, SlotHealth } from "@/types/capture";
 import { AutoClipper, type CutJob } from "./autoclip";
 import { ChunkRing } from "./buffer";
 import { muxMp4, type TrackConfigs } from "./mux";
@@ -33,7 +33,14 @@ export interface EngineStatus {
   /** Seconds encoded since the engine started. */
   recordedSeconds: number;
   silentSeconds: number;
+  health: SlotHealth;
 }
+
+/** Capture size and bitrate per quality setting. */
+export const QUALITY = {
+  "720p": { maxWidth: 1280, maxHeight: 720, bitrate: 3_000_000 },
+  "480p": { maxWidth: 854, maxHeight: 480, bitrate: 1_500_000 },
+} as const;
 
 export interface EngineEvents {
   status: (s: EngineStatus) => void;
@@ -48,9 +55,9 @@ interface Processor<T> {
 }
 declare const MediaStreamTrackProcessor: { new <T>(init: { track: MediaStreamTrack }): Processor<T> };
 
-async function pickVideoCodec(width: number, height: number): Promise<VideoEncoderConfig> {
+async function pickVideoCodec(width: number, height: number, bitrate: number): Promise<VideoEncoderConfig> {
   for (const codec of VIDEO_CODECS) {
-    const cfg: VideoEncoderConfig = { codec, width, height, bitrate: 3_000_000, framerate: 30, latencyMode: "realtime", avc: { format: "avc" } };
+    const cfg: VideoEncoderConfig = { codec, width, height, bitrate, framerate: 30, latencyMode: "realtime", avc: { format: "avc" } };
     if ((await VideoEncoder.isConfigSupported(cfg)).supported) return cfg;
   }
   throw new Error("This browser can't encode H.264 video (WebCodecs).");
@@ -75,17 +82,21 @@ export const captureStats = { videoFrames: 0, videoChunks: 0, audioFrames: 0, au
 
 export async function startEngine(streamId: string, initialTarget: CaptureTarget | null, initialOpts: CaptureOptions, on: EngineEvents) {
   const mandatory = { chromeMediaSource: "tab", chromeMediaSourceId: streamId };
+  const q = QUALITY[initialOpts.quality ?? "720p"];
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { mandatory } as unknown as MediaTrackConstraints,
-    video: { mandatory: { ...mandatory, maxWidth: 1280, maxHeight: 720, maxFrameRate: 30 } } as unknown as MediaTrackConstraints,
+    video: { mandatory: { ...mandatory, maxWidth: q.maxWidth, maxHeight: q.maxHeight, maxFrameRate: 30 } } as unknown as MediaTrackConstraints,
   });
   const [vTrack] = stream.getVideoTracks();
   const [aTrack] = stream.getAudioTracks();
   if (!vTrack) throw new Error("The tab has no video to capture.");
 
-  // Keep the tab audible.
+  // Capturing mutes the tab; its sound plays here only for the slot the editor listens to.
   const ctx = new AudioContext();
-  if (aTrack) ctx.createMediaStreamSource(new MediaStream([aTrack])).connect(ctx.destination);
+  const speaker = ctx.createGain();
+  speaker.gain.value = initialOpts.listen === false ? 0 : 1;
+  speaker.connect(ctx.destination);
+  if (aTrack) ctx.createMediaStreamSource(new MediaStream([aTrack])).connect(speaker);
 
   let opts = initialOpts;
   let target = initialTarget;
@@ -95,7 +106,7 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
   const settings = vTrack.getSettings();
   const width = Math.max(2, Math.floor((settings.width ?? 1280) / 2) * 2);
   const height = Math.max(2, Math.floor((settings.height ?? 720) / 2) * 2);
-  const vCfg = await pickVideoCodec(width, height);
+  const vCfg = await pickVideoCodec(width, height, q.bitrate);
   const ring = new ChunkRing(effectiveBufferSeconds(opts) * 1000);
   const signals = new LiveSignals();
   const aSettings = aTrack?.getSettings();
@@ -107,6 +118,11 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
   let recordedMs = 0;
   let silentSeconds = 0;
   let latestDb: number | null = null;
+  let throttled = false;
+  let dropped = 0;
+  let encodedSinceReport = 0;
+  let lastReport = Date.now();
+  let lastEncodedAt = 0;
 
   // --- video -----------------------------------------------------------------------------------
   let vBase: { wall: number; ts: number } | null = null;
@@ -200,12 +216,17 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
             /* thumbnails are best effort */
           }
         }
-        if (vEnc.state === "configured" && vEnc.encodeQueueSize < 8) {
+        // Throttled: encode at most every ~60 ms (half of 30 fps) to save CPU.
+        const skip = throttled && at - lastEncodedAt < 60;
+        if (vEnc.state === "configured" && vEnc.encodeQueueSize >= 8) dropped += 1;
+        else if (vEnc.state === "configured" && !skip) {
           const keyFrame = needKey || at - lastKey >= KEYFRAME_MS;
           if (keyFrame) {
             lastKey = at;
             needKey = false;
           }
+          lastEncodedAt = at;
+          encodedSinceReport += 1;
           vEnc.encode(frame, { keyFrame });
         }
       } else {
@@ -330,14 +351,20 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
         );
       }
     }
-    if (++ticks % 3 === 0)
+    if (++ticks % 3 === 0) {
+      const secs = Math.max(0.5, (now - lastReport) / 1000);
+      const fps = Math.round((encodedSinceReport / secs) * 10) / 10;
+      encodedSinceReport = 0;
+      lastReport = now;
       on.status({
         bufferedSeconds: Math.round(((ring.newest ?? now) - (ring.oldest ?? now)) / 1000),
         levelDb: isActive() ? latestDb : null,
         recording: isActive(),
         recordedSeconds: Math.round(recordedMs / 1000),
         silentSeconds,
+        health: { fps: isActive() ? fps : 0, dropped, queue: vEnc.state === "configured" ? vEnc.encodeQueueSize : 0, throttled },
       });
+    }
   }, 1000);
 
   vTrack.addEventListener("ended", () => void stop("The tab was closed or stopped sharing."));
@@ -387,7 +414,14 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
       paused = p;
       if (p) needKey = true;
     },
+    setListening(on: boolean) {
+      speaker.gain.value = on ? 1 : 0;
+    },
+    setThrottled(on: boolean) {
+      throttled = on;
+    },
     updateOptions(next: CaptureOptions) {
+      if (typeof next.listen === "boolean") speaker.gain.value = next.listen ? 1 : 0;
       opts = next;
       ring.keepMs = effectiveBufferSeconds(next) * 1000;
       clipper.updateOptions(next);

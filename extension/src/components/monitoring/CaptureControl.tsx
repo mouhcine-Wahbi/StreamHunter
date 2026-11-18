@@ -3,6 +3,7 @@ import { Circle, Clapperboard, Scissors, Square, Video } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useCapture } from "@/hooks/useCapture";
+import { useSettings } from "@/hooks/useSettings";
 import { channelFromUrl } from "@/types/capture";
 import { formatRelative } from "@/utils/format";
 
@@ -27,8 +28,10 @@ export function isStreamSite(url: string | undefined | null): boolean {
  * - Capture this stream (manual): records the channel open in this tab.
  */
 export function CaptureControl() {
-  const capture = useCapture();
   const [tab, setTab] = useState<{ id: number; url: string } | null>(null);
+  const capture = useCapture(tab?.id ?? -1);
+  const { settings } = useSettings();
+  const max = settings.recording.maxStreams;
 
   useEffect(() => {
     let alive = true;
@@ -43,6 +46,9 @@ export function CaptureControl() {
 
   const target = channelFromUrl(tab?.url);
   const { state } = capture;
+  const others = capture.slots.filter((s) => s.tabId !== tab?.id);
+  const full = others.length >= max;
+  const count = max > 1 ? ` (${others.length + 1} of ${max})` : "";
   const active = state.status === "capturing" || state.status === "starting";
   const where = state.platform && state.channel ? `${PLATFORM_HOST[state.platform]}/${state.channel}` : null;
 
@@ -56,6 +62,14 @@ export function CaptureControl() {
           </Badge>
         )}
       </h2>
+      {others.length > 0 && (
+        <p className="mb-1.5 text-fg-muted">
+          {others.filter((s) => s.recording).length > 0
+            ? `Recording in other tabs: ${others.filter((s) => s.recording).map((s) => s.channel).join(", ")}.`
+            : `${others.length} other recorder tab${others.length === 1 ? "" : "s"} armed.`}{" "}
+          Manage them in Live Monitoring.
+        </p>
+      )}
       {active ? (
         <div className="space-y-2">
           <p className="text-fg">
@@ -78,10 +92,15 @@ export function CaptureControl() {
             </Button>
           </div>
         </div>
+      ) : tab && isStreamSite(tab.url) && full ? (
+        <p className="text-fg-subtle">
+          Already recording {others.length} stream{others.length === 1 ? "" : "s"}, the limit. Stop one in Live Monitoring, or allow more simultaneous
+          streams in Settings → Recording.
+        </p>
       ) : tab && isStreamSite(tab.url) ? (
         <div className="space-y-2">
           <Button size="sm" variant="primary" className="w-full" loading={capture.busy} icon={<Clapperboard className="size-3.5" />} onClick={() => void capture.arm(tab.id)}>
-            Use this tab as the recorder
+            {others.length > 0 ? `Add this tab as a recorder${count}` : `Use this tab as a recorder${count}`}
           </Button>
           <p className="text-fg-subtle">
             Automatic: StreamHunter switches this tab to whichever Auto-record streamer is live, records only while one is, and turns detected moments

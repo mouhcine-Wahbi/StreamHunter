@@ -14,7 +14,7 @@ import { db } from "@/local/db";
 import { createHighlight, listHighlights } from "@/local/highlights";
 import { listClips, saveClip } from "@/local/clips";
 import { ACTIVITY_KEY, KICK_CHAT_REASON } from "@/background/chat-manager";
-import { CAPTURE_KEY, INITIAL_CAPTURE_STATE } from "@/types/capture";
+import { CAPTURES_KEY, INITIAL_CAPTURE_STATE } from "@/types/capture";
 import type { Streamer } from "@/types/api";
 
 /** Wires runtime messages to the real handler, as the service worker would. */
@@ -56,17 +56,17 @@ describe("popup capture (capture mode)", () => {
         startedAt: "2026-11-17T12:00:00Z", bufferedSeconds: 45, levelDb: -21, message: "Buffering the last 2 minutes. Detected moments become clips." };
       if (m.type === "capture/start" || m.type === "capture/arm") {
         onStart(m);
-        void chrome.storage.local.set({ [CAPTURE_KEY]: capturing }).then(() => respond({ ok: true, data: capturing }));
+        void chrome.storage.local.set({ [CAPTURES_KEY]: { slots: { 42: capturing } } }).then(() => respond({ ok: true, data: capturing }));
         return true;
       }
       if (m.type === "capture/save-last") {
         const s = { ...capturing, message: `Saving the last ${m.seconds} s…` };
-        void chrome.storage.local.set({ [CAPTURE_KEY]: s }).then(() => respond({ ok: true, data: s }));
+        void chrome.storage.local.set({ [CAPTURES_KEY]: { slots: { 42: s } } }).then(() => respond({ ok: true, data: s }));
         return true;
       }
       if (m.type === "capture/stop") {
         const s = { ...INITIAL_CAPTURE_STATE, clips: 2 };
-        void chrome.storage.local.set({ [CAPTURE_KEY]: s }).then(() => respond({ ok: true, data: s }));
+        void chrome.storage.local.set({ [CAPTURES_KEY]: { slots: {}, clips: 2 } }).then(() => respond({ ok: true, data: s }));
         return true;
       }
       return false;
@@ -95,7 +95,7 @@ describe("popup capture (capture mode)", () => {
     const starts: unknown[] = [];
     workerWithCapture((m) => starts.push(m));
     render(<Popup />);
-    await userEvent.click(await screen.findByRole("button", { name: "Use this tab as the recorder" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Use this tab as a recorder" }));
     expect(starts).toEqual([{ type: "capture/arm", tabId: 42 }]);
     expect(screen.queryByRole("button", { name: /Only capture this stream/ })).not.toBeInTheDocument(); // a directory page is not a channel
   });

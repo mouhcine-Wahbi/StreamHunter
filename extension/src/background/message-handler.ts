@@ -1,7 +1,8 @@
 import { getMonitoringState } from "@/store/storage";
 import { isRuntimeRequest, type RuntimeResponse } from "@/types/messages";
 import type { MonitoringManager } from "./monitoring-manager";
-import { getCaptureState, type CaptureManager } from "./capture-manager";
+import { getCaptureState, getSlots, type CaptureManager } from "./capture-manager";
+import { SYSTEM_KEY, type SystemLoad } from "@/types/capture";
 
 const NO_CAPTURE = "Capture is only available in the installed extension";
 
@@ -9,6 +10,8 @@ export async function handleMessage(
   message: unknown,
   manager: MonitoringManager,
   capture?: CaptureManager,
+  /** Overload protection hook (runs at most every 10 s, on engine reports). */
+  onLoad?: () => Promise<void>,
 ): Promise<RuntimeResponse> {
   if (!isRuntimeRequest(message)) return { ok: false, error: "Unknown message" };
   try {
@@ -42,7 +45,19 @@ export async function handleMessage(
         return { ok: true, data: null };
       }
       case "capture/get":
-        return { ok: true, data: await getCaptureState() };
+        return { ok: true, data: await getCaptureState(Number.isInteger(message.tabId) ? message.tabId : undefined) };
+      case "capture/list":
+        return { ok: true, data: await getSlots() };
+      case "capture/pause-slot":
+        if (!capture) return { ok: false, error: NO_CAPTURE };
+        if (!Number.isInteger(message.tabId)) return { ok: false, error: "Invalid tab" };
+        return { ok: true, data: await capture.setPaused(Boolean(message.paused), message.tabId, "you") };
+      case "capture/listen":
+        if (!capture) return { ok: false, error: NO_CAPTURE };
+        if (!Number.isInteger(message.tabId)) return { ok: false, error: "Invalid tab" };
+        return { ok: true, data: await capture.setListening(message.tabId, Boolean(message.on)) };
+      case "system/get":
+        return { ok: true, data: (((await chrome.storage.local.get(SYSTEM_KEY))[SYSTEM_KEY] ?? null) as SystemLoad | null) };
       case "capture/start":
         if (!capture) return { ok: false, error: NO_CAPTURE };
         if (!Number.isInteger(message.tabId) || typeof message.url !== "string") return { ok: false, error: "Invalid tab" };
@@ -56,22 +71,27 @@ export async function handleMessage(
         return { ok: true, data: await capture.sync() };
       case "capture/stop":
         if (!capture) return { ok: false, error: NO_CAPTURE };
-        return { ok: true, data: await capture.stop() };
+        return { ok: true, data: await capture.stop(Number.isInteger(message.tabId) ? message.tabId : undefined) };
       case "capture/save-last": {
         if (!capture) return { ok: false, error: NO_CAPTURE };
         const seconds = Math.max(5, Math.min(110, Number(message.seconds) || 30));
-        return { ok: true, data: await capture.saveLast(seconds) };
+        return { ok: true, data: await capture.saveLast(seconds, Number.isInteger(message.tabId) ? message.tabId : undefined) };
       }
       case "capture/status":
-        await capture?.onStatus({
+        await capture?.onStatus(Number(message.slot), {
           bufferedSeconds: Number(message.bufferedSeconds) || 0,
           levelDb: typeof message.levelDb === "number" ? message.levelDb : null,
           recordedSeconds: typeof message.recordedSeconds === "number" ? message.recordedSeconds : undefined,
           silentSeconds: typeof message.silentSeconds === "number" ? message.silentSeconds : undefined,
+          health: message.health && typeof message.health === "object" ? {
+            fps: Number(message.health.fps) || 0, dropped: Number(message.health.dropped) || 0,
+            queue: Number(message.health.queue) || 0, throttled: Boolean(message.health.throttled),
+          } : undefined,
         });
+        await onLoad?.();
         return { ok: true, data: null };
       case "capture/detection":
-        await capture?.onDetection({
+        await capture?.onDetection(Number(message.slot), {
           at: Number(message.at) || Date.now(),
           reasons: Array.isArray(message.reasons) ? message.reasons.map(String).slice(0, 8) : [],
           score: Number(message.score) || 0,
@@ -79,13 +99,13 @@ export async function handleMessage(
         });
         return { ok: true, data: null };
       case "capture/clip-saved":
-        await capture?.onClipSaved(Number(message.clipId), Number(message.highlightId), Number(message.durationSec) || 0);
+        await capture?.onClipSaved(Number(message.slot), Number(message.clipId), Number(message.highlightId), Number(message.durationSec) || 0);
         return { ok: true, data: null };
       case "capture/clip-failed":
-        await capture?.onClipFailed(String(message.reason));
+        await capture?.onClipFailed(Number(message.slot), String(message.reason));
         return { ok: true, data: null };
       case "capture/ended":
-        await capture?.onEnded(String(message.reason));
+        await capture?.onEnded(Number(message.slot), String(message.reason));
         return { ok: true, data: null };
     }
   } catch (err) {

@@ -21,7 +21,10 @@ import { TWITCH_USER_KEY } from "@/platforms/twitch-user";
 import { getSettings } from "@/store/storage";
 import type { LocalHighlight } from "@/local/highlights";
 import type { Streamer } from "@/types/api";
-import { createCaptureManager, defaultCaptureDeps } from "./capture-manager";
+import { byPriority, createCaptureManager, defaultCaptureDeps, getSlots } from "./capture-manager";
+import { createGovernor, defaultGovernorIo } from "./resource-governor";
+import { enforceStorageLimits } from "@/local/clips";
+import { SYSTEM_KEY } from "@/types/capture";
 import { updateClip, type LocalClip } from "@/local/clips";
 import { createTwitchClip } from "@/platforms/twitch-clips";
 
@@ -42,6 +45,59 @@ async function afterClip(clipId: number): Promise<void> {
 }
 
 const capture = createCaptureManager({ ...defaultCaptureDeps, afterClip });
+
+/** Overload protection across all recording slots (see resource-governor.ts). */
+const governor = createGovernor({
+  now: () => Date.now(),
+  ...defaultGovernorIo,
+  async slots() {
+    const [slots, streamers] = await Promise.all([getSlots(), db.all<Streamer>("streamers")]);
+    const rank = (id: number | null) => streamers.find((s) => s.id === id);
+    // Highest priority first: favourites, then most viewers; manual captures count as top priority.
+    return slots.sort((a, b) => {
+      if (a.mode !== b.mode) return a.mode === "manual" ? -1 : 1;
+      const sa = rank(a.streamerId);
+      const sb = rank(b.streamerId);
+      return sa && sb ? byPriority(sa, sb) : sa ? -1 : sb ? 1 : 0;
+    });
+  },
+  enabled: async () => (await getSettings()).recording.protectResources,
+  async apply(a) {
+    if (a.kind === "throttle") await capture.setThrottled(a.tabId, a.on);
+    else if (a.kind === "pause") await capture.setPaused(a.paused, a.tabId, a.reason);
+    else await enforceStorageLimits((await getSettings()).storage, new Date());
+  },
+  async notify(message) {
+    await chrome.notifications
+      ?.create(`sh-load-${Date.now()}`, { type: "basic", iconUrl: chrome.runtime.getURL("icons/icon-128.png"), title: "StreamHunter", message, priority: 0 })
+      .catch(() => undefined);
+  },
+  save: (load) => chrome.storage.local.set({ [SYSTEM_KEY]: load }),
+});
+
+/** Keyboard shortcut (Alt+Shift+R by default): arm the current Twitch/Kick tab as a recorder. */
+chrome.commands?.onCommand?.addListener((command, tab) => {
+  if (command !== "arm-recorder" || tab?.id === undefined) return;
+  const id = tab.id;
+  void (async () => {
+    const host = (() => {
+      try {
+        return new URL(tab.url ?? "").hostname;
+      } catch {
+        return "";
+      }
+    })();
+    const message = /(^|\.)(twitch\.tv|kick\.com)$/.test(host)
+      ? await capture.arm(id).then(
+          () => "This tab is now a recorder.",
+          (e: unknown) => (e instanceof Error ? e.message : "Could not use this tab as a recorder."),
+        )
+      : "Open twitch.tv or kick.com in this tab first.";
+    await chrome.notifications
+      ?.create(`sh-arm-${Date.now()}`, { type: "basic", iconUrl: chrome.runtime.getURL("icons/icon-128.png"), title: "StreamHunter", message, priority: 0 })
+      .catch(() => undefined);
+  })();
+});
 
 /** Every stored highlight: clip it if that stream is being captured, then notify. */
 async function onHighlight(h: LocalHighlight, s: Streamer): Promise<void> {
@@ -110,7 +166,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedSender(sender)) return false;
   // Messages addressed to the offscreen document are not for the worker.
   if ((message as { target?: unknown } | null)?.target === "offscreen") return false;
-  handleMessage(message, manager, capture).then(sendResponse);
+  handleMessage(message, manager, capture, () => governor.maybeRun()).then(sendResponse);
   return true; // keep the channel open for the async response
 });
 

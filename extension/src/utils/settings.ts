@@ -68,6 +68,7 @@ export function sanitizeSettings(input: unknown): Settings {
   const loc = isRecord(s.locale) ? s.locale : {};
   const priv = isRecord(s.privacy) ? s.privacy : {};
   const store = isRecord(s.storage) ? s.storage : {};
+  const rec = isRecord(s.recording) ? s.recording : {};
   const w = isRecord(det.weights) ? det.weights : {};
   const weight = (k: keyof Settings["detection"]["weights"]) => clampInt(w[k], LIMITS.weight.min, LIMITS.weight.max, d.detection.weights[k]);
 
@@ -111,6 +112,12 @@ export function sanitizeSettings(input: unknown): Settings {
       bufferSeconds: clampInt(clips.bufferSeconds, LIMITS.bufferSeconds.min, LIMITS.bufferSeconds.max, d.clips.bufferSeconds),
       maxClipSeconds: clampInt(clips.maxClipSeconds, LIMITS.maxClipSeconds.min, LIMITS.maxClipSeconds.max, d.clips.maxClipSeconds),
       twitchNativeClips: bool(clips.twitchNativeClips, d.clips.twitchNativeClips),
+    },
+    recording: {
+      maxStreams: clampInt(rec.maxStreams, LIMITS.maxStreams.min, LIMITS.maxStreams.max, d.recording.maxStreams),
+      quality: oneOf(rec.quality, ["720p", "480p"] as const, d.recording.quality),
+      audio: oneOf(rec.audio, ["first", "none"] as const, d.recording.audio),
+      protectResources: bool(rec.protectResources, d.recording.protectResources),
     },
     storage: {
       maxTotalMb: clampInt(store.maxTotalMb, LIMITS.maxTotalMb.min, LIMITS.maxTotalMb.max, d.storage.maxTotalMb),

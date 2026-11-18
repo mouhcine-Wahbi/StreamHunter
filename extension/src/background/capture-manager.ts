@@ -7,8 +7,8 @@ import { getMonitoringState, getSettings } from "@/store/storage";
 import type { Streamer } from "@/types/api";
 import type { Signal } from "@/detection/fusion";
 import {
-  CAPTURE_KEY, channelFromUrl, INITIAL_CAPTURE_STATE, STATS_KEY,
-  type CaptureOptions, type CaptureState, type CaptureTarget, type ClipRequest,
+  CAPTURES_KEY, channelFromUrl, INITIAL_CAPTURE_STATE, STATS_KEY,
+  type CaptureOptions, type CaptureState, type CaptureTarget, type ClipRequest, type PauseReason, type SlotHealth,
 } from "@/types/capture";
 import type { OffscreenRequest } from "@/types/messages";
 import type { Settings } from "@/types/settings";
@@ -18,7 +18,7 @@ const OFFSCREEN_URL = "offscreen.html";
 export const BUFFER_SECONDS = 120;
 
 export const REARM_MESSAGE =
-  "Video capture is inactive. Open a Twitch or Kick tab, click the StreamHunter icon and choose Use this tab as the recorder.";
+  "Video capture is inactive. Open a Twitch or Kick tab, click the StreamHunter icon and choose Use this tab as a recorder.";
 
 export interface CaptureDeps {
   now: () => number;
@@ -28,7 +28,7 @@ export interface CaptureDeps {
   closeOffscreen: () => Promise<void>;
   toOffscreen: (message: OffscreenRequest) => Promise<{ ok: boolean; error?: string } | undefined>;
   notify: (title: string, message: string, id?: string) => Promise<void>;
-  /** Point the recorder tab at a channel (chrome.tabs.update; no "tabs" permission needed). */
+  /** Point a recorder tab at a channel (chrome.tabs.update; no "tabs" permission needed). */
   navigate: (tabId: number, url: string) => Promise<void>;
   /** Called after a clip is saved (Twitch native clip, …). */
   afterClip?: (clipId: number, highlightId: number) => Promise<void>;
@@ -54,7 +54,7 @@ export const defaultCaptureDeps: CaptureDeps = {
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_URL,
       reasons: ["USER_MEDIA" as chrome.offscreen.Reason],
-      justification: "Record the stream tab the editor chose into a local rolling buffer and cut clips from it (nothing is uploaded).",
+      justification: "Record the stream tabs the editor chose into local rolling buffers and cut clips from them (nothing is uploaded).",
     });
   },
   async closeOffscreen() {
@@ -71,17 +71,54 @@ export const defaultCaptureDeps: CaptureDeps = {
   },
 };
 
-export async function getCaptureState(): Promise<CaptureState> {
-  const raw = (await chrome.storage.local.get(CAPTURE_KEY))[CAPTURE_KEY];
-  return { ...INITIAL_CAPTURE_STATE, ...((raw ?? {}) as Partial<CaptureState>) };
+// --- storage -----------------------------------------------------------------------------------
+
+interface CapturesStore {
+  slots: Record<string, CaptureState>;
+  /** The last message once every slot has stopped ("The recorder tab was closed…"). */
+  note: string | null;
+  /** Clips saved since install (all slots). */
+  clips: number;
 }
 
-async function setCaptureState(s: CaptureState): Promise<CaptureState> {
-  await chrome.storage.local.set({ [CAPTURE_KEY]: s });
-  return s;
+async function readStore(): Promise<CapturesStore> {
+  const raw = (await chrome.storage.local.get(CAPTURES_KEY))[CAPTURES_KEY] as Partial<CapturesStore> | undefined;
+  const slots: Record<string, CaptureState> = {};
+  for (const [k, v] of Object.entries(raw?.slots ?? {})) slots[k] = { ...INITIAL_CAPTURE_STATE, ...v };
+  return { slots, note: raw?.note ?? null, clips: raw?.clips ?? 0 };
 }
 
-const patch = async (p: Partial<CaptureState>) => setCaptureState({ ...(await getCaptureState()), ...p });
+// Every engine reports every few seconds: serialise read-modify-write of the store.
+let chain: Promise<unknown> = Promise.resolve();
+function mutate<T>(fn: (s: CapturesStore) => T | Promise<T>): Promise<T> {
+  const run = async () => {
+    const store = await readStore();
+    const out = await fn(store);
+    await chrome.storage.local.set({ [CAPTURES_KEY]: store });
+    return out;
+  };
+  const next = chain.then(run, run);
+  chain = next.catch(() => undefined);
+  return next;
+}
+
+const byArmed = (a: CaptureState, b: CaptureState) => (a.armedAt ?? "").localeCompare(b.armedAt ?? "");
+
+/** All slots that are not off, oldest first. */
+export async function getSlots(): Promise<CaptureState[]> {
+  return Object.values((await readStore()).slots).filter((s) => s.status !== "off").sort(byArmed);
+}
+
+/**
+ * One slot's state: the slot for `tabId`, else the first recording slot, else the first slot, else
+ * an "off" state carrying the last note (what the single-stream UI shows).
+ */
+export async function getCaptureState(tabId?: number): Promise<CaptureState> {
+  const store = await readStore();
+  const slots = Object.values(store.slots).filter((s) => s.status !== "off").sort(byArmed);
+  const found = tabId !== undefined ? store.slots[String(tabId)] : slots.find((s) => s.recording) ?? slots[0];
+  return found && found.status !== "off" ? found : { ...INITIAL_CAPTURE_STATE, clips: store.clips, message: store.note };
+}
 
 export async function getStats(): Promise<{ recordedSeconds: number }> {
   const raw = (await chrome.storage.local.get(STATS_KEY))[STATS_KEY] as { recordedSeconds?: number } | undefined;
@@ -90,6 +127,7 @@ export async function getStats(): Promise<{ recordedSeconds: number }> {
 
 export function captureOptions(settings: Settings): CaptureOptions {
   return {
+    quality: settings.recording.quality,
     bufferSeconds: settings.clips.bufferSeconds,
     preRollSeconds: settings.clips.preRollSeconds,
     postRollSeconds: settings.clips.postRollSeconds,
@@ -97,6 +135,44 @@ export function captureOptions(settings: Settings): CaptureOptions {
     weights: settings.detection.weights,
     clipThreshold: settings.detection.clipThreshold,
   };
+}
+
+// --- choosing streamers ------------------------------------------------------------------------
+
+const eligible = (s: Streamer) => Boolean(s.auto_record) && s.monitoring_enabled && s.is_live === true;
+/** Recording priority: favourites first, then most viewers. */
+export const byPriority = (a: Streamer, b: Streamer) => Number(b.is_favorite) - Number(a.is_favorite) || (b.viewer_count ?? 0) - (a.viewer_count ?? 0);
+
+/** Single-slot choice (kept for the one-recorder case): keep the current one while live. */
+export function pickRecordingTarget(streamers: Streamer[], currentId: number | null): Streamer | null {
+  return assignTargets(streamers, [{ slot: 0, current: currentId }])[0] ?? null;
+}
+
+/**
+ * Which streamer each recorder slot records. Sticky: a slot keeps its streamer while that streamer
+ * is live and eligible. Free slots then take the remaining live Auto-record streamers by priority.
+ * A streamer is never recorded twice (`exclude`: streamers in manual captures).
+ */
+export function assignTargets(
+  streamers: Streamer[],
+  slots: { slot: number; current: number | null }[],
+  exclude: Set<number> = new Set(),
+): Record<number, Streamer | null> {
+  const live = streamers.filter((s) => eligible(s) && !exclude.has(s.id)).sort(byPriority);
+  const out: Record<number, Streamer | null> = {};
+  const taken = new Set<number>();
+  for (const sl of slots) {
+    const keep = live.find((s) => s.id === sl.current && !taken.has(s.id));
+    out[sl.slot] = keep ?? null;
+    if (keep) taken.add(keep.id);
+  }
+  for (const sl of slots) {
+    if (out[sl.slot]) continue;
+    const next = live.find((s) => !taken.has(s.id)) ?? null;
+    out[sl.slot] = next;
+    if (next) taken.add(next.id);
+  }
+  return out;
 }
 
 /** The streamer record for a captured channel: from the monitoring list, else added to it. */
@@ -125,22 +201,39 @@ async function targetFor(streamer: Streamer): Promise<CaptureTarget & { sessionK
   };
 }
 
-/**
- * Which streamer the recorder should show: keep the current one while it is live (no flapping);
- * otherwise the live "Auto-record" streamer with the most viewers, favourites first.
- */
-export function pickRecordingTarget(streamers: Streamer[], currentId: number | null): Streamer | null {
-  const live = streamers.filter((s) => s.auto_record && s.monitoring_enabled && s.is_live === true);
-  const current = live.find((s) => s.id === currentId);
-  if (current) return current;
-  return (
-    [...live].sort((a, b) => Number(b.is_favorite) - Number(a.is_favorite) || (b.viewer_count ?? 0) - (a.viewer_count ?? 0))[0] ?? null
-  );
-}
+// --- manager ---------------------------------------------------------------------------------------
 
-/** Capture, driven by the worker. State lives in storage (the worker may sleep in between). */
+/** Recording slots, driven by the worker. State lives in storage (the worker may sleep in between). */
 export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
-  async function launch(tabId: number, target: CaptureTarget | null): Promise<void> {
+  const sessionKeys = new Map<number, string>(); // slot → broadcast being recorded (restart detection)
+  const send = (m: OffscreenRequest) => deps.toOffscreen(m).catch(() => undefined);
+
+  async function activeCount(): Promise<number> {
+    return (await getSlots()).length;
+  }
+
+  async function checkLimit(tabId: number): Promise<void> {
+    const settings = await getSettings();
+    const slots = await getSlots();
+    if (slots.some((s) => s.tabId === tabId)) return; // replacing this tab's own slot
+    if (slots.length >= settings.recording.maxStreams)
+      throw new Error(
+        settings.recording.maxStreams === 1
+          ? "Already recording one stream. Stop it first, or allow more simultaneous streams in Settings → Recording."
+          : `Already recording ${slots.length} streams (the limit). Stop one, or raise the limit in Settings → Recording.`,
+      );
+    const system = (await chrome.storage.local.get("sh.system"))["sh.system"] as { overloaded?: boolean; reason?: string } | undefined;
+    if (system?.overloaded && slots.length > 0) throw new Error(`Not starting another stream: ${system.reason ?? "the Mac is overloaded"}.`);
+  }
+
+  /** Whether this new slot should play its sound (Settings → Recording → sound). */
+  async function shouldListen(): Promise<boolean> {
+    const settings = await getSettings();
+    if (settings.recording.audio === "none") return false;
+    return !(await getSlots()).some((s) => s.listening);
+  }
+
+  async function launch(tabId: number, target: CaptureTarget | null, listen: boolean): Promise<void> {
     let streamId: string;
     try {
       streamId = await deps.streamIdFor(tabId);
@@ -149,110 +242,212 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
     }
     const settings = await getSettings();
     await deps.ensureOffscreen();
-    const res = await deps.toOffscreen({ target: "offscreen", type: "capture/start", streamId, capture: target, options: captureOptions(settings) });
+    const res = await deps.toOffscreen({
+      target: "offscreen", type: "capture/start", slot: tabId, streamId, capture: target, options: { ...captureOptions(settings), listen },
+    });
     if (!res?.ok) {
-      await deps.closeOffscreen();
-      await setCaptureState({ ...INITIAL_CAPTURE_STATE, status: "error", message: res?.error ?? "The capture did not start" });
+      await removeSlot(tabId, res?.error ?? "The capture did not start");
       throw new Error(res?.error ?? "The capture did not start");
     }
+  }
+
+  async function putSlot(tabId: number, s: CaptureState): Promise<CaptureState> {
+    return mutate((store) => {
+      store.slots[String(tabId)] = s;
+      return s;
+    });
+  }
+
+  async function patchSlot(tabId: number, p: Partial<CaptureState>): Promise<CaptureState> {
+    return mutate((store) => {
+      const cur = store.slots[String(tabId)];
+      if (!cur || cur.status === "off") return cur ?? { ...INITIAL_CAPTURE_STATE };
+      const next = { ...cur, ...p };
+      store.slots[String(tabId)] = next;
+      return next;
+    });
+  }
+
+  async function removeSlot(tabId: number, note: string | null): Promise<void> {
+    await mutate((store) => {
+      delete store.slots[String(tabId)];
+      if (note !== null || Object.keys(store.slots).length === 0) store.note = note;
+    });
+    sessionKeys.delete(tabId);
   }
 
   /** Manual capture: the stream open in this tab, chosen from the popup. */
   async function start(tabId: number, url: string): Promise<CaptureState> {
     const channel = channelFromUrl(url);
     if (!channel) throw new Error("Open a Twitch or Kick channel in this tab first");
-    if ((await getCaptureState()).status !== "off") await stop();
+    await checkLimit(tabId);
+    if ((await getCaptureState(tabId)).status !== "off") await stop(tabId);
     const streamer = await streamerFor(channel.platform, channel.channel);
+    if ((await getSlots()).some((s) => s.streamerId === streamer.id)) throw new Error(`${streamer.display_name} is already being recorded in another tab.`);
     const { sessionKey: _key, ...target } = await targetFor(streamer);
-    await setCaptureState({ ...INITIAL_CAPTURE_STATE, status: "starting", tabId, platform: channel.platform, channel: channel.channel, streamerId: streamer.id });
-    await launch(tabId, target);
+    const listen = await shouldListen();
+    const at = new Date(deps.now()).toISOString();
+    await putSlot(tabId, { ...INITIAL_CAPTURE_STATE, status: "starting", tabId, platform: channel.platform, channel: channel.channel, streamerId: streamer.id, armedAt: at, listening: listen });
+    await launch(tabId, target, listen);
     const settings = await getSettings();
-    return patch({
+    return patchSlot(tabId, {
       status: "capturing",
       recording: true,
-      startedAt: new Date(deps.now()).toISOString(),
+      startedAt: at,
       message: `Buffering the last ${Math.round(settings.clips.bufferSeconds / 60)} minutes. Detected moments become clips.`,
     });
   }
 
   /**
-   * Recorder mode: this tab becomes StreamHunter's recorder. The editor's click (the popup) is the
-   * only one needed; from then on the tab is navigated to whichever Auto-record streamer is live.
+   * Recorder mode: this tab becomes one of StreamHunter's recorders. The editor's click (the popup)
+   * is the only one needed per tab; from then on the tab is navigated to a live Auto-record streamer.
    */
   async function arm(tabId: number): Promise<CaptureState> {
-    if ((await getCaptureState()).status !== "off") await stop();
-    await setCaptureState({ ...INITIAL_CAPTURE_STATE, status: "starting", mode: "recorder", tabId });
-    await launch(tabId, null);
-    await patch({ status: "capturing", recording: false, startedAt: new Date(deps.now()).toISOString(), waitingReason: "Checking who is live…", message: null });
-    return sync();
+    await checkLimit(tabId);
+    if ((await getCaptureState(tabId)).status !== "off") await stop(tabId);
+    const listen = await shouldListen();
+    const at = new Date(deps.now()).toISOString();
+    await putSlot(tabId, { ...INITIAL_CAPTURE_STATE, status: "starting", mode: "recorder", tabId, armedAt: at, listening: listen });
+    await launch(tabId, null, listen);
+    await patchSlot(tabId, { status: "capturing", recording: false, startedAt: at, waitingReason: "Checking who is live…", message: null });
+    await sync();
+    return getCaptureState(tabId);
   }
 
-  let lastSessionKey: string | null = null;
+  let syncing: Promise<CaptureState> | null = null;
+  /** Match the recorder tabs to the live Auto-record streamers (after every status check). */
+  function sync(): Promise<CaptureState> {
+    syncing ??= runSync().finally(() => (syncing = null));
+    return syncing;
+  }
 
-  /** Recorder mode: match the recorder tab to the live Auto-record streamers (after every check). */
-  async function sync(): Promise<CaptureState> {
-    const s = await getCaptureState();
-    if (s.mode !== "recorder" || s.status !== "capturing" || s.tabId === null) return s;
-    const monitoring = await getMonitoringState();
-    const send = (m: OffscreenRequest) => deps.toOffscreen(m).catch(() => undefined);
-    if (!monitoring.enabled) {
-      await send({ target: "offscreen", type: "capture/target", capture: null });
-      return patch({ recording: false, streamerId: null, channel: null, waitingReason: "Monitoring is stopped. Start monitoring to record automatically." });
+  async function runSync(): Promise<CaptureState> {
+    const [settings, monitoring] = await Promise.all([getSettings(), getMonitoringState()]);
+    let slots = await getSlots();
+    // The limit was lowered: stop the newest slots beyond it.
+    for (const extra of slots.slice(settings.recording.maxStreams)) {
+      if (extra.tabId !== null) await stop(extra.tabId, `Stopped: the limit is now ${settings.recording.maxStreams} simultaneous stream${settings.recording.maxStreams === 1 ? "" : "s"}.`);
     }
-    if (monitoring.paused) {
-      await send({ target: "offscreen", type: "capture/pause", paused: true });
-      return patch({ recording: false, paused: true, waitingReason: "Monitoring is paused." });
+    slots = await getSlots();
+    const recorders = slots.filter((s) => s.mode === "recorder" && s.status === "capturing" && s.tabId !== null);
+    if (recorders.length === 0) return getCaptureState();
+
+    if (!monitoring.enabled || monitoring.paused) {
+      for (const r of recorders) {
+        if (!monitoring.enabled) {
+          await send({ target: "offscreen", type: "capture/target", slot: r.tabId!, capture: null });
+          sessionKeys.delete(r.tabId!);
+          await patchSlot(r.tabId!, { recording: false, streamerId: null, channel: null, waitingReason: "Monitoring is stopped. Start monitoring to record automatically." });
+        } else if (!r.paused) {
+          await send({ target: "offscreen", type: "capture/pause", slot: r.tabId!, paused: true });
+          await patchSlot(r.tabId!, { recording: false, paused: true, pauseReason: "monitoring", waitingReason: "Monitoring is paused." });
+        }
+      }
+      return getCaptureState();
     }
-    if (s.paused) await send({ target: "offscreen", type: "capture/pause", paused: false });
+
     const streamers = await db.all<Streamer>("streamers");
-    const next = pickRecordingTarget(streamers, s.streamerId);
-    if (!next) {
-      if (s.streamerId !== null || s.recording) await send({ target: "offscreen", type: "capture/target", capture: null });
-      lastSessionKey = null;
-      const any = streamers.some((x) => x.auto_record && x.monitoring_enabled);
-      return patch({
-        recording: false, paused: false, streamerId: null, channel: null,
-        waitingReason: any ? "Waiting for an Auto-record streamer to go live." : "No streamer has Auto-record on. Turn it on in Streamers.",
+    const manualIds = new Set(slots.filter((s) => s.mode === "manual" && s.streamerId !== null).map((s) => s.streamerId!));
+    const plan = assignTargets(streamers, recorders.map((r) => ({ slot: r.tabId!, current: r.streamerId })), manualIds);
+    const anyAuto = streamers.some((x) => x.auto_record && x.monitoring_enabled);
+
+    for (const r of recorders) {
+      const tabId = r.tabId!;
+      const next = plan[tabId] ?? null;
+      // Resume slots paused only because monitoring was paused.
+      const pausedNow = r.paused && r.pauseReason !== "monitoring";
+      if (r.paused && r.pauseReason === "monitoring") await send({ target: "offscreen", type: "capture/pause", slot: tabId, paused: false });
+      if (!next) {
+        if (r.streamerId !== null || r.recording) await send({ target: "offscreen", type: "capture/target", slot: tabId, capture: null });
+        sessionKeys.delete(tabId);
+        await patchSlot(tabId, {
+          recording: false, paused: pausedNow, pauseReason: pausedNow ? r.pauseReason : null, streamerId: null, channel: null,
+          waitingReason: anyAuto
+            ? recorders.length > 1 ? "Waiting for another Auto-record streamer to go live." : "Waiting for an Auto-record streamer to go live."
+            : "No streamer has Auto-record on. Turn it on in My Streamers.",
+        });
+        continue;
+      }
+      const { sessionKey, ...target } = await targetFor(next);
+      const switching = next.id !== r.streamerId;
+      const last = sessionKeys.get(tabId);
+      const restarted = !switching && last !== undefined && sessionKey !== last;
+      if (switching || restarted) await deps.navigate(tabId, streamUrl(next)).catch(() => undefined);
+      sessionKeys.set(tabId, sessionKey);
+      await send({ target: "offscreen", type: "capture/target", slot: tabId, capture: target });
+      await patchSlot(tabId, {
+        recording: !pausedNow, paused: pausedNow, pauseReason: pausedNow ? r.pauseReason : null,
+        streamerId: next.id, platform: next.platform, channel: next.username.toLowerCase(), waitingReason: null,
+        message: switching ? `Recording ${next.display_name}.` : restarted ? `${next.display_name} restarted the stream; recording again.` : r.message,
       });
     }
-    const { sessionKey, ...target } = await targetFor(next);
-    const switching = next.id !== s.streamerId;
-    // A new broadcast of the same streamer (stream restarted): reload the player too.
-    const restarted = !switching && lastSessionKey !== null && sessionKey !== lastSessionKey;
-    if (switching || restarted) await deps.navigate(s.tabId, streamUrl(next)).catch(() => undefined);
-    lastSessionKey = sessionKey;
-    await send({ target: "offscreen", type: "capture/target", capture: target });
-    return patch({
-      recording: true, paused: false, streamerId: next.id, platform: next.platform, channel: next.username.toLowerCase(), waitingReason: null,
-      message: switching ? `Recording ${next.display_name}.` : restarted ? `${next.display_name} restarted the stream; recording again.` : s.message,
-    });
+    return getCaptureState();
   }
 
-  async function stop(message: string | null = null): Promise<CaptureState> {
-    await deps.toOffscreen({ target: "offscreen", type: "capture/stop" }).catch(() => undefined);
-    await deps.closeOffscreen().catch(() => undefined);
-    const s = await getCaptureState();
-    lastSessionKey = null;
-    return setCaptureState({ ...INITIAL_CAPTURE_STATE, clips: s.clips, message });
+  /** Stop one slot (tabId) or all of them. */
+  async function stop(tabId?: number, message: string | null = null): Promise<CaptureState> {
+    const slots = tabId === undefined ? await getSlots() : [await getCaptureState(tabId)].filter((s) => s.status !== "off");
+    await send({ target: "offscreen", type: "capture/stop", ...(tabId === undefined ? {} : { slot: tabId }) });
+    for (const s of slots) if (s.tabId !== null) await removeSlot(s.tabId, message);
+    if (tabId === undefined) await mutate((store) => void (store.note = message));
+    if ((await activeCount()) === 0) await deps.closeOffscreen().catch(() => undefined);
+    // Hand the speakers to another slot when the listened one stops.
+    if (slots.some((s) => s.listening) && (await getSettings()).recording.audio === "first") {
+      const next = (await getSlots())[0];
+      if (next?.tabId != null) await setListening(next.tabId, true);
+    }
+    return getCaptureState();
   }
 
-  async function setPaused(paused: boolean): Promise<CaptureState> {
-    const s = await getCaptureState();
-    if (s.status !== "capturing") return s;
-    await deps.toOffscreen({ target: "offscreen", type: "capture/pause", paused }).catch(() => undefined);
-    const next = await patch({ paused, recording: !paused && (s.mode === "manual" || s.streamerId !== null) });
-    return s.mode === "recorder" && !paused ? sync() : next;
+  /** Pause/resume one slot, or (no tabId) all of them, e.g. Pause monitoring. */
+  async function setPaused(paused: boolean, tabId?: number, reason: PauseReason = tabId === undefined ? "monitoring" : "you"): Promise<CaptureState> {
+    const slots = tabId === undefined ? await getSlots() : [await getCaptureState(tabId)];
+    for (const s of slots) {
+      if (s.status !== "capturing" || s.tabId === null) continue;
+      // A global pause/resume never touches slots paused for another reason (the editor's own pause, overload…).
+      if (tabId === undefined && paused && s.paused) continue;
+      if (tabId === undefined && !paused && s.paused && s.pauseReason !== reason) continue;
+      await send({ target: "offscreen", type: "capture/pause", slot: s.tabId, paused });
+      await patchSlot(s.tabId, {
+        paused, pauseReason: paused ? reason : null,
+        recording: !paused && (s.mode === "manual" || s.streamerId !== null),
+      });
+    }
+    if (!paused && slots.some((s) => s.mode === "recorder")) await sync();
+    return getCaptureState(tabId);
+  }
+
+  /** Only one slot plays its sound at a time. */
+  async function setListening(tabId: number, on: boolean): Promise<CaptureState> {
+    for (const s of await getSlots()) {
+      if (s.tabId === null) continue;
+      const want = s.tabId === tabId ? on : on ? false : s.listening;
+      if (want !== s.listening) {
+        await send({ target: "offscreen", type: "capture/listen", slot: s.tabId, on: want });
+        await patchSlot(s.tabId, { listening: want });
+      }
+    }
+    return getCaptureState(tabId);
+  }
+
+  /** Overload protection: record a slot at half frame rate. */
+  async function setThrottled(tabId: number, on: boolean): Promise<void> {
+    await send({ target: "offscreen", type: "capture/throttle", slot: tabId, on });
+    const s = await getCaptureState(tabId);
+    if (s.health) await patchSlot(tabId, { health: { ...s.health, throttled: on } });
   }
 
   async function applySettings(settings: Settings): Promise<void> {
-    const s = await getCaptureState();
-    if (s.status === "capturing") await deps.toOffscreen({ target: "offscreen", type: "capture/options", options: captureOptions(settings) }).catch(() => undefined);
+    for (const s of await getSlots())
+      if (s.status === "capturing" && s.tabId !== null)
+        await send({ target: "offscreen", type: "capture/options", slot: s.tabId, options: { ...captureOptions(settings), listen: s.listening } });
+    await sync();
   }
 
-  /** "Save the last N seconds" from the popup. */
-  async function saveLast(seconds: number): Promise<CaptureState> {
-    const s = await getCaptureState();
-    if (s.status !== "capturing" || s.streamerId === null || !s.recording) throw new Error("Nothing is being recorded right now");
+  /** "Save the last N seconds" from the popup (that tab's slot, else the first recording one). */
+  async function saveLast(seconds: number, tabId?: number): Promise<CaptureState> {
+    const s = await getCaptureState(tabId);
+    if (s.status !== "capturing" || s.streamerId === null || !s.recording || s.tabId === null) throw new Error("Nothing is being recorded right now");
     const streamer = await db.get<Streamer>("streamers", s.streamerId);
     if (!streamer) throw new Error("The captured streamer is no longer on the list");
     const now = deps.now();
@@ -263,18 +458,17 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
       breakdown: { chat: null, audio: null, visual: null, context: null, active_signals: [], manual: true },
     });
     const request: ClipRequest = { highlightId: h.id, start: h.window_start_ms, end: h.window_end_ms, title: `${streamer.display_name} · Saved by you`, score: h.score };
-    await deps.toOffscreen({ target: "offscreen", type: "capture/clip", request }).catch(() => undefined);
-    return patch({ message: `Saving the last ${seconds} s…` });
+    await send({ target: "offscreen", type: "capture/clip", slot: s.tabId, request });
+    return patchSlot(s.tabId, { message: `Saving the last ${seconds} s…` });
   }
 
   /**
-   * A highlight found elsewhere (chat, viewers). If that streamer is being recorded, it becomes a
-   * signal for the fusion engine: combined with sound and picture it can make a clip (and is then
-   * merged into it); alone it stays a provisional highlight.
+   * A highlight found elsewhere (chat, viewers). If that streamer is being recorded in some slot, it
+   * becomes a fusion signal for that slot's engine; alone it stays a provisional highlight.
    */
   async function onHighlight(h: LocalHighlight, s: Streamer): Promise<boolean> {
-    const state = await getCaptureState();
-    if (state.status !== "capturing" || !state.recording || state.streamerId !== s.id || h.origin === "capture") return false;
+    const slot = (await getSlots()).find((x) => x.status === "capturing" && x.recording && x.streamerId === s.id && h.origin !== "capture");
+    if (!slot || slot.tabId === null) return false;
     const settings = await getSettings();
     const b = h.signal_breakdown ?? {};
     const signal: Signal = {
@@ -287,29 +481,33 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
       highlightIds: [h.id],
     };
     if (h.origin === "viewers") signal.start = signal.end = signal.at; // a status check only knows "now"
-    await deps.toOffscreen({ target: "offscreen", type: "capture/signal", signal }).catch(() => undefined);
+    await send({ target: "offscreen", type: "capture/signal", slot: slot.tabId, signal });
     return true;
   }
 
-  async function onStatus(st: { bufferedSeconds: number; levelDb: number | null; recordedSeconds?: number; silentSeconds?: number }) {
-    const s = await getCaptureState();
-    if (s.status !== "capturing") return;
+  async function onStatus(tabId: number, st: { bufferedSeconds: number; levelDb: number | null; recordedSeconds?: number; silentSeconds?: number; health?: SlotHealth }) {
+    const s = await getCaptureState(tabId);
+    if (s.status !== "capturing" || s.tabId !== tabId) return;
     const recorded = st.recordedSeconds ?? s.recordedSeconds;
     const delta = Math.max(0, recorded - s.recordedSeconds);
     if (delta > 0) {
       const stats = await getStats();
       await chrome.storage.local.set({ [STATS_KEY]: { recordedSeconds: stats.recordedSeconds + delta } });
     }
-    await patch({ bufferedSeconds: st.bufferedSeconds, levelDb: st.levelDb, recordedSeconds: recorded, silentSeconds: st.silentSeconds ?? 0 });
+    await patchSlot(tabId, {
+      bufferedSeconds: st.bufferedSeconds, levelDb: st.levelDb, recordedSeconds: recorded, silentSeconds: st.silentSeconds ?? 0,
+      ...(st.health ? { health: st.health } : {}),
+    });
   }
 
-  async function onDetection(d: { at: number; reasons: string[]; score: number; clipped: boolean }) {
-    await patch({ lastDetection: { at: new Date(d.at).toISOString(), reasons: d.reasons, score: d.score, clipped: d.clipped } });
+  async function onDetection(tabId: number, d: { at: number; reasons: string[]; score: number; clipped: boolean }) {
+    await patchSlot(tabId, { lastDetection: { at: new Date(d.at).toISOString(), reasons: d.reasons, score: d.score, clipped: d.clipped } });
   }
 
-  async function onClipSaved(clipId: number, highlightId: number, durationSec: number) {
-    const s = await getCaptureState();
-    await patch({ clips: s.clips + 1, lastClipAt: new Date(deps.now()).toISOString(), message: `Clip saved (${Math.round(durationSec)} s).` });
+  async function onClipSaved(tabId: number, clipId: number, highlightId: number, durationSec: number) {
+    const s = await getCaptureState(tabId);
+    await mutate((store) => void (store.clips += 1));
+    await patchSlot(tabId, { clips: s.clips + 1, lastClipAt: new Date(deps.now()).toISOString(), message: `Clip saved (${Math.round(durationSec)} s).` });
     const h = await db.get<LocalHighlight>("highlights", highlightId);
     await deps.notify("Clip saved", `${h?.streamer_display_name ?? "Stream"}: ${h?.reasons[0] ?? "highlight"} (${Math.round(durationSec)} s)`, `sh-clip-${clipId}`);
     const settings = await getSettings();
@@ -317,41 +515,50 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
     await deps.afterClip?.(clipId, highlightId).catch(() => undefined);
   }
 
-  async function onClipFailed(reason: string) {
-    await patch({ message: reason });
+  async function onClipFailed(tabId: number, reason: string) {
+    await patchSlot(tabId, { message: reason });
   }
 
-  async function onEnded(reason: string) {
-    const s = await getCaptureState();
-    if (s.status === "off") return;
-    if (s.mode === "recorder" && s.tabId !== null) {
+  async function onEnded(tabId: number, reason: string) {
+    const s = await getCaptureState(tabId);
+    if (s.status === "off" || s.tabId !== tabId) return;
+    if (s.mode === "recorder") {
       // Try to resume on the same tab (Chrome may still allow it); otherwise say what to do.
       try {
-        await deps.closeOffscreen().catch(() => undefined);
-        await launch(s.tabId, null);
-        await patch({ status: "capturing", streamerId: null, recording: false, message: `Capture restarted (${reason}).` });
+        await launch(tabId, null, s.listening);
+        sessionKeys.delete(tabId);
+        await patchSlot(tabId, { status: "capturing", streamerId: null, channel: null, recording: false, message: `Capture restarted (${reason}).` });
         await sync();
         return;
       } catch {
-        await stop(`${reason} ${REARM_MESSAGE}`);
+        await stop(tabId, `${reason} ${REARM_MESSAGE}`);
         return;
       }
     }
-    await stop(reason);
+    await stop(tabId, reason);
   }
 
   async function onTabRemoved(tabId: number) {
-    const s = await getCaptureState();
-    if (s.status !== "off" && s.tabId === tabId) await stop(s.mode === "recorder" ? `The recorder tab was closed. ${REARM_MESSAGE}` : "The captured tab was closed.");
+    const s = await getCaptureState(tabId);
+    if (s.status !== "off" && s.tabId === tabId) await stop(tabId, s.mode === "recorder" ? `A recorder tab was closed. ${REARM_MESSAGE}` : "The captured tab was closed.");
   }
 
-  /** After a browser restart the capture is gone; never show a stale "capturing". */
+  /** After a browser restart every capture is gone; never show a stale "capturing". */
   async function reset() {
-    const s = await getCaptureState();
-    if (s.status !== "off") await setCaptureState({ ...INITIAL_CAPTURE_STATE, clips: s.clips, message: s.mode === "recorder" ? `Chrome restarted. ${REARM_MESSAGE}` : null });
+    const slots = await getSlots();
+    if (slots.length === 0) return;
+    const recorder = slots.some((s) => s.mode === "recorder");
+    await mutate((store) => {
+      store.slots = {};
+      store.note = recorder ? `Chrome restarted. ${REARM_MESSAGE}` : null;
+    });
+    sessionKeys.clear();
   }
 
-  return { start, arm, sync, stop, setPaused, applySettings, saveLast, onHighlight, onStatus, onDetection, onClipSaved, onClipFailed, onEnded, onTabRemoved, reset };
+  return {
+    start, arm, sync, stop, setPaused, setListening, setThrottled, applySettings, saveLast,
+    onHighlight, onStatus, onDetection, onClipSaved, onClipFailed, onEnded, onTabRemoved, reset,
+  };
 }
 
 export type CaptureManager = ReturnType<typeof createCaptureManager>;

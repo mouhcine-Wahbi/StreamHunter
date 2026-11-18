@@ -4,6 +4,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge, Dot, type BadgeTone } from "@/components/ui/Badge";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { useCapture } from "@/hooks/useCapture";
+import { useSettings } from "@/hooks/useSettings";
 import { useStorageValue } from "@/hooks/useStorageValue";
 import type { useMonitoring } from "@/hooks/useMonitoring";
 import { ACTIVITY_KEY, type ChatActivity } from "@/background/chat-manager";
@@ -32,43 +33,55 @@ interface Stage {
   detail: string;
 }
 
-/** Honest state of the video stage: never "recording" unless frames are being encoded. */
-export function videoStage(capture: CaptureState, liveAutoRecord: Streamer[]): Pick<Stage, "tone" | "state" | "detail"> {
-  if (capture.status === "capturing") {
-    const who = capture.channel ?? "the stream";
-    if (capture.recording) {
-      const silent = capture.silentSeconds >= 20 ? " No sound for a while: is the player muted?" : "";
+const ARM_HINT = "Open a Twitch or Kick tab, click the StreamHunter icon and choose Use this tab as a recorder.";
+
+/**
+ * Honest state of the video stage across all slots: never "recording" unless frames are being
+ * encoded, and live streamers that nobody records are named.
+ */
+export function videoStage(slots: CaptureState[], liveAutoRecord: Streamer[], max = 1, note: string | null = null): Pick<Stage, "tone" | "state" | "detail"> {
+  const active = slots.filter((s) => s.status === "capturing" || s.status === "starting");
+  const recording = active.filter((s) => s.recording);
+  const recordedIds = new Set(recording.map((s) => s.streamerId));
+  const missed = liveAutoRecord.filter((s) => !recordedIds.has(s.id));
+  const missedText = missed.length
+    ? ` ${missed.map((s) => s.display_name).join(", ")} ${missed.length === 1 ? "is" : "are"} live but not recorded${active.length >= max ? ` (all ${max} recorder slot${max === 1 ? "" : "s"} in use)` : `. ${ARM_HINT}`}`
+    : "";
+  if (active.length === 0) {
+    if (liveAutoRecord.length > 0)
       return {
-        tone: capture.silentSeconds >= 20 ? "warn" : "live",
-        state: "Recording",
-        detail: `${capture.mode === "recorder" ? "Recorder tab" : "Captured tab"}: ${who}, ${capture.bufferedSeconds} s in the buffer.${silent}`,
+        tone: "danger",
+        state: "Inactive",
+        detail: `${liveAutoRecord.map((s) => s.display_name).join(", ")} ${liveAutoRecord.length === 1 ? "is" : "are"} live and detected, but video capture is inactive. ${ARM_HINT}`,
       };
-    }
-    if (capture.paused) return { tone: "warn", state: "Paused", detail: "The recorder tab is armed; recording resumes with monitoring." };
-    return { tone: "accent", state: "Armed, waiting", detail: capture.waitingReason ?? "Waiting for a streamer to record." };
+    return { tone: "neutral", state: "Off", detail: note ?? "No recorder tab. Only live status and chat are monitored; there is no video to clip." };
   }
-  if (capture.status === "starting") return { tone: "accent", state: "Starting", detail: "Starting the capture…" };
-  if (liveAutoRecord.length > 0)
+  if (recording.length > 0) {
+    const problems = recording.filter((s) => s.silentSeconds >= 20 || s.health?.throttled);
+    const list = recording
+      .map((s) => `${s.channel ?? "?"} (${s.bufferedSeconds} s buffered${s.health?.throttled ? ", half frame rate" : ""}${s.silentSeconds >= 20 ? ", no sound: player muted?" : ""})`)
+      .join(", ");
     return {
-      tone: "danger",
-      state: "Inactive",
-      detail: `${liveAutoRecord.map((s) => s.display_name).join(", ")} ${liveAutoRecord.length === 1 ? "is" : "are"} live and detected, but video capture is inactive. Open a Twitch or Kick tab, click the StreamHunter icon and choose Use this tab as the recorder.`,
+      tone: problems.length ? "warn" : "live",
+      state: recording.length === 1 ? "Recording" : `Recording ${recording.length}`,
+      detail: `${recording.length === 1 ? (recording[0]!.mode === "recorder" ? "Recorder tab" : "Captured tab") : `${recording.length} of ${max} slots`}: ${list}.${missedText}`,
     };
-  return {
-    tone: "neutral",
-    state: "Off",
-    detail: capture.message ?? "No recorder tab. Only live status and chat are monitored; there is no video to clip.",
-  };
+  }
+  const paused = active.find((s) => s.paused);
+  if (paused) return { tone: "warn", state: "Paused", detail: `${active.length === 1 ? "The recorder tab is armed" : `${active.length} recorder tabs are armed`}; recording resumes with monitoring.${missedText}` };
+  if (active.some((s) => s.status === "starting")) return { tone: "accent", state: "Starting", detail: "Starting the capture…" };
+  return { tone: "accent", state: "Armed, waiting", detail: `${active[0]!.waitingReason ?? "Waiting for a streamer to record."}${missedText}` };
 }
 
 /** Five separate stages, so it is always clear what is and isn't happening. */
 export function PipelineStatus({ monitoring }: { monitoring: ReturnType<typeof useMonitoring> }) {
   const m = monitoring.state;
-  const { state: capture } = useCapture();
+  const { slots, state: capture } = useCapture();
+  const { settings } = useSettings();
   const activity = useStorageValue<ChatActivity>(ACTIVITY_KEY) ?? {};
   const user = useStorageValue<TwitchUser>(TWITCH_USER_KEY);
   const streamers = useApiQuery<Page<Streamer>>(`/api/v1/streamers?limit=500&_=${m.lastCheckAt ?? ""}`);
-  const stats = useApiQuery<ClipStats>(`/api/v1/clips/stats?_=${capture.clips}:${capture.lastClipAt ?? ""}`);
+  const stats = useApiQuery<ClipStats>(`/api/v1/clips/stats?_=${slots.map((x) => x.clips).join(",")}:${capture.clips}`);
   const list = streamers.data?.items ?? [];
   const monitored = list.filter((s) => s.monitoring_enabled);
   const liveAutoRecord = monitored.filter((s) => s.auto_record && s.is_live === true);
@@ -97,14 +110,16 @@ export function PipelineStatus({ monitoring }: { monitoring: ReturnType<typeof u
       .filter(Boolean)
       .join(" "),
   };
-  const video: Stage = { icon: <Video className="size-4" />, name: "Video capture", ...videoStage(capture, liveAutoRecord) };
-  const d = capture.lastDetection;
+  const video: Stage = { icon: <Video className="size-4" />, name: "Video capture", ...videoStage(slots, liveAutoRecord, settings.recording.maxStreams, capture.message) };
+  const recordingAny = slots.some((x) => x.recording);
+  const d = slots.map((x) => x.lastDetection).filter((x) => x !== null).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
+  const lastClipAt = slots.map((x) => x.lastClipAt).filter((x): x is string => Boolean(x)).sort().at(-1) ?? null;
   const detection: Stage = {
     icon: <ScanSearch className="size-4" />,
     name: "Automatic detection",
-    tone: capture.recording ? "live" : "neutral",
-    state: capture.recording ? "Running" : "Off",
-    detail: capture.recording
+    tone: recordingAny ? "live" : "neutral",
+    state: recordingAny ? (slots.filter((x) => x.recording).length > 1 ? `Running on ${slots.filter((x) => x.recording).length} streams` : "Running") : "Off",
+    detail: recordingAny
       ? d
         ? `Last moment ${formatRelative(d.at)}: score ${d.score}${d.clipped ? " → clipped" : " (below the clip threshold)"} · ${d.reasons[0] ?? ""}`
         : "Learning this stream's normal sound and picture (about 30 s), then listening for moments."
@@ -114,9 +129,9 @@ export function PipelineStatus({ monitoring }: { monitoring: ReturnType<typeof u
   const exportStage: Stage = {
     icon: <Clapperboard className="size-4" />,
     name: "Clip export",
-    tone: capture.clips > 0 ? "live" : "neutral",
+    tone: lastClipAt ? "live" : "neutral",
     state: `${s?.clips ?? "—"} clips`,
-    detail: `${capture.lastClipAt ? `Last clip ${formatRelative(capture.lastClipAt)}. ` : ""}${s ? `${formatBytes(s.clip_bytes)} of clips in this browser.` : ""}`,
+    detail: `${lastClipAt ? `Last clip ${formatRelative(lastClipAt)}. ` : ""}${s ? `${formatBytes(s.clip_bytes)} of clips in this browser.` : ""}`,
   };
 
   return (

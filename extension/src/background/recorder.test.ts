@@ -69,7 +69,7 @@ describe("recorder tab (automatic recording)", () => {
     // Nobody live → stop encoding, say why.
     await db.put("streamers", streamer(2, { is_live: false }));
     s = await m.sync();
-    expect(sent.at(-1)).toEqual({ target: "offscreen", type: "capture/target", capture: null });
+    expect(sent.at(-1)).toEqual({ target: "offscreen", type: "capture/target", slot: 9, capture: null });
     expect(s).toMatchObject({ recording: false, streamerId: null, waitingReason: "Waiting for an Auto-record streamer to go live." });
 
     // S2 restarts: live with a session, then a new session → the player is reloaded.
@@ -86,7 +86,7 @@ describe("recorder tab (automatic recording)", () => {
 
     // Pause / resume.
     s = await m.setPaused(true);
-    expect(sent.at(-1)).toEqual({ target: "offscreen", type: "capture/pause", paused: true });
+    expect(sent.at(-1)).toEqual({ target: "offscreen", type: "capture/pause", slot: 9, paused: true });
     expect(s).toMatchObject({ paused: true, recording: false });
     s = await m.setPaused(false);
     expect(s).toMatchObject({ paused: false, recording: true });
@@ -102,10 +102,10 @@ describe("recorder tab (automatic recording)", () => {
     const { d } = deps();
     const m = createCaptureManager(d);
     await m.arm(9);
-    await m.onEnded("Video encoding failed");
+    await m.onEnded(9, "Video encoding failed");
     expect(await getCaptureState()).toMatchObject({ status: "capturing", mode: "recorder", message: "Capture restarted (Video encoding failed)." });
     d.streamIdFor = vi.fn(async () => Promise.reject(new Error("Extension has not been invoked")));
-    await m.onEnded("Video encoding failed");
+    await m.onEnded(9, "Video encoding failed");
     expect((await getCaptureState()).status).toBe("off");
     expect((await getCaptureState()).message).toMatch(/Video capture is inactive/);
     await m.arm(9).catch(() => undefined);
@@ -113,11 +113,16 @@ describe("recorder tab (automatic recording)", () => {
   });
 
   it("is honest in the pipeline: a live Auto-record streamer without a recorder is 'detected, video inactive'", () => {
-    expect(videoStage(INITIAL_CAPTURE_STATE, [streamer(1)])).toMatchObject({ tone: "danger", state: "Inactive" });
-    expect(videoStage(INITIAL_CAPTURE_STATE, [streamer(1)]).detail).toMatch(/S1 is live and detected, but video capture is inactive/);
-    expect(videoStage(INITIAL_CAPTURE_STATE, [])).toMatchObject({ state: "Off" });
-    expect(videoStage({ ...INITIAL_CAPTURE_STATE, status: "capturing", mode: "recorder", recording: false, waitingReason: "Waiting" }, [])).toMatchObject({ state: "Armed, waiting" });
-    expect(videoStage({ ...INITIAL_CAPTURE_STATE, status: "capturing", recording: true, channel: "s1", silentSeconds: 25 }, []).detail).toMatch(/muted/);
+    expect(videoStage([], [streamer(1)])).toMatchObject({ tone: "danger", state: "Inactive" });
+    expect(videoStage([], [streamer(1)]).detail).toMatch(/S1 is live and detected, but video capture is inactive/);
+    expect(videoStage([], [])).toMatchObject({ state: "Off" });
+    expect(videoStage([{ ...INITIAL_CAPTURE_STATE, status: "capturing", mode: "recorder", recording: false, waitingReason: "Waiting" }], [])).toMatchObject({ state: "Armed, waiting" });
+    expect(videoStage([{ ...INITIAL_CAPTURE_STATE, status: "capturing", recording: true, channel: "s1", silentSeconds: 25 }], []).detail).toMatch(/muted/);
+    // Several slots: count them, and name live streamers nobody records.
+    const rec = (id: number) => ({ ...INITIAL_CAPTURE_STATE, status: "capturing" as const, mode: "recorder" as const, recording: true, tabId: id, streamerId: id, channel: `s${id}`, bufferedSeconds: 60 });
+    const multi = videoStage([rec(1), rec(2)], [streamer(1), streamer(2), streamer(3)], 2);
+    expect(multi).toMatchObject({ tone: "live", state: "Recording 2" });
+    expect(multi.detail).toMatch(/2 of 2 slots: s1 \(60 s buffered\), s2 \(60 s buffered\)\. S3 is live but not recorded \(all 2 recorder slots in use\)/);
   });
 });
 

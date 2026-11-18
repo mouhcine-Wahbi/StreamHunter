@@ -1,13 +1,14 @@
 /**
- * Offscreen document: hosts the capture engine (Chrome only allows tab capture with media APIs in a
- * document, not in the service worker). The worker starts/stops it, switches its target streamer,
- * forwards chat/viewer signals and clip requests; the engine reports status, detections and saved
- * clips back. Video and audio never leave the browser.
+ * Offscreen document: hosts the capture engines (Chrome only allows tab capture with media APIs in a
+ * document, not in the service worker, and an extension has one offscreen document). One engine per
+ * recording slot (= captured tab), each with its own buffer, detection and clips; several run at
+ * once. The worker addresses them by slot. Video and audio never leave the browser.
  */
 import { startEngine, type CaptureEngine } from "@/capture/engine";
 import type { OffscreenRequest, RuntimeRequest } from "@/types/messages";
 
-let engine: CaptureEngine | null = null;
+const engines = new Map<number, CaptureEngine>();
+(globalThis as { __streamhunterEngines?: typeof engines }).__streamhunterEngines = engines;
 
 function send(message: RuntimeRequest) {
   void chrome.runtime.sendMessage(message).catch(() => undefined);
@@ -16,21 +17,28 @@ function send(message: RuntimeRequest) {
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   const m = message as OffscreenRequest | null;
   if (m?.target !== "offscreen") return false; // meant for the worker
+  const engine = "slot" in m && typeof m.slot === "number" ? engines.get(m.slot) : undefined;
+  const reply = (p: Promise<unknown> | undefined) => {
+    void (p ?? Promise.resolve()).then(() => sendResponse({ ok: Boolean(engine) }));
+    return true;
+  };
   switch (m.type) {
     case "capture/start": {
-      if (typeof m.streamId !== "string" || !m.options) return false;
+      if (typeof m.streamId !== "string" || !m.options || typeof m.slot !== "number") return false;
+      const slot = m.slot;
       void (async () => {
-        await engine?.stop("Replaced by a new capture");
-        engine = await startEngine(m.streamId, m.capture ?? null, m.options, {
-          status: (s) => send({ type: "capture/status", ...s }),
-          clipSaved: (c) => send({ type: "capture/clip-saved", ...c }),
-          clipFailed: (c) => send({ type: "capture/clip-failed", ...c }),
-          detection: (d) => send({ type: "capture/detection", ...d }),
+        await engines.get(slot)?.stop("Replaced by a new capture");
+        const e = await startEngine(m.streamId, m.capture ?? null, m.options, {
+          status: (s) => send({ type: "capture/status", slot, ...s }),
+          clipSaved: (c) => send({ type: "capture/clip-saved", slot, ...c }),
+          clipFailed: (c) => send({ type: "capture/clip-failed", slot, ...c }),
+          detection: (d) => send({ type: "capture/detection", slot, ...d }),
           ended: (reason) => {
-            engine = null;
-            send({ type: "capture/ended", reason });
+            if (engines.get(slot) === e) engines.delete(slot);
+            send({ type: "capture/ended", slot, reason });
           },
         });
+        engines.set(slot, e);
       })().then(
         () => sendResponse({ ok: true }),
         (e: unknown) => sendResponse({ ok: false, error: e instanceof Error ? e.message : "Could not start the capture" }),
@@ -46,18 +54,26 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
       sendResponse({ ok: Boolean(engine) });
       return false;
     case "capture/target":
-      void (engine?.setTarget(m.capture ?? null) ?? Promise.resolve()).then(() => sendResponse({ ok: Boolean(engine) }));
-      return true;
+      return reply(engine?.setTarget(m.capture ?? null));
     case "capture/pause":
-      void (engine?.setPaused(Boolean(m.paused)) ?? Promise.resolve()).then(() => sendResponse({ ok: Boolean(engine) }));
-      return true;
+      return reply(engine?.setPaused(Boolean(m.paused)));
+    case "capture/listen":
+      engine?.setListening(Boolean(m.on));
+      sendResponse({ ok: Boolean(engine) });
+      return false;
+    case "capture/throttle":
+      engine?.setThrottled(Boolean(m.on));
+      sendResponse({ ok: Boolean(engine) });
+      return false;
     case "capture/options":
       if (engine && m.options) engine.updateOptions(m.options);
       sendResponse({ ok: Boolean(engine) });
       return false;
-    case "capture/stop":
-      void (engine?.stop("Stopped") ?? Promise.resolve()).then(() => sendResponse({ ok: true }));
+    case "capture/stop": {
+      const targets = typeof m.slot === "number" ? [engines.get(m.slot)] : [...engines.values()];
+      void Promise.all(targets.map((e) => e?.stop("Stopped"))).then(() => sendResponse({ ok: true }));
       return true;
+    }
   }
   return false;
 });

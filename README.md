@@ -2,24 +2,44 @@
 
 **Find the moment. Capture the clip.**
 
-StreamHunter is a Chrome extension for video editors and clipping teams. Search Twitch and Kick
-streamers, keep a monitoring list, and let StreamHunter watch it in the background: it notices when
-streamers go live and when their chat or audience suddenly reacts. Open a stream and capture it,
-and the moments it detects become real MP4 clips, ranked by score, in your Clip Library.
+StreamHunter is an automatic clipping assistant for video editors, for Twitch and Kick. Pick the
+streamers, arm a recorder tab once, click **Start monitoring** and leave the computer running.
+StreamHunter switches the recorder tab to whichever selected streamer is live, listens to the
+sound, watches the picture, reads Twitch chat and viewer numbers, and when several of those react
+together it saves an MP4 clip. Come back to a library of ranked clips ready to review and download.
 
 Everything runs **inside your browser**. There is no StreamHunter server, no account and no upload:
 your monitoring list, highlights and clips live in this browser (IndexedDB), and StreamHunter talks
 to Twitch and Kick directly through their official APIs with your own free developer apps.
 
-> **Status:** v1.0, local-first. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for what is
+> **Status:** v1.1, automatic clipping, local-first. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for what is
 > verified and how.
 
 ## How it works
 
 | Mode | What it uses | What you get |
 |---|---|---|
-| **Discovery** (background, no stream open) | Live status, title, category and viewers of your monitoring list (one batched request per platform every couple of minutes); Twitch chat over EventSub after "Sign in with Twitch" | Go-live notifications and **provisional highlights**: a time, a score and the reasons, plus an **Open stream** button. No video, and they are labelled that way |
-| **Capture** (you open the stream and click Capture) | The tab's video and audio, encoded in the browser into a 2-minute rolling buffer | Detected moments (chat, loud audio, fast action, flashes) and "Save last 30 s" become **MP4 clips** (H.264 + AAC) stored in the browser |
+| **Discovery** (background) | Live status, title, category and viewers of your monitoring list (one batched request per platform every couple of minutes); Twitch chat over EventSub after "Sign in with Twitch" | Go-live notifications and **provisional highlights** (a time, a score, the reasons, **Open stream**). No video, and they are labelled that way |
+| **Automatic recording** (recorder tab) | One tab you arm once from the popup. StreamHunter navigates it to the live **Auto-record** streamer, encodes video and audio into a rolling buffer (2 minutes by default), and records nothing while nobody is live | Moments where several signals fire together become **MP4 clips** with a thumbnail, stored in the browser |
+| **Manual capture** | The stream open in the current tab | Same detection, plus **Save last 30 s** |
+
+### How a clip is decided
+
+Each signal is measured against the stream's own normal and gets an intensity (0–100):
+
+| Signal | What counts | Points at full strength (configurable) |
+|---|---|---|
+| Audio | Louder than usual, sudden bursts, shouting-like, cheer-like and laughter-like sound | 25 |
+| Chat (Twitch) | Message-rate spikes, repeated reactions (LOL, LMAO, WTF…), emote waves, many chatters at once | 30 |
+| Visual | Fast motion, rapid scene changes, flashes | 20 |
+| Viewers | Sudden viewer-count jumps (raids) | 15 |
+| Several kinds together | Bonus | 10 |
+
+Signals close together form one moment. A clip is saved when the moment's score reaches the
+threshold (40 by default), so **no single signal makes a clip on its own**. Overlapping moments
+extend one clip (up to 90 s) instead of saving the same footage twice. A clip covers 20 s before
+and 20 s after the moment. Audio cues are signal-processing heuristics, not a trained classifier,
+and are labelled "-like".
 
 StreamHunter never says a clip exists when it only saw chat or viewer numbers.
 
@@ -32,9 +52,14 @@ StreamHunter never says a clip exists when it only saw chat or viewer numbers.
 | Background live-status checks (batched, rate-limit aware), sessions per broadcast, go-live notifications | ✅ |
 | Chat-based detection: spikes vs each stream's own normal, emote waves, repeated messages, "clip it", reactions in 8 languages, mood shifts | ✅ Twitch (needs Sign in with Twitch) |
 | Viewer-spike detection (raids, sudden attention) | ✅ Twitch and Kick |
-| Highlight notifications with **Open stream** | ✅ |
-| Capture mode: rolling buffer, loudness / motion / flash detection, automatic clips, Save last 30 s | ✅ |
-| Top Highlights (ranked, filter by platform/status/video) and Clip Library (preview, rename, download MP4, delete) | ✅ |
+| Recorder tab: automatic channel switching, idle while offline, stream restarts | ✅ |
+| Signal fusion with configurable weights and threshold, no duplicate clips | ✅ |
+| Rolling buffer (60–300 s), 20 s / 20 s around each moment, MP4 + JPEG thumbnail | ✅ |
+| Start / Pause / Resume / Stop monitoring, five-stage pipeline status | ✅ |
+| Overview (status, streamers, clips, recording time, storage), Top Highlights (ranked clips, filters: score, recent, streamer, platform, category, duration, detection type), Clip Library (preview, download MP4, rename, delete, favourite) | ✅ |
+| Storage limit and age limit with automatic cleanup (favourites kept) | ✅ |
+| Optional native Twitch clip for each clip | ✅ opt-in (needs `clips:edit`) |
+| Several streams recorded at once | ⏳ one recorder tab for now; the engine is per tab, so more tabs can be added later |
 | Kick chat | 🚫 Kick only sends chat to servers (webhooks) |
 
 ## Requirements
@@ -92,12 +117,14 @@ platform's token endpoint.
 ## Using it
 
 1. **Discover**: pick Twitch or Kick, browse who's live or search a channel, click **Add**.
-2. **Live Monitoring → Start monitoring**. StreamHunter checks your list every 2 minutes (Settings →
-   Monitoring) while Chrome is open. Sessions open when a streamer goes live.
-3. When a moment is detected you get a notification. **Open stream** takes you there.
-4. On the stream tab, click the StreamHunter icon → **Capture this stream**. From then on, detected
-   moments for that streamer become clips automatically; **Save last 30 s** clips on demand.
-5. Review in **Top Highlights** and download from the **Clip Library**.
+2. **My Streamers**: turn on **Auto-record** for the streamer(s) you want clipped.
+3. Open `twitch.tv` (or `kick.com`) in a tab, click the StreamHunter icon and choose **Use this tab
+   as the recorder**. Chrome requires this one click; leave the tab open (it can be in the
+   background) and the player unmuted.
+4. **Start monitoring** and leave the computer running. The **Pipeline** panel shows each stage:
+   channel discovery, chat, video capture, detection, clip export.
+5. Come back to **Top Highlights** (ranked) and the **Clip Library** to preview, favourite and
+   download.
 
 ## Tests
 
@@ -118,11 +145,14 @@ simulator. The MP4 muxer runs for real.
 * Monitoring runs **only while Chrome is open**.
 * **Kick chat isn't available**: Kick delivers chat only to a public server via webhooks. Kick
   discovery uses live status and viewer spikes.
-* **Video only exists for captured streams.** A moment found from chat while nobody captured the
-  stream has no video. Chrome needs your click on the stream tab to capture it, so capture can't
-  start automatically.
-* The capture buffer holds the **last 2 minutes**, in memory. Keep the stream tab open while
-  capturing; muting the player also mutes the capture.
+* **Video only exists while a recorder tab runs.** Chrome needs one click on a tab before it can be
+  captured; after a Chrome restart or if the recorder tab is closed, arm it again (the Pipeline
+  panel says so). A moment found from chat while nothing was recorded has no video.
+* **One stream is recorded at a time** (the live Auto-record streamer with the most viewers,
+  favourites first; the current one is kept while it is live).
+* The recorder tab plays the stream: pre-roll ads and "mature content" gates on the platform's page
+  are recorded too or can block playback. Muting the player mutes the capture (a warning appears
+  after 20 s of silence).
 * Clips are cut on keyframes (every 2 s), so they can start up to 2 s early. They keep the tab's
   framing (no 9:16 reframing or subtitles; edit them in your editor).
 * Twitch's Sign in with Twitch token can expire; sign in again when chat shows as unavailable.

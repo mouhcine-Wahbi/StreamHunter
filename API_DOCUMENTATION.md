@@ -35,15 +35,18 @@ Lists return `{items, total, limit, offset}` and accept `limit` / `offset`.
 |---|---|
 | `GET /api/v1/highlights?platform&status&min_score&date_from&streamer_id&has_video&sort=score` | Highlights; `sort=score` ranks them. Each has `origin` (`chat` / `viewers` / `capture`), `has_video`, `clip`, `reasons`, `signal_breakdown`, `window_start_ms` / `window_end_ms` |
 | `GET /api/v1/highlights/{id}` · `POST …/approve` · `POST …/reject` · `PATCH {status: "pending_review"}` · `DELETE` | Review |
-| `GET /api/v1/clips?sort=score` | Clips (MP4s from captures): duration, size, resolution, score, `started_at` |
-| `PATCH /api/v1/clips/{id} {title}` · `DELETE /api/v1/clips/{id}` | Rename / delete (also deletes the video) |
+| `GET /api/v1/clips?sort=score&platform&streamer_id&category&duration=short\|medium\|long&type=audio\|chat\|visual\|viewers\|manual&favorite=true&min_score` | Clips with their metadata; default newest first |
+| `GET /api/v1/clips/stats` | Clip count, favourites, total bytes and seconds, recorded seconds, browser storage estimate |
+| `PATCH /api/v1/clips/{id} {title?, favorite?}` · `DELETE /api/v1/clips/{id}` | Rename / favourite / delete (also deletes the video and thumbnail) |
 
 The video itself is read from the `clipBlobs` store (`clipBlob(id)` in `src/local/clips.ts`).
 
 ### Worker messages
 Pages talk to the service worker with `chrome.runtime.sendMessage` (`src/types/messages.ts`):
-`monitoring/get|start|stop|check-now`, `app/open`, `capture/get|start {tabId, url}|stop|save-last {seconds}`.
-The offscreen engine reports `capture/status`, `capture/clip-saved`, `capture/clip-failed`, `capture/ended`.
+`monitoring/get|start|stop|pause|resume|check-now`, `app/open`,
+`capture/get|start {tabId, url}|arm {tabId}|sync|stop|save-last {seconds}`.
+The worker sends the offscreen engine `capture/start|target|signal|pause|options|clip|stop`; the engine
+reports `capture/status`, `capture/detection`, `capture/clip-saved`, `capture/clip-failed`, `capture/ended`.
 
 ## 2. Platform endpoints used
 
@@ -55,6 +58,7 @@ The offscreen engine reports `capture/status`, `capture/clip-saved`, `capture/cl
 | Twitch | `GET /helix/users?id=…(≤100)` | app token | Avatars |
 | Twitch | `https://id.twitch.tv/oauth2/authorize` (implicit, `user:read:chat`) · `GET /oauth2/validate` · `POST /oauth2/revoke` | user | Sign in with Twitch |
 | Twitch | `wss://eventsub.wss.twitch.tv/ws` + `POST/DELETE /helix/eventsub/subscriptions` (`channel.chat.message` v1) | user token | Chat |
+| Twitch | `POST /helix/clips?broadcaster_id=` | user token with `clips:edit` | Optional native Twitch clip (off by default) |
 | Kick | `POST https://id.kick.com/oauth/token` (client_credentials) | client id + secret | App token |
 | Kick | `GET https://api.kick.com/public/v1/channels?slug=…(≤50)` | app token | Lookup, live status |
 | Kick | `GET /public/v1/users?id=…` · `GET /public/v1/livestreams?limit=&sort=viewer_count` | app token | Avatars, live now |

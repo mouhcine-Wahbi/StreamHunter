@@ -1,5 +1,6 @@
 import type { CandidateStatus, Clip, HighlightCandidate, MonitoringSession, Streamer } from "@/types/api";
 import { db } from "./db";
+import { dedupeReasons } from "@/detection/fusion";
 
 /**
  * A highlight is a moment worth looking at. Two kinds, never confused:
@@ -122,7 +123,7 @@ export async function updateHighlight(
   return db.put("highlights", {
     ...h,
     score: Math.max(h.score, patch.score ?? h.score),
-    reasons: [...new Set([...h.reasons, ...(patch.reasons ?? [])])].slice(0, 8),
+    reasons: dedupeReasons([...h.reasons, ...(patch.reasons ?? [])]).slice(0, 8),
     window_end_ms: Math.max(h.window_end_ms, patch.endAt ?? h.window_end_ms),
     signal_breakdown: patch.breakdown ? ({ ...h.signal_breakdown, ...patch.breakdown } as LocalHighlight["signal_breakdown"]) : h.signal_breakdown,
   });

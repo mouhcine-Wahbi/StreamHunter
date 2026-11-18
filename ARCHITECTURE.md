@@ -67,11 +67,24 @@ messages → RollingChatWindow (5 s buckets, ≤ 2 counted messages per chatter 
 Kick's official API delivers chat only via webhooks to a public HTTPS server, so Kick sessions report
 chat as unavailable and rely on live status and viewer spikes.
 
-## 3. Capture mode
+## 3. Recording and automatic clipping
 
-The editor clicks **Capture this stream** in the popup on a stream tab. That click lets
-`chrome.tabCapture.getMediaStreamId` work; the worker creates the offscreen document (reason
-`USER_MEDIA`) and starts the engine there:
+Chrome lets an extension capture a tab only after the user invokes it on that tab. Verified in
+Chrome 157: once running, a tab capture **continues when the tab navigates** (same site or
+another). So the editor arms one **recorder tab** once (popup → *Use this tab as the recorder*), and
+the worker (`capture-manager.ts`) then directs it after every status check:
+
+```text
+pickRecordingTarget(): live + monitored + Auto-record; keep the current one while live,
+                       else favourites first, then most viewers
+  → different streamer: chrome.tabs.update(recorder, streamUrl) + engine.setTarget(streamer)
+      (pending clips of the previous streamer are cut first, then the buffer is cleared)
+  → same streamer, new session (stream restarted): reload the page, keep recording
+  → nobody live / monitoring stopped / paused: engine idle (frames dropped, nothing encoded)
+```
+
+Manual capture (*Only capture this stream*) uses the same engine with a fixed target. The worker
+creates the offscreen document (reason `USER_MEDIA`) and starts the engine there:
 
 ```text
 getUserMedia(tab video ≤ 1280×720 ≤ 30 fps + tab audio)
@@ -82,23 +95,31 @@ getUserMedia(tab video ≤ 1280×720 ≤ 30 fps + tab audio)
   │          + RMS loudness per second
   └─ ChunkRing: encoded chunks of the last 120 s (wall-clock timestamps)
 
-every second: LiveSignals (2-minute rolling median per stream)
-  → loud (≥ 6 dB over normal for 2 s), fast action (≥ 2.5× usual motion for 2 s),
-    flash (brightness +50 and back)
-  → score = calculateScore({audio, visual}); ≥ minimum score → highlight (origin "capture")
-clip requests (capture moments, chat/viewer highlights of the captured streamer, Save last N s)
-  → wait for the post-roll → ChunkRing.select(from keyframe ≤ start … end)
-  → mp4-muxer (no re-encode, tracks aligned) → IndexedDB clips + clipBlobs → notification
+every second: LiveSignals (2-minute rolling median per stream) → fusion signals
+  audio:  ≥ 6 dB over normal for 2 s; +12 dB jump (burst); loud + high zero-crossing rate
+          (shouting-like; sustained and even → cheer-like); envelope pulsing at 3–7 Hz (laughter-like)
+  visual: ≥ 2.5× usual motion for 2 s; scene cuts more often than usual; flash
+worker → engine: chat moments and viewer spikes of the recorded streamer (as signals)
+AutoClipper (capture/autoclip.ts)
+  FusionEngine: signals within 10 s of each other = one moment (≤ 60 s)
+    score = Σ weight × intensity/100 (+ bonus for ≥ 2 kinds); ≥ threshold → clip
+  ClipPlanner: [start − pre-roll, end + post-roll]; overlap with a pending clip → extend (≤ max);
+    peak inside a saved clip → merge reasons; pre-roll overlapping a saved clip → start after it
+  → highlight (origin "capture", fused); chat/viewer highlights it absorbed are deleted
+  → after the post-roll: ChunkRing.select → mp4-muxer → clips + clipBlobs + clipThumbs (JPEG)
+  → storage limits enforced → optional Twitch clip → notification
 ```
 
-A clip covers `[moment − pre-roll, moment + post-roll]` (Settings → Clips, default 20 s / 10 s), within
-what the buffer still holds.
+Defaults: weights audio 25, chat 30, visual 20, viewers 15, multi 10; threshold 40; 20 s before
+and after; buffer 120 s (always ≥ pre + post + 70 s so a moment's footage is still there when its
+post-roll ends); clips ≤ 90 s. All configurable in Settings.
 
 ## 4. Data
 
 See [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md). Retention (Settings → Privacy, default 30 days) deletes
-provisional highlights and ended sessions after each status check; highlights with a clip stay until
-the clip is deleted.
+provisional highlights and ended sessions after each status check. Settings → Storage limits the
+clips (default 5 GB, optional maximum age): the oldest non-favourite clips are deleted after each
+new clip.
 
 ## 5. Chrome constraints and how they are handled
 
@@ -107,6 +128,7 @@ the clip is deleted.
 | The service worker can stop at any time | All state in storage; alarms drive checks; single-flight ticks; restore on startup |
 | Alarms fire at most every 30 s | Interval in minutes (1–60) |
 | Tab media needs a document | Offscreen document (one per extension) hosts the capture engine |
-| Tab capture needs a user gesture on that tab | Capture starts only from the popup; detections notify with Open stream |
+| Tab capture needs a user gesture on that tab | One click arms the recorder tab; the running capture follows the tab's navigations. If it stops, the worker tries to restart it and otherwise shows "video capture inactive" |
+| Background tab playback | A captured tab is not throttled; a muted player is detected (silence warning) |
 | A WebSocket keeps the worker alive only while active | Twitch keepalive every 10 s; the socket closes when no Twitch session is active |
 | Storage quota | Clips are ~0.4 MB/s at 720p; delete from the Clip Library |

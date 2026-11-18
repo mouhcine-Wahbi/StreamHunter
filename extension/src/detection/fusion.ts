@@ -87,6 +87,22 @@ export function maxSingleSignalScore(w: FusionWeights): number {
   return Math.max(w.audio, w.chat, w.visual, w.viewers);
 }
 
+/**
+ * One line per kind of reason: "Rapid scene changes (5 in 4 s)" and "(13 in 4 s)", or "18 dB" and
+ * "12 dB louder", are the same reason; the first (strongest signal's) wording is kept.
+ */
+export function dedupeReasons(reasons: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of reasons) {
+    const key = r.replace(/\s*\([^)]*\)/g, "").replace(/\d+(\.\d+)?/g, "#").trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
+
 interface Group {
   signals: Signal[];
   start: number;
@@ -146,7 +162,7 @@ export class FusionEngine {
     }
     const kinds = SIGNAL_KINDS.filter((k) => (intensities[k] ?? 0) >= this.cfg.minIntensity);
     const score = fusedScore(intensities, this.cfg);
-    const reasons = [...new Set(g.signals.sort((a, b) => b.intensity - a.intensity).flatMap((s) => s.reasons))].slice(0, 6);
+    const reasons = dedupeReasons(g.signals.sort((a, b) => b.intensity - a.intensity).flatMap((s) => s.reasons)).slice(0, 6);
     return {
       start: g.start,
       end: g.end,

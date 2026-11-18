@@ -2,7 +2,7 @@
  * Automatic clipping for one capture: signals in → fused moments → planned clips → cut requests.
  * No WebCodecs or Chrome here, so it is tested directly; the engine supplies storage and cutting.
  */
-import { ClipPlanner, FusionEngine, type FusedMoment, type Signal, type SignalKind } from "@/detection/fusion";
+import { ClipPlanner, dedupeReasons, FusionEngine, type FusedMoment, type Signal, type SignalKind } from "@/detection/fusion";
 import type { NewHighlight } from "@/local/highlights";
 import type { CaptureOptions, CaptureTarget } from "@/types/capture";
 
@@ -154,7 +154,7 @@ export class AutoClipper {
       job.end = c.end;
       job.score = c.score;
       job.peakAt = c.peakAt;
-      job.reasons = [...new Set([...job.reasons, ...m.reasons])].slice(0, 8);
+      job.reasons = dedupeReasons([...job.reasons, ...m.reasons]).slice(0, 8);
       job.kinds = [...new Set([...job.kinds, ...m.kinds])];
       await this.deps.updateHighlight(job.highlightId, { score: m.score, reasons: m.reasons, endAt: c.end, breakdown });
       const clipId = this.clipIds.get(c.key);

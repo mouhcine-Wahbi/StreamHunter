@@ -1,4 +1,4 @@
-import { ClipPlanner, DEFAULT_FUSION, FusionEngine, fusedScore, type Signal } from "./fusion";
+import { ClipPlanner, dedupeReasons, DEFAULT_FUSION, FusionEngine, fusedScore, type Signal } from "./fusion";
 
 const T = 1_000_000;
 const sig = (kind: Signal["kind"], at: number, intensity: number, reason = `${kind} ${intensity}`, extra: Partial<Signal> = {}): Signal => ({ kind, at, intensity, reasons: [reason], ...extra });
@@ -45,6 +45,14 @@ describe("fusion scoring", () => {
   it("caps a moment's length", () => {
     const f = new FusionEngine();
     for (let i = 0; i < 20; i++) expect(f.add(sig("audio", T + i * 5000, 60))?.end ?? null).toBe(i === 13 ? T + 60_000 : null);
+  });
+});
+
+describe("reasons", () => {
+  it("keeps one line per kind of reason (seen in the real-Chrome run)", () => {
+    expect(
+      dedupeReasons(["Fast on-screen action (37.0× the usual motion)", "Rapid scene changes (5 in 4 s)", "Rapid scene changes (13 in 4 s)", "Stream audio 18 dB louder than usual", "Stream audio 12 dB louder than usual", "Laughter-like rhythmic bursts"]),
+    ).toEqual(["Fast on-screen action (37.0× the usual motion)", "Rapid scene changes (5 in 4 s)", "Stream audio 18 dB louder than usual", "Laughter-like rhythmic bursts"]);
   });
 });
 

@@ -8,14 +8,18 @@
    apps. They are stored in `chrome.storage.local` and sent only to that platform's token endpoint
    (`id.twitch.tv`, `id.kick.com`). They are never logged or shown again after saving (the secret
    field stays empty).
-3. **Least privilege for chat.** Sign in with Twitch asks for one scope, `user:read:chat`. The state
+3. **Least privilege for chat.** Sign in with Twitch asks for `user:read:chat`, plus `clips:edit`
+   only when the editor turns on "Also create a Twitch clip". The state
    parameter is checked, the token is validated with Twitch, and Sign out revokes it.
 4. **Minimal data.** Chat messages are analysed in memory and discarded; only highlights (time, score,
    reasons) are kept, and provisional highlights expire after the retention period.
-5. **Explicit consent for capture.** Recording a tab only starts when the editor clicks **Capture this
-   stream** in the popup on that tab (Chrome requires that click). Chrome shows its sharing indicator
-   while it runs, the tab stays audible, and capture stops with **Stop capture** or when the tab closes.
-   The video is encoded in memory and only the clips are saved, locally. Nothing is uploaded.
+5. **Explicit consent for capture.** Recording only starts when the editor clicks **Use this tab as
+   the recorder** or **Only capture this stream** in the popup on that tab (Chrome requires that
+   click). The recorder tab is then navigated only to `twitch.tv/<login>` / `kick.com/<slug>` of
+   streamers the editor marked Auto-record. Chrome shows its sharing indicator while it runs, the
+   tab stays audible, nothing is encoded while nobody is live or monitoring is paused or stopped,
+   and capture ends with **Stop capture** or when the tab closes. Only clips are saved, locally, within the
+   storage limit. Nothing is uploaded.
 6. **Official APIs only.** Twitch Helix, Twitch EventSub and Kick's public API. No scraping, no
    unofficial chat sockets, no stream downloaders, no DRM or restriction bypasses. Nothing is
    published anywhere.

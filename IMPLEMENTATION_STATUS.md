@@ -1,10 +1,47 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-17_
+_Last updated: 2026-11-18_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
-## v1.0 — Local-first, search-first ✅ (current)
+## v1.1 — Automatic clipping ✅ (current)
+
+Plan: [docs/AUTO_CLIPPING_PLAN.md](docs/AUTO_CLIPPING_PLAN.md). Start monitoring, leave Chrome
+running, come back to ranked clips.
+
+| Item | Status | Notes |
+|---|---|---|
+| Recorder tab: armed once, navigated to the live Auto-record streamer, idle while nobody is live, reload on stream restart, restart attempt if the engine stops | ✅ verified in Chrome | Chrome needs one click per tab; a running capture keeps going through navigations (tested same-site and cross-site) |
+| Signal fusion (audio 25 / chat 30 / visual 20 / viewers 15 / multi 10, threshold 40, all configurable) | ✅ | One signal alone never clips with the defaults; Settings warns if weights allow it |
+| Overlaps: extend a pending clip (≤ 90 s), merge into a saved one, never duplicate footage | ✅ | `ClipPlanner` |
+| Audio: louder than usual, sudden bursts, shouting-like, cheer-like, laughter-like (envelope rhythm) | ✅ | Heuristics, labelled "-like" |
+| Visual: fast motion, rapid scene changes, flashes | ✅ | |
+| Chat and viewer moments of the recorded streamer become fusion signals; absorbed provisional highlights are merged | ✅ | |
+| Buffer 60–300 s (≥ pre + post + 70 s), 20 s / 20 s, MP4 + JPEG thumbnail at the peak | ✅ verified in Chrome | |
+| Start / Pause / Resume / Stop monitoring; five-stage pipeline (discovery, chat, video, detection, export) | ✅ | "Live and detected, but video capture inactive" when no recorder runs; silence warning for a muted player |
+| Overview (status, streamers, clips, recording time, clip footage, storage), Top Highlights (ranked clips, 6 filters), Clip Library (preview, download, rename, delete, favourite) | ✅ | Provisional moments kept in a separate, clearly labelled list |
+| Storage limit (default 5 GB) and optional age limit, favourites never deleted | ✅ | After every clip |
+| Optional native Twitch clips (`POST /helix/clips`, `clips:edit`) | 🟡 | Implemented, off by default; **not run against real Twitch** |
+| Several streams at once | ⏳ | One recorder tab; the engine and director are per tab so more can be added |
+| Tests | ✅ | 114 (fusion, planner, auto-clipper, audio/visual features, recorder director, storage limits, clip filters, pause/resume, UI) |
+
+**Real-Chrome check (Chrome 157, built extension):**
+
+* *Recorder:* armed on a tab with no Auto-record streamer live → 150 frames read, **0 encoded**.
+  Streamer marked live → the tab navigated itself to `twitch.tv/twitch` and 150 chunks were encoded in
+  5 s. Marked offline → encoding stopped again (0 chunks in 5 s).
+* *Automatic clipping* on a scripted test stream (calm picture and quiet noise, then events):
+  laugh + fast action at t=50 s → score 55, **clipped**; action alone at t=80 s → score 20,
+  **not clipped**; laugh + a chat signal at t=110 s → score 56, **clipped** (audio + chat). Two MP4s
+  (48.7 s and 49.0 s, 1280×720, H.264 + AAC) that play in Chrome with no dropped frames, without
+  overlapping footage, each with a thumbnail of the peak (t=52.2 s and t=114.7 s on the page clock).
+* *Found and fixed:* a single step in loudness scored as "laughter-like" (the rhythm check now
+  needs a real oscillation); repeated reason variants ("5 in 4 s", "13 in 4 s") are now one line.
+
+**Not verified yet:** real Twitch/Kick APIs and Twitch chat (no app credentials on this machine), a
+real Twitch player in the recorder tab over hours (ads, mature-content gates, autoplay muting).
+
+## v1.0 — Local-first, search-first ✅
 
 No backend: one Chrome extension, data in IndexedDB, Twitch/Kick called directly with the editor's
 own developer apps. Plan and API analysis: [docs/LOCAL_FIRST_MIGRATION.md](docs/LOCAL_FIRST_MIGRATION.md).

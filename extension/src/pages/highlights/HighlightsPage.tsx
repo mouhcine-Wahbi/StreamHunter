@@ -92,12 +92,12 @@ export function HighlightsPage() {
         title="Top Highlights"
         description="Recorded clips, ranked by their highlight score. Each score combines the signals that fired together: audio, chat, picture and viewers."
       />
-      <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filters">
-        <Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="w-40">
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6" role="group" aria-label="Filters">
+        <Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
           <option value="score">Highest score</option>
           <option value="recent">Most recent</option>
         </Select>
-        <Select aria-label="Streamer" value={streamer} onChange={(e) => setStreamer(e.target.value)} className="w-44">
+        <Select aria-label="Streamer" value={streamer} onChange={(e) => setStreamer(e.target.value)}>
           <option value="all">All streamers</option>
           {streamers.map(([id, name]) => (
             <option key={id} value={String(id)}>
@@ -105,12 +105,12 @@ export function HighlightsPage() {
             </option>
           ))}
         </Select>
-        <Select aria-label="Platform" value={platform} onChange={(e) => setPlatform(e.target.value as Platform | "all")} className="w-36">
+        <Select aria-label="Platform" value={platform} onChange={(e) => setPlatform(e.target.value as Platform | "all")}>
           <option value="all">All platforms</option>
           <option value="twitch">Twitch</option>
           <option value="kick">Kick</option>
         </Select>
-        <Select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)} className="w-44">
+        <Select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
           <option value="all">All categories</option>
           {categories.map((c) => (
             <option key={c} value={c}>
@@ -118,13 +118,13 @@ export function HighlightsPage() {
             </option>
           ))}
         </Select>
-        <Select aria-label="Duration" value={duration} onChange={(e) => setDuration(e.target.value as Duration)} className="w-40">
+        <Select aria-label="Duration" value={duration} onChange={(e) => setDuration(e.target.value as Duration)}>
           <option value="all">Any length</option>
           <option value="short">Under 30 s</option>
           <option value="medium">30–60 s</option>
           <option value="long">Over 60 s</option>
         </Select>
-        <Select aria-label="Detection type" value={type} onChange={(e) => setType(e.target.value as DetectionType | "all")} className="w-44">
+        <Select aria-label="Detection type" value={type} onChange={(e) => setType(e.target.value as DetectionType | "all")}>
           <option value="all">Any detection</option>
           {(Object.keys(DETECTION_LABEL) as DetectionType[]).map((t) => (
             <option key={t} value={t}>

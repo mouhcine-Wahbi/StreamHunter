@@ -1,15 +1,14 @@
 import { PlatformError } from "@/platforms/http";
-import { createKickClient } from "@/platforms/kick";
-import { createTwitchClient } from "@/platforms/twitch";
-import type { ChannelInfo, PlatformClient } from "@/platforms/types";
+import { createAdapters, type Adapters } from "@/platforms/registry";
+import type { ChannelInfo } from "@/platforms/types";
 import type { Platform, Streamer } from "@/types/api";
 import { db } from "./db";
 
-export type Clients = Record<Platform, PlatformClient>;
+export type Clients = Adapters;
 
 let defaultClients: Clients | null = null;
 export function platformClients(): Clients {
-  defaultClients ??= { twitch: createTwitchClient(), kick: createKickClient() };
+  defaultClients ??= createAdapters();
   return defaultClients;
 }
 
@@ -56,11 +55,14 @@ export async function addStreamer(info: ChannelInfo): Promise<Streamer> {
 }
 
 /** Find a channel by its exact name on one platform (what "Add" uses). */
-export async function resolveChannel(clients: Clients, platform: Platform, username: string): Promise<ChannelInfo> {
-  const found = await clients[platform].search(username);
-  const match = found.find((c) => c.username.toLowerCase() === username.toLowerCase());
-  if (!match) throw new LocalError("streamer_not_found", `No ${platform === "twitch" ? "Twitch" : "Kick"} channel named "${username}"`, 404);
-  return match;
+/** Find a channel from a name, link, handle or ID on one platform (what "Add" uses). */
+export async function resolveChannel(clients: Clients, platform: Platform, input: string): Promise<ChannelInfo> {
+  try {
+    return await clients[platform].resolve(input);
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 404) throw new LocalError("streamer_not_found", e.message, 404);
+    throw e;
+  }
 }
 
 export async function updateStreamer(id: number, patch: Partial<Pick<Streamer, "monitoring_enabled" | "is_favorite" | "auto_record">>): Promise<Streamer> {
@@ -124,7 +126,7 @@ export interface RefreshResult {
 export async function refreshStatuses(clients: Clients = platformClients(), at: Date = new Date()): Promise<RefreshResult> {
   const streamers = (await db.all<Streamer>("streamers")).filter((s) => s.monitoring_enabled);
   const result: RefreshResult = { checked: 0, live: 0, skipped_recent: 0, unavailable: {}, retry_after: {}, changes: [], checked_ids: [], spikes: [] };
-  for (const platform of ["twitch", "kick"] as const) {
+  for (const platform of ["twitch", "kick", "youtube"] as const) {
     const group = streamers.filter((s) => s.platform === platform);
     if (group.length === 0) continue;
     let live: ChannelInfo[];
@@ -151,7 +153,7 @@ export async function refreshStatuses(clients: Clients = platformClients(), at: 
         stream_started_at: c?.stream_started_at ?? null,
         current_title: c?.current_title ?? s.current_title,
         current_category: c?.current_category ?? s.current_category,
-        display_name: c?.display_name && platform === "twitch" ? c.display_name : s.display_name,
+        display_name: c?.display_name && platform !== "kick" ? c.display_name : s.display_name,
         status_checked_at: at.toISOString(),
         updated_at: at.toISOString(),
       };
@@ -167,6 +169,10 @@ export async function refreshStatuses(clients: Clients = platformClients(), at: 
   return result;
 }
 
-export function streamUrl(s: Pick<Streamer, "platform" | "username">): string {
+export function streamUrl(s: Pick<Streamer, "platform" | "username"> & { platform_user_id?: string }): string {
+  if (s.platform === "youtube")
+    return s.platform_user_id && /^UC[\w-]{22}$/.test(s.platform_user_id)
+      ? `https://www.youtube.com/channel/${s.platform_user_id}/live`
+      : `https://www.youtube.com/@${s.username}/live`;
   return s.platform === "twitch" ? `https://www.twitch.tv/${s.username}` : `https://kick.com/${s.username}`;
 }

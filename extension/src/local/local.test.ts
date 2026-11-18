@@ -1,3 +1,4 @@
+import { createAdapters } from "@/platforms/registry";
 import { ApiError } from "@/services/api-client";
 import { createKickClient } from "@/platforms/kick";
 import { createTwitchClient } from "@/platforms/twitch";
@@ -15,7 +16,7 @@ const TWITCH: FakeChannel[] = [
 ];
 const KICK: FakeChannel[] = [{ id: "77", login: "kickstar", live: true, viewers: 900, title: "IRL", game: "IRL" }];
 
-const api = () => new LocalApi(() => ({ twitch: createTwitchClient(), kick: createKickClient() }));
+const api = () => new LocalApi(() => createAdapters());
 
 describe("platform clients (official APIs, editor's own app)", () => {
   it("explains what to set up when no credentials are saved", async () => {
@@ -96,7 +97,12 @@ describe("platform clients (official APIs, editor's own app)", () => {
   it("stores credentials trimmed, and only complete ones", async () => {
     await setCredentials("twitch", { clientId: "  id ", clientSecret: " s " });
     await setCredentials("kick", { clientId: "id", clientSecret: "" });
-    expect(await getCredentials()).toEqual({ twitch: { clientId: "id", clientSecret: "s" }, kick: null });
+    await setCredentials("youtube", { apiKey: " not a key! " });
+    expect(await getCredentials()).toEqual({ twitch: { clientId: "id", clientSecret: "s" }, kick: null, youtube: null });
+    // Twitch may be saved without a secret (API calls then use Sign in with Twitch); Kick may not.
+    await setCredentials("twitch", { clientId: "id2", clientSecret: "" });
+    await setCredentials("youtube", { apiKey: " AIzaSyA-abcdefghijklmnopqrstuvwxyz012 " });
+    expect(await getCredentials()).toEqual({ twitch: { clientId: "id2", clientSecret: "" }, kick: null, youtube: { apiKey: "AIzaSyA-abcdefghijklmnopqrstuvwxyz012" } });
   });
 });
 
@@ -131,7 +137,7 @@ describe("local API (no backend)", () => {
     await a.post("/api/v1/streamers", { platform: "twitch", username: "shroud" });
     await a.post("/api/v1/streamers", { platform: "kick", username: "kickstar" });
     channels[0]!.live = true;
-    const clients = { twitch: createTwitchClient(), kick: createKickClient() };
+    const clients = createAdapters();
     const r = await refreshStatuses(clients, new Date("2026-11-17T12:00:00Z"));
     expect(r).toMatchObject({ checked: 2, live: 2, unavailable: {} });
     expect(r.changes.map((c) => [c.streamer.username, c.change])).toEqual([["shroud", "went_live"]]);
@@ -149,7 +155,7 @@ describe("local API (no backend)", () => {
     const a = api();
     await a.post("/api/v1/streamers", { platform: "twitch", username: "shroud" });
     fakePlatforms({ ...opts, failWith: { twitch: 429 } });
-    const r = await refreshStatuses({ twitch: createTwitchClient(), kick: createKickClient() });
+    const r = await refreshStatuses(createAdapters());
     expect(r.unavailable.twitch).toMatch(/slow down/);
     expect(r.retry_after.twitch).toBe(60);
     expect((await a.get<Page<Streamer>>("/api/v1/streamers")).items[0]).toMatchObject({ is_live: true });
@@ -159,10 +165,14 @@ describe("local API (no backend)", () => {
     fakePlatforms({ twitch: TWITCH, kick: KICK });
     const a = api();
     let caps = await a.get<{ platform: string; configured: boolean }[]>("/api/v1/platforms/capabilities");
-    expect(caps.map((c) => c.configured)).toEqual([false, false]);
+    expect(caps.map((c) => [c.platform, c.configured])).toEqual([["twitch", false], ["kick", false], ["youtube", false]]);
     await configurePlatforms();
     caps = await a.get("/api/v1/platforms/capabilities");
-    expect(caps.map((c) => c.configured)).toEqual([true, true]);
+    expect(caps.map((c) => c.configured)).toEqual([true, true, false]);
+    // Every platform reports each feature honestly, with how it was checked.
+    const full = await a.get<{ platform: string; capabilities: Record<string, { support: string; verified: string }> }[]>("/api/v1/platforms/capabilities");
+    expect(full.map((c) => [c.platform, c.capabilities.chat!.support])).toEqual([["twitch", "partial"], ["kick", "unsupported"], ["youtube", "unsupported"]]);
+    expect(full[0]!.capabilities.capture).toMatchObject({ support: "supported", verified: "verified" });
     const live = await a.get<{ username: string; viewer_count: number; profile_image_url: string }[]>("/api/v1/discover/live?platform=twitch");
     expect(live).toEqual([expect.objectContaining({ username: "shroud", viewer_count: 25_000, profile_image_url: "https://img/shroud.png" })]);
   });

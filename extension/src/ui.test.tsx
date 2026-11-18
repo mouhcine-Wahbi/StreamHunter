@@ -202,7 +202,7 @@ describe("platforms & status (local-first)", () => {
     installWorker();
     window.location.hash = "/settings";
     render(<App />);
-    expect(await screen.findAllByText("not configured")).toHaveLength(2);
+    expect(await screen.findAllByText("not configured")).toHaveLength(3);
     await userEvent.type(screen.getByLabelText("twitch client ID"), "my-id");
     await userEvent.type(screen.getByLabelText("twitch client secret"), "my-secret");
     await userEvent.click(screen.getAllByRole("button", { name: "Save and test" })[0]!);

@@ -17,7 +17,7 @@ export class PlatformError extends Error {
   }
 }
 
-const LABEL: Record<Platform, string> = { twitch: "Twitch", kick: "Kick" };
+const LABEL: Record<Platform, string> = { twitch: "Twitch", kick: "Kick", youtube: "YouTube" };
 
 export interface HttpDeps {
   fetchImpl?: typeof fetch;

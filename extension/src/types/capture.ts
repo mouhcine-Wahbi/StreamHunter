@@ -1,3 +1,4 @@
+import { parseYouTubeInput } from "@/platforms/youtube";
 import type { Platform } from "./api";
 
 /**
@@ -162,7 +163,7 @@ const KICK_RESERVED = new Set([
   "login", "signup", "terms-of-service", "privacy-policy", "community-guidelines", "subscriptions", "messages",
 ]);
 
-/** The channel shown in a Twitch/Kick tab, or null for any other page. */
+/** The channel shown in a Twitch/Kick/YouTube tab, or null for any other page. YouTube video pages give "video:<id>". */
 export function channelFromUrl(url: string | undefined | null): { platform: Platform; channel: string } | null {
   if (!url) return null;
   let u: URL;
@@ -172,6 +173,11 @@ export function channelFromUrl(url: string | undefined | null): { platform: Plat
     return null;
   }
   if (u.protocol !== "https:") return null;
+  if (/(^|\.)(youtube\.com|youtu\.be)$/.test(u.hostname)) {
+    const p = parseYouTubeInput(u.toString());
+    if (!p) return null;
+    return { platform: "youtube", channel: p.kind === "video" ? `video:${p.value}` : p.kind === "handle" ? p.value.toLowerCase() : p.value };
+  }
   const first = u.pathname.split("/").filter(Boolean)[0] ?? "";
   const host = u.hostname.replace(/^(www|m)\./, "");
   if (host === "twitch.tv" && /^[A-Za-z0-9_]{2,25}$/.test(first) && !TWITCH_RESERVED.has(first.toLowerCase()))

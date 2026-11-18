@@ -1,5 +1,4 @@
 import { ApiClient, ApiError, type Method } from "@/services/api-client";
-import { getCredentials } from "@/platforms/credentials";
 import { PlatformError } from "@/platforms/http";
 import type { ChannelInfo } from "@/platforms/types";
 import type { CandidateStatus, Page, Platform, Streamer, StreamerSearchResult } from "@/types/api";
@@ -72,8 +71,8 @@ export function filterClips(all: LocalClip[], q: URLSearchParams): LocalClip[] {
 }
 
 function platformParam(v: string | null): Platform {
-  if (v === "twitch" || v === "kick") return v;
-  throw new LocalError("invalid_platform", "Choose Twitch or Kick", 422);
+  if (v === "twitch" || v === "kick" || v === "youtube") return v;
+  throw new LocalError("invalid_platform", "Choose Twitch, Kick or YouTube", 422);
 }
 
 function searchResult(c: ChannelInfo): StreamerSearchResult & { viewer_count: number | null } {
@@ -193,29 +192,16 @@ export class LocalApi extends ApiClient {
     };
   }
 
+  /** Per platform: set up or not, and what is supported (and how it was checked), from its adapter. */
   private async capabilities() {
-    const creds = await getCredentials();
-    const cap = (platform: Platform) => {
-      const ok = creds[platform] !== null;
-      const v = ok ? "supported" : "requires_configuration";
-      return {
-        platform,
-        configured: ok,
-        connection_status: "not_connected",
-        capabilities: {
-          search: v,
-          live_status: v,
-          discover_live: v,
-          chat_monitoring: platform === "twitch" ? "requires_authorization" : "unsupported",
-          capture: "supported",
-        },
-        notes:
-          platform === "kick"
-            ? ["Kick has no search API: add channels by their exact name.", "Kick chat is only delivered to servers (webhooks), so it isn't monitored."]
-            : ["Chat monitoring needs Sign in with Twitch (user:read:chat)."],
-      };
-    };
-    return [cap("twitch"), cap("kick")];
+    const adapters = this.clients();
+    return Promise.all(
+      (["twitch", "kick", "youtube"] as const).map(async (platform) => {
+        const a = adapters[platform];
+        const auth = await a.authStatus();
+        return { platform, label: a.label, configured: auth.configured, auth_message: auth.message, capabilities: a.capabilities() };
+      }),
+    );
   }
 }
 

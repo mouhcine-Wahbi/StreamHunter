@@ -1,11 +1,13 @@
 /**
  * StreamHunter's data model (stored in IndexedDB, served by LocalApi under /api/v1/... paths).
  */
-export type Platform = "twitch" | "kick";
+export type Platform = "twitch" | "kick" | "youtube";
+export const PLATFORM_LABEL: Record<Platform, string> = { twitch: "Twitch", kick: "Kick", youtube: "YouTube" };
 
 export const PLATFORMS: readonly { id: Platform; label: string }[] = [
   { id: "twitch", label: "Twitch" },
   { id: "kick", label: "Kick" },
+  { id: "youtube", label: "YouTube" },
 ];
 
 export interface Page<T> {

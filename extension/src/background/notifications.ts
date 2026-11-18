@@ -1,3 +1,4 @@
+import { PLATFORM_LABEL, type Platform } from "@/types/api";
 import type { Streamer } from "@/types/api";
 import type { Settings } from "@/types/settings";
 import type { LocalHighlight } from "@/local/highlights";
@@ -6,7 +7,7 @@ export interface StreamNotification {
   type: "streamer_live" | "streamer_offline" | "highlight_detected";
   streamer_id: number;
   streamer_display_name: string;
-  platform: "twitch" | "kick";
+  platform: Platform;
   title: string | null;
   category: string | null;
   at: string;
@@ -66,7 +67,7 @@ export async function notifyStreamEvents(events: StreamNotification[], settings:
   if (!settings.notifications.onStreamerLive) return;
   const live = events.filter((e) => e.type === "streamer_live").slice(0, 5); // avoid a burst
   for (const e of live) {
-    const platform = e.platform === "twitch" ? "Twitch" : "Kick";
+    const platform = PLATFORM_LABEL[e.platform];
     await chrome.notifications
       .create(`${NOTIFICATION_PREFIX}${e.streamer_id}-${e.at}`, {
         type: "basic",

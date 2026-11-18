@@ -1,8 +1,8 @@
 import { Badge } from "@/components/ui/Badge";
-import type { Platform } from "@/types/api";
+import { PLATFORM_LABEL, type Platform } from "@/types/api";
 
 export function PlatformBadge({ platform }: { platform: Platform }) {
-  return <Badge tone={platform}>{platform === "twitch" ? "Twitch" : "Kick"}</Badge>;
+  return <Badge tone={platform}>{PLATFORM_LABEL[platform]}</Badge>;
 }
 
 export function LiveBadge({ isLive }: { isLive: boolean | null }) {

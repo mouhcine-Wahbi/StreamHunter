@@ -6,65 +6,138 @@ import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Field";
-import { getCredentials, setCredentials, type PlatformCredentials } from "@/platforms/credentials";
+import { getCredentials, setCredentials, type AppPlatform, type PlatformCredentials } from "@/platforms/credentials";
+import type { Capability, Feature } from "@/platforms/adapter";
 import { getTwitchUser, redirectUrl, signInWithTwitch, signOutOfTwitch, TWITCH_USER_KEY, type TwitchUser } from "@/platforms/twitch-user";
 import { onStorageKeyChange } from "@/store/storage";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useAction } from "@/hooks/useAction";
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
-import type { Platform } from "@/types/api";
-
-/** Capability value as reported by the platform layer (never computed in the UI). */
-type CapabilityValue = boolean | string;
+import { PLATFORM_LABEL, type Platform } from "@/types/api";
 
 interface PlatformCapabilities {
   platform: Platform;
+  label: string;
   configured: boolean;
-  connection_status: string;
-  capabilities: Record<string, CapabilityValue>;
-  notes?: string[];
+  auth_message: string;
+  capabilities: Record<Feature, Capability>;
 }
 
-function tone(v: CapabilityValue): BadgeTone {
-  if (v === true || v === "supported") return "live";
-  if (v === false || v === "unsupported") return "neutral";
-  return "warn";
-}
-
-function label(v: CapabilityValue): string {
-  if (v === true) return "supported";
-  if (v === false) return "unsupported";
-  return v.replace(/_/g, " ");
-}
+const SUPPORT_TONE: Record<Capability["support"], BadgeTone> = { supported: "live", partial: "warn", unsupported: "neutral" };
+const VERIFIED_LABEL: Record<Capability["verified"], string> = {
+  verified: "tested for real",
+  simulated: "tested against documented responses",
+  untested: "not yet tested",
+};
+const FEATURE_LABEL: Record<Feature, string> = {
+  search: "Search",
+  lookup: "Add by name/link",
+  live_status: "Live status",
+  discover_live: "Live now list",
+  viewers: "Viewer count",
+  chat: "Chat signals",
+  capture: "Video recording",
+  native_clips: "Native clips",
+};
 
 const APP_HELP: Record<Platform, { url: string; label: string; redirect: string }> = {
-  twitch: { url: "https://dev.twitch.tv/console/apps", label: "dev.twitch.tv/console", redirect: "OAuth redirect URL: any (e.g. http://localhost)" },
+  twitch: { url: "https://dev.twitch.tv/console/apps", label: "dev.twitch.tv/console", redirect: "OAuth redirect URL: the one shown under Chat below" },
   kick: { url: "https://kick.com/settings/developer", label: "kick.com/settings/developer", redirect: "Redirect URL: any (e.g. http://localhost)" },
+  youtube: {
+    url: "https://console.cloud.google.com/apis/credentials",
+    label: "console.cloud.google.com",
+    redirect: "enable YouTube Data API v3, then Create credentials → API key",
+  },
 };
+
+/** YouTube: an API key from the editor's own Google Cloud project (public data, no sign-in). */
+function YouTubeKeyForm({ onChanged }: { onChanged: () => void }) {
+  const client = useApiClient();
+  const [saved, setSaved] = useState(false);
+  const [key, setKey] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => void getCredentials().then((c) => setSaved(Boolean(c.youtube))), []);
+  const save = useAction(async () => {
+    setNotice(null);
+    const next = await setCredentials("youtube", { apiKey: key });
+    if (!next.youtube) throw new Error("That doesn't look like an API key (letters, digits, - and _).");
+    setSaved(true);
+    setKey("");
+    // Prove it works with a 1-unit call (channels.list by handle).
+    await client.get(`/api/v1/streamers/search?platform=youtube&username=${encodeURIComponent("@YouTube")}`);
+    setNotice("Saved and working: YouTube answered.");
+    onChanged();
+  });
+  const remove = useAction(async () => {
+    await setCredentials("youtube", null);
+    setSaved(false);
+    setNotice("Removed from this computer.");
+    onChanged();
+  });
+  return (
+    <div className="mt-4 space-y-2 border-t border-ink-700 pt-3 text-xs">
+      <p className="text-fg-muted">
+        A free API key from your own Google Cloud project at{" "}
+        <a className="text-accent underline" href={APP_HELP.youtube.url} target="_blank" rel="noreferrer">
+          {APP_HELP.youtube.label}
+        </a>{" "}
+        ({APP_HELP.youtube.redirect}). Public data only, so no Google sign-in. Restrict the key to the YouTube Data API. Stored only in this browser.
+      </p>
+      <Input
+        aria-label="youtube API key"
+        placeholder={saved ? "API key (saved; enter again to change)" : "API key"}
+        type="password"
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        autoComplete="off"
+      />
+      <div className="flex gap-2">
+        <Button size="sm" variant="primary" loading={save.pending} icon={<Plug className="size-3.5" />} onClick={() => void save.run()}>
+          {saved ? "Update and test" : "Save and test"}
+        </Button>
+        {saved && (
+          <Button size="sm" variant="ghost" loading={remove.pending} icon={<Unplug className="size-3.5" />} onClick={() => void remove.run()}>
+            Remove
+          </Button>
+        )}
+      </div>
+      {notice && <p className="text-live">{notice}</p>}
+      {(save.error || remove.error) && (
+        <p role="alert" className="text-danger">
+          {save.error ?? remove.error}
+        </p>
+      )}
+    </div>
+  );
+}
 
 /** The editor's own developer-app credentials for one platform (kept on this computer only). */
 function CredentialsForm({ platform, onChanged }: { platform: Platform; onChanged: () => void }) {
   const client = useApiClient();
   const [creds, setCreds] = useState<PlatformCredentials | null>(null);
   const [clientId, setClientId] = useState("");
+  const app = platform as AppPlatform;
   const [secret, setSecret] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     void getCredentials().then((c) => {
       setCreds(c);
-      setClientId(c[platform]?.clientId ?? "");
+      setClientId(c[app]?.clientId ?? "");
     });
   }, [platform]);
-  const saved = creds?.[platform] ?? null;
+  const saved = creds?.[app] ?? null;
+  const optionalSecret = platform === "twitch";
 
   const save = useAction(async () => {
     setNotice(null);
-    if (!clientId.trim() || !secret.trim()) throw new Error("Enter both the client ID and the client secret.");
-    setCreds(await setCredentials(platform, { clientId, clientSecret: secret }));
+    if (!clientId.trim() || (!secret.trim() && !optionalSecret)) throw new Error("Enter both the client ID and the client secret.");
+    // Twitch without a secret: API calls use your Sign in with Twitch token instead (nothing secret is stored).
+    const keep = !secret.trim() && saved?.clientId === clientId.trim() ? saved.clientSecret : secret;
+    setCreds(await setCredentials(platform, { clientId, clientSecret: keep }));
     setSecret("");
     // Prove it works with one cheap call: the most-watched live channel.
     const live = await client.get<unknown[]>(`/api/v1/discover/live?platform=${platform}&limit=1`);
-    setNotice(`Saved and working: ${platform === "twitch" ? "Twitch" : "Kick"} answered (${live.length} live channel checked).`);
+    setNotice(`Saved and working: ${PLATFORM_LABEL[platform]} answered (${live.length} live channel checked).`);
     onChanged();
   });
   const remove = useAction(async () => {
@@ -78,17 +151,18 @@ function CredentialsForm({ platform, onChanged }: { platform: Platform; onChange
   return (
     <div className="mt-4 space-y-2 border-t border-ink-700 pt-3 text-xs">
       <p className="text-fg-muted">
-        Your own {platform === "twitch" ? "Twitch" : "Kick"} app, created for free at{" "}
+        Your own {PLATFORM_LABEL[platform]} app, created for free at{" "}
         <a className="text-accent underline" href={APP_HELP[platform].url} target="_blank" rel="noreferrer">
           {APP_HELP[platform].label}
         </a>{" "}
-        ({APP_HELP[platform].redirect}). Stored only in this browser and sent only to {platform === "twitch" ? "Twitch" : "Kick"}.
+        ({APP_HELP[platform].redirect}). Stored only in this browser and sent only to {PLATFORM_LABEL[platform]}.
+        {optionalSecret && " The secret is optional: without it, StreamHunter uses your Sign in with Twitch below instead."}
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
         <Input aria-label={`${platform} client ID`} placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" />
         <Input
           aria-label={`${platform} client secret`}
-          placeholder={saved ? "Client secret (saved; enter again to change)" : "Client secret"}
+          placeholder={saved?.clientSecret ? "Client secret (saved; enter again to change)" : optionalSecret ? "Client secret (optional)" : "Client secret"}
           type="password"
           value={secret}
           onChange={(e) => setSecret(e.target.value)}
@@ -172,27 +246,32 @@ export function PlatformConnections() {
                   <Link2 className="size-4 text-fg-subtle" />
                   <PlatformBadge platform={p.platform} />
                 </div>
-                <Badge tone={p.configured ? "live" : "warn"}>{p.configured ? "app credentials saved" : "not configured"}</Badge>
+                <Badge tone={p.configured ? "live" : "warn"}>
+                  {p.configured ? (p.platform === "youtube" ? "API key saved" : "app credentials saved") : "not configured"}
+                </Badge>
               </div>
+              <p className="mt-1 text-xs text-fg-subtle">{p.auth_message}</p>
               <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
-                {Object.entries(p.capabilities).map(([k, v]) => (
-                  <div key={k} className="flex items-center justify-between gap-2 text-xs">
-                    <dt className="text-fg-muted">{k.replace(/_/g, " ")}</dt>
-                    <dd>
-                      <Badge tone={tone(v)}>{label(v)}</Badge>
+                {(Object.entries(p.capabilities) as [Feature, Capability][]).map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between gap-2 text-xs" title={`${v.note} (${VERIFIED_LABEL[v.verified]})`}>
+                    <dt className="text-fg-muted">{FEATURE_LABEL[k]}</dt>
+                    <dd className="flex items-center gap-1">
+                      <Badge tone={SUPPORT_TONE[v.support]}>{v.support}</Badge>
+                      {v.support !== "unsupported" && v.verified !== "verified" && (
+                        <span className="text-[10px] text-fg-subtle">{v.verified === "simulated" ? "simulated" : "untested"}</span>
+                      )}
                     </dd>
                   </div>
                 ))}
               </dl>
-              {p.notes?.map((n) => (
-                <p key={n} className="mt-2 text-xs text-fg-subtle">
-                  {n}
-                </p>
-              ))}
-              <CredentialsForm platform={p.platform} onChanged={query.reload} />
-              {p.platform === "twitch" && <TwitchChatSignIn configured={p.configured} />}
+              {p.platform === "youtube" ? <YouTubeKeyForm onChanged={query.reload} /> : <CredentialsForm platform={p.platform} onChanged={query.reload} />}
+              {p.platform === "twitch" && <TwitchChatSignIn configured />}
             </Card>
           ))}
+          <p className="text-[11px] text-fg-subtle">
+            "simulated": checked against each platform's documented responses, not yet against the real service with your credentials. "untested":
+            not checked yet. Hover a row for details.
+          </p>
         </div>
       )}
     </ApiStateView>

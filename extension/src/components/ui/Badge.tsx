@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/utils/cn";
 
-export type BadgeTone = "neutral" | "accent" | "live" | "warn" | "danger" | "twitch" | "kick";
+export type BadgeTone = "neutral" | "accent" | "live" | "warn" | "danger" | "twitch" | "kick" | "youtube";
 
 const tones: Record<BadgeTone, string> = {
   neutral: "bg-ink-700 text-fg-muted border-ink-600",
@@ -11,6 +11,7 @@ const tones: Record<BadgeTone, string> = {
   danger: "bg-danger-soft text-danger border-danger/30",
   twitch: "bg-twitch/12 text-twitch border-twitch/30",
   kick: "bg-kick/10 text-kick border-kick/30",
+  youtube: "bg-youtube/12 text-youtube border-youtube/30",
 };
 
 export function Badge({

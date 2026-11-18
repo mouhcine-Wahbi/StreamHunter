@@ -7,14 +7,14 @@ import { useSettings } from "@/hooks/useSettings";
 import { channelFromUrl } from "@/types/capture";
 import { formatRelative } from "@/utils/format";
 
-const PLATFORM_HOST = { twitch: "twitch.tv", kick: "kick.com" } as const;
+const PLATFORM_HOST = { twitch: "twitch.tv", kick: "kick.com", youtube: "youtube.com" } as const;
 
 /** Twitch or Kick page (any path): can become the recorder tab. */
 export function isStreamSite(url: string | undefined | null): boolean {
   if (!url) return false;
   try {
     const u = new URL(url);
-    return u.protocol === "https:" && /(^|\.)(twitch\.tv|kick\.com)$/.test(u.hostname);
+    return u.protocol === "https:" && /(^|\.)(twitch\.tv|kick\.com|youtube\.com)$/.test(u.hostname);
   } catch {
     return false;
   }

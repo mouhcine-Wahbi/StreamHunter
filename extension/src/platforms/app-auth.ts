@@ -1,6 +1,8 @@
-import type { Platform } from "@/types/api";
-import { clearToken, getCachedToken, getCredentials, setCachedToken, type AppCredentials } from "./credentials";
+import { clearToken, getCachedToken, getCredentials, setCachedToken, type AppCredentials, type AppPlatform } from "./credentials";
 import { PlatformError, requestJson, type HttpDeps } from "./http";
+import { getTwitchUser } from "./twitch-user";
+
+type Platform = AppPlatform;
 
 const TOKEN_URL: Record<Platform, string> = {
   twitch: "https://id.twitch.tv/oauth2/token",
@@ -46,6 +48,13 @@ export function appAuth(platform: Platform, http: HttpDeps = {}) {
 
   async function call<T>(run: (token: string, clientId: string) => Promise<T>): Promise<T> {
     const c = await credentials();
+    // Twitch without a secret: use the editor's own Sign in with Twitch token (Helix accepts user tokens).
+    if (!c.clientSecret) {
+      const user = platform === "twitch" ? await getTwitchUser() : null;
+      if (!user)
+        throw new PlatformError(platform, "not_configured", "No client secret saved: click Sign in with Twitch in Settings → Platforms (or add the secret).");
+      return run(user.token, c.clientId);
+    }
     const token = (await getCachedToken(platform)) ?? (await fetchToken(c));
     try {
       return await run(token, c.clientId);

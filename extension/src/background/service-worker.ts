@@ -87,12 +87,12 @@ chrome.commands?.onCommand?.addListener((command, tab) => {
         return "";
       }
     })();
-    const message = /(^|\.)(twitch\.tv|kick\.com)$/.test(host)
+    const message = /(^|\.)(twitch\.tv|kick\.com|youtube\.com)$/.test(host)
       ? await capture.arm(id).then(
           () => "This tab is now a recorder.",
           (e: unknown) => (e instanceof Error ? e.message : "Could not use this tab as a recorder."),
         )
-      : "Open twitch.tv or kick.com in this tab first.";
+      : "Open twitch.tv, kick.com or youtube.com in this tab first.";
     await chrome.notifications
       ?.create(`sh-arm-${Date.now()}`, { type: "basic", iconUrl: chrome.runtime.getURL("icons/icon-128.png"), title: "StreamHunter", message, priority: 0 })
       .catch(() => undefined);

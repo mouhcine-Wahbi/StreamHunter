@@ -12,7 +12,8 @@ import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
 import { useAction } from "@/hooks/useAction";
 import { ApiError } from "@/services/api-client";
 import { streamUrl } from "@/local/streamers";
-import { PLATFORMS, type Platform, type StreamerSearchResult } from "@/types/api";
+import { PLATFORM_LABEL, PLATFORMS, type Platform, type StreamerSearchResult } from "@/types/api";
+import { channelFromUrl } from "@/types/capture";
 
 type Result = StreamerSearchResult & { viewer_count?: number | null };
 
@@ -73,14 +74,19 @@ export function DiscoverPage() {
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [validation, setValidation] = useState<string | null>(null);
 
+  // YouTube's "live now" costs 100 of the key's 10,000 daily units: only on request.
+  const [ytLive, setYtLive] = useState(false);
   const query = useApiQuery<Result[]>(submitted);
-  const live = useApiQuery<Result[]>(submitted === null ? `/api/v1/discover/live?platform=${platform}&limit=24` : null);
+  const live = useApiQuery<Result[]>(submitted === null && (platform !== "youtube" || ytLive) ? `/api/v1/discover/live?platform=${platform}&limit=24` : null);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const u = username.trim();
-    if (!USERNAME_RE.test(u)) {
-      setValidation("Enter a channel name (2–25 letters, numbers or underscores).");
+    let u = username.trim();
+    // A pasted channel link works on every platform.
+    const fromLink = channelFromUrl(/^https?:\/\//.test(u) ? u : u.includes(".") ? `https://${u}` : null);
+    if (platform !== "youtube" && fromLink?.platform === platform) u = fromLink.channel;
+    if (platform === "youtube" ? !u || u.length > 200 : !USERNAME_RE.test(u)) {
+      setValidation(platform === "youtube" ? "Enter a channel link, @handle, channel ID or name." : "Enter a channel name or link (2–25 letters, numbers or underscores).");
       return;
     }
     setValidation(null);
@@ -89,7 +95,7 @@ export function DiscoverPage() {
 
   return (
     <>
-      <PageHeader title="Discover" description="Search Twitch and Kick channels, see who is live, and add them to your monitoring list." />
+      <PageHeader title="Discover" description="Find Twitch, Kick and YouTube channels, see who is live, and add them to your monitoring list." />
       <form onSubmit={onSubmit} className="flex flex-wrap items-start gap-3" role="search">
         <Segmented
           label="Platform"
@@ -103,7 +109,7 @@ export function DiscoverPage() {
         <div className="min-w-64 flex-1">
           <Input
             aria-label="Channel name"
-            placeholder={platform === "twitch" ? "Twitch channel, e.g. shroud" : "Kick channel slug, e.g. xqc"}
+            placeholder={platform === "twitch" ? "Twitch channel or link, e.g. shroud" : platform === "kick" ? "Kick channel slug or link, e.g. xqc" : "YouTube link, @handle or channel ID"}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             aria-invalid={validation ? true : undefined}
@@ -111,9 +117,13 @@ export function DiscoverPage() {
           {validation ? (
             <p className="mt-1.5 text-xs text-danger">{validation}</p>
           ) : (
-            platform === "kick" && (
+            platform === "kick" ? (
               <p className="mt-1.5 text-xs text-fg-subtle">Kick has no search API: enter the exact channel name from kick.com/&lt;name&gt;.</p>
-            )
+            ) : platform === "youtube" ? (
+              <p className="mt-1.5 text-xs text-fg-subtle">
+                Links, @handles and channel IDs cost 1 quota unit. A plain name uses YouTube search: 100 of your key's 10,000 daily units.
+              </p>
+            ) : null
           )}
         </div>
         <Button type="submit" variant="primary" icon={<Search className="size-4" />}>
@@ -125,8 +135,16 @@ export function DiscoverPage() {
         {submitted === null ? (
           <section aria-labelledby="live-now">
             <h2 id="live-now" className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
-              <Radio className="size-4" /> Live now on {platform === "twitch" ? "Twitch" : "Kick"}
+              <Radio className="size-4" /> Live now on {PLATFORM_LABEL[platform]}
             </h2>
+            {platform === "youtube" && !ytLive ? (
+              <EmptyState icon={<Radio className="size-5" />} title="Live now on YouTube">
+                <span className="block">Listing YouTube's live streams uses 100 of your API key's 10,000 daily units, so it only loads on request.</span>
+                <Button className="mt-3" size="sm" variant="secondary" onClick={() => setYtLive(true)}>
+                  Load live now (100 units)
+                </Button>
+              </EmptyState>
+            ) : (
             <ApiStateView query={live} feature="live channels">
               {(results) =>
                 results.length === 0 ? (
@@ -142,6 +160,7 @@ export function DiscoverPage() {
                 )
               }
             </ApiStateView>
+            )}
           </section>
         ) : (
           <ApiStateView query={query} feature="search results">

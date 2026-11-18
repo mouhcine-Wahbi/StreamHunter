@@ -10,10 +10,26 @@ import type { Platform } from "@/types/api";
  */
 export interface AppCredentials {
   clientId: string;
+  /**
+   * Empty for Twitch in "no secret" mode: API calls then use the editor's Sign in with Twitch
+   * token instead of an app token, so no secret is stored at all.
+   */
   clientSecret: string;
 }
 
-export type PlatformCredentials = Record<Platform, AppCredentials | null>;
+/** YouTube Data API: an API key from the editor's own Google Cloud project (public data only). */
+export interface YouTubeCredentials {
+  apiKey: string;
+}
+
+/** Platforms that use an app (client ID + secret). */
+export type AppPlatform = "twitch" | "kick";
+
+export interface PlatformCredentials {
+  twitch: AppCredentials | null;
+  kick: AppCredentials | null;
+  youtube: YouTubeCredentials | null;
+}
 
 interface CachedToken {
   token: string;
@@ -24,21 +40,27 @@ interface CachedToken {
 export const CREDENTIALS_KEY = "sh.platformCredentials";
 const TOKENS_KEY = "sh.appTokens";
 
-function valid(c: unknown): AppCredentials | null {
+function valid(c: unknown, secretOptional = false): AppCredentials | null {
   const v = c as Partial<AppCredentials> | null;
-  return v && typeof v.clientId === "string" && v.clientId.trim() && typeof v.clientSecret === "string" && v.clientSecret.trim()
-    ? { clientId: v.clientId.trim(), clientSecret: v.clientSecret.trim() }
-    : null;
+  const id = typeof v?.clientId === "string" ? v.clientId.trim() : "";
+  const secret = typeof v?.clientSecret === "string" ? v.clientSecret.trim() : "";
+  return id && (secret || secretOptional) ? { clientId: id, clientSecret: secret } : null;
+}
+
+function validKey(c: unknown): YouTubeCredentials | null {
+  const k = (c as Partial<YouTubeCredentials> | null)?.apiKey;
+  return typeof k === "string" && /^[\w-]{20,60}$/.test(k.trim()) ? { apiKey: k.trim() } : null;
 }
 
 export async function getCredentials(): Promise<PlatformCredentials> {
   const raw = ((await chrome.storage.local.get(CREDENTIALS_KEY))[CREDENTIALS_KEY] ?? {}) as Record<string, unknown>;
-  return { twitch: valid(raw.twitch), kick: valid(raw.kick) };
+  return { twitch: valid(raw.twitch, true), kick: valid(raw.kick), youtube: validKey(raw.youtube) };
 }
 
-export async function setCredentials(platform: Platform, creds: AppCredentials | null): Promise<PlatformCredentials> {
+export async function setCredentials(platform: Platform, creds: AppCredentials | YouTubeCredentials | null): Promise<PlatformCredentials> {
   const current = await getCredentials();
-  const next = { ...current, [platform]: creds ? valid(creds) : null };
+  const clean = !creds ? null : platform === "youtube" ? validKey(creds) : valid(creds, platform === "twitch");
+  const next = { ...current, [platform]: clean };
   await chrome.storage.local.set({ [CREDENTIALS_KEY]: next });
   await clearToken(platform); // a token from the old app must not be reused
   return next;

@@ -1,28 +1,23 @@
 import type { ReactNode } from "react";
-import { Activity, Clapperboard, Plug, Radio, Sparkles, Users } from "lucide-react";
+import { Activity, Clapperboard, Film, HardDrive, Plug, Sparkles, Timer, Users } from "lucide-react";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge, Dot } from "@/components/ui/Badge";
 import { MonitoringCard } from "@/components/monitoring/MonitoringCard";
-import { HighlightRow } from "@/components/highlights/HighlightRow";
+import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
+import { STATUS_META } from "@/components/monitoring/MonitoringStatusPill";
+import { PipelineStatus, type ClipStats } from "@/components/monitoring/PipelineStatus";
+import { useCapture } from "@/hooks/useCapture";
+import { useSettings } from "@/hooks/useSettings";
+import { ClipCard } from "@/pages/clips/ClipCard";
+import type { LocalClip } from "@/local/clips";
+import { formatBytes, formatSeconds } from "@/utils/format";
 import { ApiStateView } from "@/components/ApiStateView";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import type { useMonitoring } from "@/hooks/useMonitoring";
-import type { HighlightCandidate, Page, Platform, Streamer } from "@/types/api";
+import type { Page, Platform, Streamer } from "@/types/api";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { ApiError } from "@/services/api-client";
-
-function startOfTodayIso(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
-
-function unavailableReason(error: Error | null): string {
-  if (!error) return "";
-  return error instanceof ApiError && error.code === "platform_not_configured" ? "Set up Twitch/Kick in Settings" : "Couldn't load";
-}
 
 /** Whether Twitch and Kick are set up (the editor's own app credentials). */
 function PlatformsCard() {
@@ -49,7 +44,7 @@ function PlatformsCard() {
   );
 }
 
-function StatTile({ label, icon, value, error }: { label: string; icon: ReactNode; value: number | null; error: Error | null }) {
+function StatTile({ label, icon, value, sub }: { label: string; icon: ReactNode; value: ReactNode; sub?: string }) {
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between text-fg-subtle">
@@ -57,54 +52,85 @@ function StatTile({ label, icon, value, error }: { label: string; icon: ReactNod
         {icon}
       </div>
       <div className="mt-3 text-2xl font-semibold tracking-tight text-fg tabular">{value ?? "—"}</div>
-      <div className="mt-0.5 h-4 text-[11px] text-fg-subtle">{unavailableReason(error)}</div>
+      <div className="mt-0.5 h-4 truncate text-[11px] text-fg-subtle">{sub ?? ""}</div>
     </Card>
   );
 }
 
 export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof useMonitoring> }) {
-  const streamers = useApiQuery<Page<Streamer>>("/api/v1/streamers?limit=1");
-  const live = useApiQuery<Page<Streamer>>("/api/v1/streams/live?limit=1");
-  const today = useApiQuery<Page<HighlightCandidate>>(
-    `/api/v1/highlights?limit=1&date_from=${encodeURIComponent(startOfTodayIso())}`,
-  );
-  const clips = useApiQuery<Page<unknown>>("/api/v1/clips?limit=1");
-  const recent = useApiQuery<Page<HighlightCandidate>>("/api/v1/highlights?limit=5");
+  const { state: capture } = useCapture();
+  const streamers = useApiQuery<Page<Streamer>>("/api/v1/streamers?limit=500");
+  const stats = useApiQuery<ClipStats>(`/api/v1/clips/stats?_=${capture.clips}:${capture.lastClipAt ?? ""}`);
+  const recent = useApiQuery<Page<LocalClip>>(`/api/v1/clips?limit=4&_=${capture.lastClipAt ?? ""}`);
+  const settings = useSettings();
+  const monitored = streamers.data?.items.filter((s) => s.monitoring_enabled) ?? [];
+  const s = stats.data;
+  const limit = settings.settings.storage.maxTotalMb * 1_048_576;
+  const status = STATUS_META[monitoring.state.status];
 
   return (
     <>
-      <PageHeader title="Overview" description="What StreamHunter is watching and what it has found." />
+      <PageHeader
+        title="Overview"
+        description="Start monitoring, leave Chrome running, and come back to ranked clips."
+        actions={<MonitoringToggle monitoring={monitoring} />}
+      />
 
-      <section aria-label="Statistics" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <StatTile label="Monitored streamers" icon={<Users className="size-4" />} value={streamers.data?.total ?? null} error={streamers.error} />
-        <StatTile label="Live now" icon={<Radio className="size-4" />} value={live.data?.total ?? null} error={live.error} />
-        <StatTile label="Highlights today" icon={<Sparkles className="size-4" />} value={today.data?.total ?? null} error={today.error} />
-        <StatTile label="Clips created" icon={<Clapperboard className="size-4" />} value={clips.data?.total ?? null} error={clips.error} />
+      <section aria-label="Statistics" className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-6">
+        <StatTile label="Monitoring" icon={<Activity className="size-4" />} value={status.label} sub={capture.recording ? `Recording ${capture.channel ?? ""}` : "Not recording"} />
+        <StatTile
+          label="Monitored streamers"
+          icon={<Users className="size-4" />}
+          value={streamers.data ? monitored.length : null}
+          sub={`${monitored.filter((x) => x.auto_record).length} with Auto-record`}
+        />
+        <StatTile label="Clips generated" icon={<Clapperboard className="size-4" />} value={s?.clips ?? null} sub={s ? `${s.favorites} favourite${s.favorites === 1 ? "" : "s"}` : ""} />
+        <StatTile label="Recording time" icon={<Timer className="size-4" />} value={s ? formatSeconds(s.recorded_seconds) : null} sub="Total video recorded" />
+        <StatTile label="Clip footage" icon={<Film className="size-4" />} value={s ? formatSeconds(s.clip_seconds) : null} sub="Total length of saved clips" />
+        <StatTile
+          label="Storage used"
+          icon={<HardDrive className="size-4" />}
+          value={s ? formatBytes(s.clip_bytes) : null}
+          sub={`Limit ${formatBytes(limit)}${s?.storage_quota_bytes ? ` · browser allows ${formatBytes(s.storage_quota_bytes)}` : ""}`}
+        />
       </section>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <Card>
-          <CardHeader icon={<Activity className="size-4" />} title="Recent highlights" description="Latest detected moments across your watchlist." />
-          <CardBody>
-            <ApiStateView query={recent} feature="recent highlights">
-              {(page) =>
-                page.items.length === 0 ? (
-                  <EmptyState icon={<Sparkles className="size-5" />} title="No highlights yet">
-                    Highlights appear here once monitoring is active and a monitored streamer's chat reacts to something.
-                  </EmptyState>
-                ) : (
-                  <div className="divide-y divide-ink-700/70">
-                    {page.items.map((h) => (
-                      <HighlightRow key={h.id} h={h} />
-                    ))}
-                  </div>
-                )
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader
+              icon={<Sparkles className="size-4" />}
+              title="Recent highlights"
+              description="The latest clips StreamHunter recorded."
+              actions={
+                <a href="#/highlights" className="text-xs text-accent underline">
+                  Top Highlights
+                </a>
               }
-            </ApiStateView>
-          </CardBody>
-        </Card>
+            />
+            <CardBody>
+              <ApiStateView query={recent} feature="recent clips">
+                {(page) =>
+                  page.items.length === 0 ? (
+                    <EmptyState icon={<Sparkles className="size-5" />} title="No clips yet">
+                      1. Turn on Auto-record for a streamer in My Streamers. 2. Open twitch.tv or kick.com in a tab, click the StreamHunter icon and
+                      choose Use this tab as the recorder. 3. Start monitoring and leave Chrome running.
+                    </EmptyState>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {page.items.map((c) => (
+                        <ClipCard key={c.id} c={c} onChanged={() => recent.reload()} />
+                      ))}
+                    </div>
+                  )
+                }
+              </ApiStateView>
+            </CardBody>
+          </Card>
+        </div>
 
         <div className="space-y-6">
+          <PipelineStatus monitoring={monitoring} />
           <MonitoringCard monitoring={monitoring} />
           <PlatformsCard />
         </div>

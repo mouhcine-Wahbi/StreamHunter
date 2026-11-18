@@ -1,3 +1,4 @@
+import { getSettings } from "@/store/storage";
 import { useEffect, useState } from "react";
 import { Link2, Plug, Unplug } from "lucide-react";
 import { ApiStateView } from "@/components/ApiStateView";
@@ -121,7 +122,7 @@ function TwitchChatSignIn({ configured }: { configured: boolean }) {
     void getTwitchUser().then(setUser);
     return onStorageKeyChange(TWITCH_USER_KEY, () => void getTwitchUser().then(setUser));
   }, []);
-  const signIn = useAction(async () => setUser(await signInWithTwitch()));
+  const signIn = useAction(async () => setUser(await signInWithTwitch({ clips: (await getSettings()).clips.twitchNativeClips })));
   const signOut = useAction(async () => {
     await signOutOfTwitch();
     setUser(null);

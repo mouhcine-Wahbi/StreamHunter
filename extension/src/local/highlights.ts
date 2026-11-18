@@ -111,3 +111,19 @@ export async function pruneOldData(days: number, now: Date): Promise<number> {
   for (const s of sessions) if (s.status === "ended" && (s.ended_at ?? s.started_at) < cutoff) await db.delete("sessions", s.id);
   return removed;
 }
+
+/** Merge new evidence into an existing highlight (overlapping moments of one clip). */
+export async function updateHighlight(
+  id: number,
+  patch: { score?: number; reasons?: string[]; endAt?: number; breakdown?: Record<string, unknown> },
+): Promise<LocalHighlight | undefined> {
+  const h = await db.get<LocalHighlight>("highlights", id);
+  if (!h) return undefined;
+  return db.put("highlights", {
+    ...h,
+    score: Math.max(h.score, patch.score ?? h.score),
+    reasons: [...new Set([...h.reasons, ...(patch.reasons ?? [])])].slice(0, 8),
+    window_end_ms: Math.max(h.window_end_ms, patch.endAt ?? h.window_end_ms),
+    signal_breakdown: patch.breakdown ? ({ ...h.signal_breakdown, ...patch.breakdown } as LocalHighlight["signal_breakdown"]) : h.signal_breakdown,
+  });
+}

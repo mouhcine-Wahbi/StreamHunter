@@ -25,7 +25,7 @@ export function useMonitoring() {
     };
   }, []);
 
-  const run = useCallback(async (type: "monitoring/start" | "monitoring/stop" | "monitoring/check-now") => {
+  const run = useCallback(async (type: "monitoring/start" | "monitoring/stop" | "monitoring/pause" | "monitoring/resume" | "monitoring/check-now") => {
     setBusy(true);
     setError(null);
     try {
@@ -43,6 +43,8 @@ export function useMonitoring() {
     error,
     start: useCallback(() => run("monitoring/start"), [run]),
     stop: useCallback(() => run("monitoring/stop"), [run]),
+    pause: useCallback(() => run("monitoring/pause"), [run]),
+    resume: useCallback(() => run("monitoring/resume"), [run]),
     checkNow: useCallback(() => run("monitoring/check-now"), [run]),
   };
 }

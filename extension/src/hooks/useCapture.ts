@@ -38,6 +38,7 @@ export function useCapture() {
     busy,
     error,
     start: useCallback((tabId: number, url: string) => run(() => sendRequest({ type: "capture/start", tabId, url })), [run]),
+    arm: useCallback((tabId: number) => run(() => sendRequest({ type: "capture/arm", tabId })), [run]),
     stop: useCallback(() => run(() => sendRequest({ type: "capture/stop" })), [run]),
     saveLast: useCallback((seconds: number) => run(() => sendRequest({ type: "capture/save-last", seconds })), [run]),
   };

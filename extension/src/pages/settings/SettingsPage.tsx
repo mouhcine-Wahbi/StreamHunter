@@ -9,6 +9,9 @@ import { useSettings } from "@/hooks/useSettings";
 import { LIMITS, SUPPORTED_KEYWORD_LANGUAGES, type Sensitivity } from "@/types/settings";
 import { cn } from "@/utils/cn";
 import { NumberField, Section } from "./sections";
+import { maxSingleSignalScore } from "@/detection/fusion";
+
+const WEIGHT_LABEL = { audio: "Audio reaction", chat: "Chat activity", visual: "Visual activity", viewers: "Viewer spike", multi: "Several signals together" } as const;
 import { PlatformConnections } from "./PlatformConnections";
 
 function KeywordEditor({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
@@ -198,7 +201,31 @@ export function SettingsPage() {
           <KeywordEditor value={s.detection.customKeywords} onChange={(customKeywords) => void update({ detection: { customKeywords } })} />
         </Section>
 
-        <Section id="clips" title="Clips" description="How much of the stream a clip keeps around a detected moment, while you capture it (the buffer holds the last 2 minutes).">
+        <Section
+          id="scoring"
+          title="Automatic clipping"
+          description="Each signal adds up to its points at full strength; two or more kinds firing together add the bonus. A clip is made when the total reaches the threshold."
+        >
+          {(["audio", "chat", "visual", "viewers", "multi"] as const).map((k) => (
+            <Field key={k} inline label={WEIGHT_LABEL[k]}>
+              {({ id }) => (
+                <NumberField id={id} value={s.detection.weights[k]} min={LIMITS.weight.min} max={LIMITS.weight.max} suffix="pts" onCommit={(v) => void update({ detection: { weights: { [k]: v } } })} />
+              )}
+            </Field>
+          ))}
+          <Field inline label="Clip threshold" hint="Minimum combined score (0–100) for an automatic clip.">
+            {({ id, describedBy }) => (
+              <NumberField id={id} describedBy={describedBy} value={s.detection.clipThreshold} min={0} max={100} onCommit={(clipThreshold) => void update({ detection: { clipThreshold } })} />
+            )}
+          </Field>
+          {maxSingleSignalScore(s.detection.weights) >= s.detection.clipThreshold && (
+            <p role="status" className="rounded-lg border border-warn/25 bg-warn-soft px-3 py-2 text-xs text-warn">
+              With these values a single signal can reach the threshold on its own, so you may get clips from one loud sound or one chat burst.
+            </p>
+          )}
+        </Section>
+
+        <Section id="clips" title="Clips & recording" description="How much of the stream a clip keeps around a detected moment, and how much is kept in memory while recording.">
           <Field inline label="Seconds before the moment">
             {({ id }) => (
               <NumberField id={id} value={s.clips.preRollSeconds} min={LIMITS.rollSeconds.min} max={LIMITS.rollSeconds.max} suffix="s" onCommit={(preRollSeconds) => void update({ clips: { preRollSeconds } })} />
@@ -207,6 +234,34 @@ export function SettingsPage() {
           <Field inline label="Seconds after the moment">
             {({ id }) => (
               <NumberField id={id} value={s.clips.postRollSeconds} min={LIMITS.rollSeconds.min} max={LIMITS.rollSeconds.max} suffix="s" onCommit={(postRollSeconds) => void update({ clips: { postRollSeconds } })} />
+            )}
+          </Field>
+          <Field inline label="Rolling buffer" hint="Kept in memory while recording (about 0.4 MB per second at 720p). Always at least before + after + 70 s.">
+            {({ id, describedBy }) => (
+              <NumberField id={id} describedBy={describedBy} value={s.clips.bufferSeconds} min={LIMITS.bufferSeconds.min} max={LIMITS.bufferSeconds.max} suffix="s" onCommit={(bufferSeconds) => void update({ clips: { bufferSeconds } })} />
+            )}
+          </Field>
+          <Field inline label="Longest clip" hint="Overlapping moments extend one clip up to this length instead of saving the same footage twice.">
+            {({ id, describedBy }) => (
+              <NumberField id={id} describedBy={describedBy} value={s.clips.maxClipSeconds} min={LIMITS.maxClipSeconds.min} max={LIMITS.maxClipSeconds.max} suffix="s" onCommit={(maxClipSeconds) => void update({ clips: { maxClipSeconds } })} />
+            )}
+          </Field>
+          <Field inline label="Also create a Twitch clip" hint="Optional. For Twitch clips, also asks Twitch to create a clip on your account (public on Twitch). Needs Sign in with Twitch with clip permission.">
+            {({ id }) => (
+              <Switch id={id} label="Also create a Twitch clip" checked={s.clips.twitchNativeClips} onChange={(twitchNativeClips) => void update({ clips: { twitchNativeClips } })} />
+            )}
+          </Field>
+        </Section>
+
+        <Section id="storage" title="Storage" description="Clips are stored in this browser. When they take more space than allowed, the oldest are deleted automatically. Favourites are never deleted automatically.">
+          <Field inline label="Maximum clip storage">
+            {({ id }) => (
+              <NumberField id={id} value={s.storage.maxTotalMb} min={LIMITS.maxTotalMb.min} max={LIMITS.maxTotalMb.max} suffix="MB" onCommit={(maxTotalMb) => void update({ storage: { maxTotalMb } })} />
+            )}
+          </Field>
+          <Field inline label="Delete clips older than" hint="0 keeps clips until the storage limit is reached.">
+            {({ id, describedBy }) => (
+              <NumberField id={id} describedBy={describedBy} value={s.storage.maxAgeDays} min={LIMITS.maxAgeDays.min} max={LIMITS.maxAgeDays.max} suffix="days" onCommit={(maxAgeDays) => void update({ storage: { maxAgeDays } })} />
             )}
           </Field>
         </Section>

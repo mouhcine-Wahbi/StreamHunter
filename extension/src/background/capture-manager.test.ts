@@ -22,6 +22,7 @@ function deps(overrides: Partial<CaptureDeps> = {}) {
       return { ok: true };
     }),
     notify: async (title, message) => void notes.push(`${title}: ${message}`),
+    navigate: vi.fn(async () => undefined),
     ...overrides,
   };
   return { d, sent, notes };
@@ -38,7 +39,7 @@ describe("capture manager (worker side)", () => {
     expect(sent[0]).toMatchObject({
       type: "capture/start", streamId: "stream-1",
       capture: { streamerId: 1, platform: "twitch", displayName: "Alpha", username: "alpha" },
-      options: { bufferSeconds: 120, preRollSeconds: 20, postRollSeconds: 10, minScore: 60 },
+      options: { bufferSeconds: 120, preRollSeconds: 20, postRollSeconds: 20, maxClipSeconds: 90, clipThreshold: 40, weights: { audio: 25, chat: 30, visual: 20, viewers: 15, multi: 10 } },
     });
     expect(await db.all("streamers")).toHaveLength(1); // now on the monitoring list
   });
@@ -61,16 +62,19 @@ describe("capture manager (worker side)", () => {
     expect(await getCaptureState()).toMatchObject({ status: "error", message: "This browser can't encode H.264 video (WebCodecs)." });
   });
 
-  it("clips chat highlights of the captured streamer, and saves the last 30 s on request", async () => {
+  it("turns chat highlights of the recorded streamer into fusion signals, and saves the last 30 s on request", async () => {
     fakePlatforms({});
     const { d, sent, notes } = deps();
     const m = createCaptureManager(d);
     await m.start(1, "https://kick.com/alpha");
     const streamer = (await db.all<Streamer>("streamers"))[0]!;
-    const h = await createHighlight({ streamer, session: null, origin: "chat", peakAt: NOW, startAt: NOW - 20_000, endAt: NOW + 10_000, score: 80,
-      confidence: 0.9, category: "funny_moment", reasons: ["40 chatters laughing"], breakdown: {} });
+    const h = await createHighlight({ streamer, session: null, origin: "chat", peakAt: NOW, startAt: NOW - 25_000, endAt: NOW + 25_000, score: 80,
+      confidence: 0.9, category: "funny_moment", reasons: ["40 chatters laughing"], breakdown: { chat: 72 } });
     expect(await m.onHighlight(h, streamer)).toBe(true);
-    expect(sent.at(-1)).toEqual({ target: "offscreen", type: "capture/clip", request: { highlightId: h.id, start: NOW - 20_000, end: NOW + 10_000, title: "alpha · 40 chatters laughing", score: 80 } });
+    expect(sent.at(-1)).toEqual({
+      target: "offscreen", type: "capture/signal",
+      signal: { kind: "chat", at: NOW, start: NOW - 5000, end: NOW + 5000, intensity: 72, reasons: ["40 chatters laughing"], highlightIds: [h.id] },
+    });
     expect(await m.onHighlight(h, { ...streamer, id: 99 })).toBe(false); // another streamer: no clip
 
     await m.saveLast(30);

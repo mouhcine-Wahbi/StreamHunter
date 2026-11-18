@@ -62,7 +62,7 @@ export function createMonitoringManager(overrides: Partial<MonitoringDeps> = {})
 
   async function runTick(force: boolean): Promise<MonitoringState> {
     const state = await getMonitoringState();
-    if (!state.enabled) return state;
+    if (!state.enabled || state.paused) return state;
 
     const now = deps.now();
     if (!force && state.nextAttemptAt && new Date(state.nextAttemptAt) > now) {
@@ -139,6 +139,7 @@ export function createMonitoringManager(overrides: Partial<MonitoringDeps> = {})
     const settings = await getSettings();
     await patchMonitoringState({
       enabled: true,
+      paused: false,
       status: "starting",
       enabledAt: deps.now().toISOString(),
       lastError: null,
@@ -155,6 +156,7 @@ export function createMonitoringManager(overrides: Partial<MonitoringDeps> = {})
     await syncAlarms(false, settings.monitoring.intervalMinutes);
     const state = await patchMonitoringState({
       enabled: false,
+      paused: false,
       status: "stopped",
       enabledAt: null,
       activeSessions: null,
@@ -166,18 +168,37 @@ export function createMonitoringManager(overrides: Partial<MonitoringDeps> = {})
     return state;
   }
 
+  /** Pause: keep the setup, but no checks, chat or recording until Resume. */
+  async function pause(): Promise<MonitoringState> {
+    const state = await getMonitoringState();
+    if (!state.enabled) return state;
+    await pauseActiveSessions(deps.now());
+    await deps.afterCheck?.().catch(() => undefined); // chat disconnects (no active sessions)
+    return patchMonitoringState({ paused: true, status: "paused", nextAttemptAt: null });
+  }
+
+  async function resume(): Promise<MonitoringState> {
+    const state = await getMonitoringState();
+    if (!state.enabled) return start();
+    if (!state.paused) return state;
+    await patchMonitoringState({ paused: false, status: "starting", nextAttemptAt: null, consecutiveFailures: 0 });
+    await resumePausedSessions();
+    return tick(true);
+  }
+
   /** Called when the worker starts (browser startup / install / update). */
   async function restore(): Promise<MonitoringState> {
     const [state, settings] = await Promise.all([getMonitoringState(), getSettings()]);
     if (state.enabled && !settings.monitoring.resumeOnStartup) return stop();
     await syncAlarms(state.enabled, settings.monitoring.intervalMinutes);
     if (!state.enabled) return state;
+    if (state.paused) return patchMonitoringState({ status: "paused" });
     await patchMonitoringState({ status: "starting", nextAttemptAt: null });
     await resumePausedSessions();
     return tick(true);
   }
 
-  return { start, stop, tick, restore, checkOnce };
+  return { start, stop, pause, resume, tick, restore, checkOnce };
 }
 
 export type MonitoringManager = ReturnType<typeof createMonitoringManager>;

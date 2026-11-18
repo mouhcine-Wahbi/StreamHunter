@@ -8,8 +8,27 @@ import type { Platform } from "./api";
  */
 export type CaptureStatus = "off" | "starting" | "capturing" | "error";
 
+/**
+ * manual:   the editor captures the stream open in a tab (popup → Capture this stream).
+ * recorder: automatic. The editor armed one tab once; StreamHunter navigates it to whichever
+ *           "Auto-record" streamer is live and records only while one is.
+ */
+export type CaptureMode = "manual" | "recorder";
+
 export interface CaptureState {
   status: CaptureStatus;
+  mode: CaptureMode;
+  /** Encoding into the buffer right now (false while the recorder waits for a streamer or is paused). */
+  recording: boolean;
+  paused: boolean;
+  /** Recorder mode: why nothing is being recorded right now. */
+  waitingReason: string | null;
+  /** Seconds the captured audio has been silent (muted player?). */
+  silentSeconds: number;
+  /** Seconds recorded by this capture. */
+  recordedSeconds: number;
+  /** Latest automatic detection (any signal, clipped or not). */
+  lastDetection: { at: string; reasons: string[]; score: number; clipped: boolean } | null;
   tabId: number | null;
   platform: Platform | null;
   channel: string | null;
@@ -25,6 +44,13 @@ export interface CaptureState {
 
 export const INITIAL_CAPTURE_STATE: CaptureState = {
   status: "off",
+  mode: "manual",
+  recording: false,
+  paused: false,
+  waitingReason: null,
+  silentSeconds: 0,
+  recordedSeconds: 0,
+  lastDetection: null,
   tabId: null,
   platform: null,
   channel: null,
@@ -38,6 +64,8 @@ export const INITIAL_CAPTURE_STATE: CaptureState = {
 };
 
 export const CAPTURE_KEY = "sh.capture";
+/** Lifetime totals: { recordedSeconds } (shown on the Overview). */
+export const STATS_KEY = "sh.stats";
 
 /** What the offscreen engine needs to know about the captured streamer. */
 export interface CaptureTarget {
@@ -47,13 +75,17 @@ export interface CaptureTarget {
   displayName: string;
   username: string;
   broadcastStartedAt: string | null;
+  category?: string | null;
 }
 
 export interface CaptureOptions {
   bufferSeconds: number;
   preRollSeconds: number;
   postRollSeconds: number;
-  minScore: number;
+  maxClipSeconds: number;
+  /** Fusion: weights per signal kind and the minimum fused score for a clip. */
+  weights: { audio: number; chat: number; visual: number; viewers: number; multi: number };
+  clipThreshold: number;
 }
 
 /** A request to cut a clip: [start, end] in wall-clock ms, for an existing highlight. */

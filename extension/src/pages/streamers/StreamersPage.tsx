@@ -12,6 +12,7 @@ import { useAction } from "@/hooks/useAction";
 import { streamUrl } from "@/local/streamers";
 import type { Page, Streamer } from "@/types/api";
 import { formatRelative } from "@/utils/format";
+import { sendRequest } from "@/services/runtime";
 
 interface RefreshResult {
   checked: number;
@@ -25,6 +26,12 @@ function StreamerCard({ s, onChanged }: { s: Streamer; onChanged: () => void }) 
   const [confirming, setConfirming] = useState(false);
   const toggle = useAction(async (next: boolean) => {
     await client.patch(`/api/v1/streamers/${s.id}`, { monitoring_enabled: next });
+    onChanged();
+  });
+  const autoRecord = useAction(async (next: boolean) => {
+    await client.patch(`/api/v1/streamers/${s.id}`, { auto_record: next, ...(next ? { monitoring_enabled: true } : {}) });
+    // Let the recorder pick it up now (only inside the installed extension).
+    await sendRequest({ type: "capture/sync" }).catch(() => undefined);
     onChanged();
   });
   const remove = useAction(async () => {
@@ -52,7 +59,7 @@ function StreamerCard({ s, onChanged }: { s: Streamer; onChanged: () => void }) 
           {s.is_live && s.viewer_count !== null ? ` · ${s.viewer_count.toLocaleString()} viewers` : ""}
         </div>
       </div>
-      {(toggle.error || remove.error) && <p className="mt-2 text-xs text-danger">{toggle.error ?? remove.error}</p>}
+      {(toggle.error || remove.error || autoRecord.error) && <p className="mt-2 text-xs text-danger">{toggle.error ?? remove.error ?? autoRecord.error}</p>}
       <div className="mt-4 flex items-center justify-between border-t border-ink-700 pt-3">
         <label className="flex items-center gap-2 text-xs text-fg-muted">
           <Switch
@@ -62,6 +69,10 @@ function StreamerCard({ s, onChanged }: { s: Streamer; onChanged: () => void }) 
             label={`Monitor ${s.display_name}`}
           />
           Monitor
+        </label>
+        <label className="flex items-center gap-2 text-xs text-fg-muted" title="Record this streamer automatically on the recorder tab while live">
+          <Switch checked={Boolean(s.auto_record)} disabled={autoRecord.pending} onChange={(v) => void autoRecord.run(v)} label={`Auto-record ${s.display_name}`} />
+          Auto-record
         </label>
         {confirming ? (
           <div className="flex gap-1.5">
@@ -111,7 +122,7 @@ export function StreamersPage({ onDiscover }: { onDiscover: () => void }) {
     <>
       <PageHeader
         title="My Streamers"
-        description="Channels on your watchlist. Toggle monitoring per streamer."
+        description="Channels on your watchlist. Monitor checks live status and chat; Auto-record also records the stream on your recorder tab while it is live."
         actions={
           <Button variant="secondary" size="sm" loading={refresh.pending} icon={<RefreshCw className="size-3.5" />} onClick={() => void refresh.run()}>
             Refresh status

@@ -6,10 +6,12 @@
  * - degraded: some platform couldn't be checked (not set up, error, rate limit).
  * - offline:  no platform could be checked; retrying with backoff.
  */
-export type MonitoringStatus = "stopped" | "starting" | "active" | "degraded" | "offline";
+export type MonitoringStatus = "stopped" | "starting" | "active" | "degraded" | "offline" | "paused";
 
 export interface MonitoringState {
   enabled: boolean;
+  /** Enabled but paused by the editor: no checks, no chat, no recording until Resume. */
+  paused: boolean;
   status: MonitoringStatus;
   /** ISO timestamps (UTC). */
   enabledAt: string | null;
@@ -26,6 +28,7 @@ export interface MonitoringState {
 
 export const INITIAL_MONITORING_STATE: MonitoringState = {
   enabled: false,
+  paused: false,
   status: "stopped",
   enabledAt: null,
   lastCheckAt: null,

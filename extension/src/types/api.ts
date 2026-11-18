@@ -33,6 +33,8 @@ export interface Streamer extends StreamerSearchResult {
   status_checked_at: string | null;
   monitoring_enabled: boolean;
   is_favorite: boolean;
+  /** Recorder mode records this streamer automatically while live. */
+  auto_record?: boolean;
   updated_at: string;
 }
 

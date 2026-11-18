@@ -42,6 +42,23 @@ describe("monitoring manager (local: no backend)", () => {
     expect(session).toMatchObject({ streamer_display_name: "alpha", status: "active", platform: "twitch", broadcast_started_at: "2026-11-17T10:00:00.000Z" });
   });
 
+  it("pause stops checks and sessions without losing the setup; resume picks up again", async () => {
+    await configurePlatforms();
+    const { calls } = fakePlatforms({ twitch: [{ id: "1", login: "alpha", live: true, viewers: 10 }] });
+    await watch(["twitch", "alpha"]);
+    const { manager } = setup();
+    await manager.start();
+    calls.length = 0;
+    expect(await manager.pause()).toMatchObject({ enabled: true, paused: true, status: "paused" });
+    expect((await listSessions())[0]!.status).toBe("paused");
+    expect(await manager.tick(true)).toMatchObject({ status: "paused" });
+    expect(calls).toEqual([]); // no API calls while paused
+    expect(await manager.restore()).toMatchObject({ status: "paused" }); // a worker restart keeps the pause
+    expect(await manager.resume()).toMatchObject({ enabled: true, paused: false, status: "active" });
+    expect((await listSessions())[0]!.status).toBe("active");
+    expect(await manager.stop()).toMatchObject({ enabled: false, paused: false, status: "stopped" });
+  });
+
   it("ends the session when the streamer goes offline, and notifies go-lives when enabled", async () => {
     await configurePlatforms();
     await updateSettings({ notifications: { onStreamerLive: true } });

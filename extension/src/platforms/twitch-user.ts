@@ -10,6 +10,8 @@ import { PlatformError, requestJson } from "./http";
  */
 export const TWITCH_USER_KEY = "sh.twitchUser";
 export const CHAT_SCOPE = "user:read:chat";
+/** Optional: create Twitch clips (Settings → Clips → Also create a Twitch clip). */
+export const CLIPS_SCOPE = "clips:edit";
 
 export interface TwitchUser {
   token: string;
@@ -41,7 +43,7 @@ export async function validateToken(token: string): Promise<Omit<TwitchUser, "to
   return { userId: v.user_id, login: v.login, scopes: v.scopes ?? [], expiresAt: v.expires_in ? Date.now() + v.expires_in * 1000 : null };
 }
 
-export async function signInWithTwitch(): Promise<TwitchUser> {
+export async function signInWithTwitch(opts: { clips?: boolean } = {}): Promise<TwitchUser> {
   const creds = (await getCredentials()).twitch;
   if (!creds) throw new PlatformError("twitch", "not_configured", "Save your Twitch app's client ID first.");
   const state = crypto.randomUUID();
@@ -50,7 +52,7 @@ export async function signInWithTwitch(): Promise<TwitchUser> {
     client_id: creds.clientId,
     redirect_uri: redirectUrl(),
     response_type: "token",
-    scope: CHAT_SCOPE,
+    scope: opts.clips ? `${CHAT_SCOPE} ${CLIPS_SCOPE}` : CHAT_SCOPE,
     state,
     force_verify: "true",
   }).toString();

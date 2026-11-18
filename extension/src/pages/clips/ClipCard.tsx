@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Download, Pencil, Trash2 } from "lucide-react";
+import { Download, ExternalLink, Pencil, Play, Star, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -8,23 +8,24 @@ import { ScoreRing } from "@/components/highlights/HighlightRow";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useAction } from "@/hooks/useAction";
 import { useApiClient } from "@/hooks/useApiQuery";
-import { clipBlob, clipFileName, type LocalClip } from "@/local/clips";
-import { formatDateTime } from "@/utils/format";
+import { clipBlob, clipFileName, clipThumbnail, type DetectionType, type LocalClip } from "@/local/clips";
+import { cn } from "@/utils/cn";
+import { formatBytes, formatDateTime, formatOffset, formatRelative } from "@/utils/format";
 
-const mb = (bytes: number) => `${(bytes / 1_048_576).toFixed(1)} MB`;
+export const DETECTION_LABEL: Record<DetectionType, string> = {
+  audio: "Audio",
+  chat: "Chat",
+  visual: "Visual",
+  viewers: "Viewers",
+  manual: "Saved by you",
+};
 
-/** One clip: a real MP4 cut from a capture, stored in this browser. Preview, rename, download, delete. */
-export function ClipCard({ c, onChanged }: { c: LocalClip; onChanged: () => void }) {
-  const client = useApiClient();
+function useObjectUrl(load: () => Promise<Blob | undefined>, key: number): string | null {
   const [url, setUrl] = useState<string | null>(null);
-  const [title, setTitle] = useState(c.title ?? "");
-  const [editing, setEditing] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-
   useEffect(() => {
     let objectUrl: string | null = null;
     let alive = true;
-    void clipBlob(c.id).then((b) => {
+    void load().then((b) => {
       if (!alive || !b) return;
       objectUrl = URL.createObjectURL(b);
       setUrl(objectUrl);
@@ -33,12 +34,33 @@ export function ClipCard({ c, onChanged }: { c: LocalClip; onChanged: () => void
       alive = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [c.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return url;
+}
+
+/**
+ * One clip: a real MP4 cut from a recording, stored in this browser. Thumbnail and preview,
+ * metadata (streamer, platform, category, time in the stream, duration, why it was clipped, score),
+ * favourite, rename, download, delete.
+ */
+export function ClipCard({ c, onChanged, rank }: { c: LocalClip; onChanged: () => void; rank?: number }) {
+  const client = useApiClient();
+  const video = useObjectUrl(() => clipBlob(c.id), c.id);
+  const thumb = useObjectUrl(() => (c.has_thumbnail ? clipThumbnail(c.id) : Promise.resolve(undefined)), c.id);
+  const [playing, setPlaying] = useState(false);
+  const [title, setTitle] = useState(c.title ?? "");
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const rename = useAction(async (e: FormEvent) => {
     e.preventDefault();
     await client.patch(`/api/v1/clips/${c.id}`, { title });
     setEditing(false);
+    onChanged();
+  });
+  const favorite = useAction(async () => {
+    await client.patch(`/api/v1/clips/${c.id}`, { favorite: !c.favorite });
     onChanged();
   });
   const remove = useAction(async () => {
@@ -47,47 +69,126 @@ export function ClipCard({ c, onChanged }: { c: LocalClip; onChanged: () => void
   });
 
   return (
-    <Card className="flex flex-col gap-4 p-4 md:flex-row">
-      <div className="w-full shrink-0 overflow-hidden rounded-lg bg-black md:w-72">
-        {url ? (
-          <video src={url} controls preload="metadata" className="aspect-video w-full" aria-label={`Preview of ${c.title ?? "clip"}`} />
+    <Card className="flex flex-col overflow-hidden">
+      <div className="relative aspect-video w-full bg-black">
+        {playing && video ? (
+          <video src={video} controls autoPlay className="size-full" aria-label={`Preview of ${c.title ?? "clip"}`} />
         ) : (
-          <div className="grid aspect-video place-items-center text-xs text-fg-subtle">Video missing</div>
+          <button
+            type="button"
+            className="group relative block size-full"
+            onClick={() => setPlaying(true)}
+            disabled={!video}
+            aria-label={`Preview ${c.title ?? "clip"}`}
+          >
+            {thumb ? (
+              <img src={thumb} alt="" className="size-full object-cover" />
+            ) : (
+              <span className="grid size-full place-items-center text-xs text-fg-subtle">{video ? "No thumbnail" : "Video missing"}</span>
+            )}
+            {video && (
+              <span className="absolute inset-0 grid place-items-center bg-black/20 opacity-90 transition group-hover:bg-black/40">
+                <span className="grid size-11 place-items-center rounded-full bg-black/60 text-white">
+                  <Play className="size-5" />
+                </span>
+              </span>
+            )}
+          </button>
+        )}
+        {!playing && (
+          <>
+            <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white tabular">
+              {c.duration_seconds ?? "?"} s
+            </span>
+            {rank !== undefined && (
+              <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-white tabular">#{rank}</span>
+            )}
+          </>
         )}
       </div>
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
+
+      <div className="flex flex-1 flex-col gap-2 p-3">
+        <div className="flex items-start gap-2">
           <ScoreRing score={c.score} size={34} />
-          {editing ? (
-            <form onSubmit={(e) => void rename.run(e)} className="flex flex-1 gap-2">
-              <Input aria-label="Clip title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={140} />
-              <Button size="sm" type="submit" loading={rename.pending}>
-                Save
-              </Button>
-            </form>
-          ) : (
-            <>
-              <span className="truncate font-medium text-fg">{c.title}</span>
-              <Button size="sm" variant="ghost" aria-label="Rename clip" icon={<Pencil className="size-3.5" />} onClick={() => setEditing(true)} />
-            </>
+          <div className="min-w-0 flex-1">
+            {editing ? (
+              <form onSubmit={(e) => void rename.run(e)} className="flex gap-2">
+                <Input aria-label="Clip title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={140} />
+                <Button size="sm" type="submit" loading={rename.pending}>
+                  Save
+                </Button>
+              </form>
+            ) : (
+              <div className="line-clamp-2 text-sm font-medium text-fg" title={c.title ?? undefined}>
+                {c.title}
+              </div>
+            )}
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
+              <span className="font-medium text-fg">{c.streamer_display_name}</span>
+              <PlatformBadge platform={c.platform} />
+              {c.category && <span className="truncate">{c.category}</span>}
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={c.favorite ? "Remove from favourites" : "Mark as favourite"}
+            aria-pressed={c.favorite}
+            loading={favorite.pending}
+            onClick={() => void favorite.run()}
+            icon={<Star className={cn("size-4", c.favorite && "fill-warn text-warn")} />}
+          />
+        </div>
+
+        {c.reasons.length > 0 && (
+          <ul className="space-y-0.5 text-xs text-fg-muted">
+            {c.reasons.slice(0, 3).map((r) => (
+              <li key={r} className="truncate">
+                · {r}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap gap-1">
+          {c.detection_types.map((t) => (
+            <Badge key={t} tone={t === "manual" ? "neutral" : "accent"}>
+              {DETECTION_LABEL[t]}
+            </Badge>
+          ))}
+          {c.platform_clip_url && (
+            <a href={c.platform_clip_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-accent underline">
+              Twitch clip <ExternalLink className="size-3" />
+            </a>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
-          <PlatformBadge platform={c.platform} />
-          <Badge tone="live">MP4 ready</Badge>
-          <span>
-            {c.streamer_display_name} · {formatDateTime(c.started_at)} · {c.duration_seconds ?? "?"} s · {c.width}×{c.height} · {mb(c.size_bytes)}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-2 pt-1">
-          {url && (
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-fg-subtle">
+          <dt>Recorded</dt>
+          <dd className="text-right tabular">{formatDateTime(c.started_at)}</dd>
+          <dt>In the stream</dt>
+          <dd className="text-right tabular">{formatOffset(c.stream_offset_sec)}</dd>
+          <dt>Created</dt>
+          <dd className="text-right tabular">{formatRelative(c.created_at)}</dd>
+          <dt>File</dt>
+          <dd className="text-right tabular">
+            {c.width}×{c.height} · {formatBytes(c.size_bytes)}
+          </dd>
+        </dl>
+        {c.error_message && <p className="text-[11px] text-warn">{c.error_message}</p>}
+
+        <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
+          {video && (
             <a
-              href={url}
+              href={video}
               download={clipFileName(c)}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-medium text-white hover:opacity-90"
             >
               <Download className="size-3.5" /> Download MP4
             </a>
+          )}
+          {!editing && (
+            <Button size="sm" variant="ghost" aria-label="Rename clip" icon={<Pencil className="size-3.5" />} onClick={() => setEditing(true)}>
+              Rename
+            </Button>
           )}
           {confirming ? (
             <>
@@ -99,13 +200,12 @@ export function ClipCard({ c, onChanged }: { c: LocalClip; onChanged: () => void
               </Button>
             </>
           ) : (
-            <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} onClick={() => setConfirming(true)}>
-              Delete
-            </Button>
+            <Button size="sm" variant="ghost" aria-label="Delete clip" icon={<Trash2 className="size-3.5" />} onClick={() => setConfirming(true)} />
           )}
         </div>
-        {(rename.error || remove.error) && <p className="text-xs text-danger">{rename.error ?? remove.error}</p>}
+        {(rename.error || remove.error || favorite.error) && <p className="text-xs text-danger">{rename.error ?? remove.error ?? favorite.error}</p>}
       </div>
     </Card>
   );
 }
+

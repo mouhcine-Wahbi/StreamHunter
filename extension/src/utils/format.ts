@@ -43,3 +43,21 @@ export function formatOffset(sec: number | null): string {
   const r = s % 60;
   return `${h}:${m.toString().padStart(2, "0")}:${r.toString().padStart(2, "0")}`;
 }
+
+/** 3725 → "1h 02m", 95 → "1m 35s", 12 → "12s". */
+export function formatSeconds(sec: number | null | undefined): string {
+  if (sec === null || sec === undefined || !Number.isFinite(sec)) return "—";
+  const s = Math.max(0, Math.round(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m`;
+  if (m > 0) return `${m}m ${(s % 60).toString().padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return "—";
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  return `${Math.max(0, Math.round(bytes / 1024))} KB`;
+}

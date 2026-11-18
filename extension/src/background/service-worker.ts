@@ -21,9 +21,27 @@ import { TWITCH_USER_KEY } from "@/platforms/twitch-user";
 import { getSettings } from "@/store/storage";
 import type { LocalHighlight } from "@/local/highlights";
 import type { Streamer } from "@/types/api";
-import { createCaptureManager } from "./capture-manager";
+import { createCaptureManager, defaultCaptureDeps } from "./capture-manager";
+import { updateClip, type LocalClip } from "@/local/clips";
+import { createTwitchClip } from "@/platforms/twitch-clips";
 
-const capture = createCaptureManager();
+/** Optional: also create a native Twitch clip for each clip of a Twitch stream. */
+async function afterClip(clipId: number): Promise<void> {
+  const settings = await getSettings();
+  if (!settings.clips.twitchNativeClips) return;
+  const clip = await db.get<LocalClip>("clips", clipId);
+  if (!clip || clip.platform !== "twitch" || clip.detection_types?.includes("manual")) return;
+  const streamer = await db.get<Streamer>("streamers", clip.streamer_id);
+  if (!streamer || streamer.platform_user_id.startsWith("local:")) return;
+  try {
+    const t = await createTwitchClip(streamer.platform_user_id);
+    await updateClip(clipId, { platform_clip_id: t.id, platform_clip_url: t.url, edit_url: t.editUrl });
+  } catch (e) {
+    await updateClip(clipId, { error_message: `Twitch clip not created: ${e instanceof Error ? e.message : "error"}` });
+  }
+}
+
+const capture = createCaptureManager({ ...defaultCaptureDeps, afterClip });
 
 /** Every stored highlight: clip it if that stream is being captured, then notify. */
 async function onHighlight(h: LocalHighlight, s: Streamer): Promise<void> {
@@ -37,7 +55,13 @@ const chat = createChatManager({
   fetchImpl: (...a) => fetch(...a),
   onHighlight,
 });
-const manager = createMonitoringManager({ afterCheck: () => chat.sync(), onHighlight });
+const manager = createMonitoringManager({
+  afterCheck: async () => {
+    await chat.sync();
+    await capture.sync();
+  },
+  onHighlight,
+});
 
 function log(event: string, data?: Record<string, unknown>) {
   console.info(JSON.stringify({ src: "streamhunter.sw", event, ...data }));
@@ -102,6 +126,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   const settings = changes[STORAGE_KEYS.settings];
   if (settings) {
     const next = sanitizeSettings(settings.newValue);
+    void capture.applySettings(next);
     void getMonitoringState().then((s) => syncAlarms(s.enabled, next.monitoring.intervalMinutes));
   }
 });

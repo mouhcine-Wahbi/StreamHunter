@@ -19,6 +19,7 @@ export const STATUS_META: Record<
     dot: "warn",
     description: "Some streamers couldn't be checked; the reason is shown below.",
   },
+  paused: { label: "Paused", tone: "warn", dot: "warn", description: "Paused: no checks, chat or recording until you resume." },
   offline: {
     label: "Not checking",
     tone: "danger",

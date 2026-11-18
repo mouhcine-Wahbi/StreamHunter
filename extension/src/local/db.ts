@@ -8,11 +8,17 @@
  */
 
 export const DB_NAME = "streamhunter";
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
-export type StoreName = "streamers" | "sessions" | "highlights" | "clips" | "clipBlobs";
+export type StoreName = "streamers" | "sessions" | "highlights" | "clips" | "clipBlobs" | "clipThumbs";
 
-function upgrade(db: IDBDatabase): void {
+function upgrade(db: IDBDatabase, oldVersion: number): void {
+  if (oldVersion < 1) createV1(db);
+  // v2: a JPEG thumbnail per clip (key = clip id → Blob image/jpeg).
+  if (!db.objectStoreNames.contains("clipThumbs")) db.createObjectStore("clipThumbs");
+}
+
+function createV1(db: IDBDatabase): void {
   const streamers = db.createObjectStore("streamers", { keyPath: "id", autoIncrement: true });
   streamers.createIndex("platformUser", ["platform", "platform_user_id"], { unique: true });
   const sessions = db.createObjectStore("sessions", { keyPath: "id", autoIncrement: true });
@@ -29,7 +35,7 @@ let opening: Promise<IDBDatabase> | null = null;
 export function openDb(): Promise<IDBDatabase> {
   opening ??= new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => upgrade(req.result);
+    req.onupgradeneeded = (e) => upgrade(req.result, e.oldVersion);
     req.onsuccess = () => {
       const db = req.result;
       db.onversionchange = () => {
@@ -82,8 +88,8 @@ export const db = {
     const id = (await done((await tx(store, "readwrite")).put(v))) as number;
     return { ...v, id } as T & { id: number };
   },
-  async putBlob(key: number, blob: Blob): Promise<void> {
-    await done((await tx("clipBlobs", "readwrite")).put(blob, key));
+  async putBlob(key: number, blob: Blob, store: "clipBlobs" | "clipThumbs" = "clipBlobs"): Promise<void> {
+    await done((await tx(store, "readwrite")).put(blob, key));
   },
   async delete(store: StoreName, key: IDBValidKey): Promise<void> {
     await done((await tx(store, "readwrite")).delete(key));

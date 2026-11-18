@@ -63,11 +63,12 @@ export async function resolveChannel(clients: Clients, platform: Platform, usern
   return match;
 }
 
-export async function updateStreamer(id: number, patch: Partial<Pick<Streamer, "monitoring_enabled" | "is_favorite">>): Promise<Streamer> {
+export async function updateStreamer(id: number, patch: Partial<Pick<Streamer, "monitoring_enabled" | "is_favorite" | "auto_record">>): Promise<Streamer> {
   const s = await getStreamer(id);
   const next = { ...s, updated_at: now() };
   if (typeof patch.monitoring_enabled === "boolean") next.monitoring_enabled = patch.monitoring_enabled;
   if (typeof patch.is_favorite === "boolean") next.is_favorite = patch.is_favorite;
+  if (typeof patch.auto_record === "boolean") next.auto_record = patch.auto_record;
   return db.put("streamers", next);
 }
 

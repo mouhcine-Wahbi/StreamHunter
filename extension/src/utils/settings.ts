@@ -67,6 +67,9 @@ export function sanitizeSettings(input: unknown): Settings {
   const notif = isRecord(s.notifications) ? s.notifications : {};
   const loc = isRecord(s.locale) ? s.locale : {};
   const priv = isRecord(s.privacy) ? s.privacy : {};
+  const store = isRecord(s.storage) ? s.storage : {};
+  const w = isRecord(det.weights) ? det.weights : {};
+  const weight = (k: keyof Settings["detection"]["weights"]) => clampInt(w[k], LIMITS.weight.min, LIMITS.weight.max, d.detection.weights[k]);
 
   const langs = Array.isArray(det.keywordLanguages)
     ? det.keywordLanguages.filter((c): c is string => typeof c === "string" && LANG_CODES.has(c))
@@ -94,6 +97,8 @@ export function sanitizeSettings(input: unknown): Settings {
       ),
       keywordLanguages: Array.from(new Set(langs)),
       customKeywords: sanitizeKeywords(det.customKeywords),
+      weights: { audio: weight("audio"), chat: weight("chat"), visual: weight("visual"), viewers: weight("viewers"), multi: weight("multi") },
+      clipThreshold: clampInt(det.clipThreshold, 0, 100, d.detection.clipThreshold),
     },
     clips: {
       preRollSeconds: clampInt(clips.preRollSeconds, LIMITS.rollSeconds.min, LIMITS.rollSeconds.max, d.clips.preRollSeconds),
@@ -103,6 +108,13 @@ export function sanitizeSettings(input: unknown): Settings {
         LIMITS.rollSeconds.max,
         d.clips.postRollSeconds,
       ),
+      bufferSeconds: clampInt(clips.bufferSeconds, LIMITS.bufferSeconds.min, LIMITS.bufferSeconds.max, d.clips.bufferSeconds),
+      maxClipSeconds: clampInt(clips.maxClipSeconds, LIMITS.maxClipSeconds.min, LIMITS.maxClipSeconds.max, d.clips.maxClipSeconds),
+      twitchNativeClips: bool(clips.twitchNativeClips, d.clips.twitchNativeClips),
+    },
+    storage: {
+      maxTotalMb: clampInt(store.maxTotalMb, LIMITS.maxTotalMb.min, LIMITS.maxTotalMb.max, d.storage.maxTotalMb),
+      maxAgeDays: clampInt(store.maxAgeDays, LIMITS.maxAgeDays.min, LIMITS.maxAgeDays.max, d.storage.maxAgeDays),
     },
     notifications: {
       onHighlight: bool(notif.onHighlight, d.notifications.onHighlight),

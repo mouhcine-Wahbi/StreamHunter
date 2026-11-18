@@ -50,6 +50,13 @@ export class ChunkRing {
     for (const c of list.splice(0, n)) this.bytes -= c.data.byteLength;
   }
 
+  /** Drop everything (the recorder switched to another streamer). */
+  clear(): void {
+    this.video = [];
+    this.audio = [];
+    this.bytes = 0;
+  }
+
   get oldest(): number | null {
     return this.video[0]?.at ?? null;
   }

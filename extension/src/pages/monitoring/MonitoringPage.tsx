@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiStateView } from "@/components/ApiStateView";
 import { MonitoringCard } from "@/components/monitoring/MonitoringCard";
 import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
+import { PipelineStatus } from "@/components/monitoring/PipelineStatus";
 import { SessionActivity } from "@/components/monitoring/SessionActivity";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useApiQuery } from "@/hooks/useApiQuery";
@@ -80,6 +81,7 @@ export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof u
       />
       <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="space-y-6">
+          <PipelineStatus monitoring={monitoring} />
           <MonitoringCard monitoring={monitoring} />
           <LiveNow refreshKey={refreshKey} />
         </div>

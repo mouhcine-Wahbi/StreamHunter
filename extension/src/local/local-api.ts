@@ -5,7 +5,7 @@ import type { ChannelInfo } from "@/platforms/types";
 import type { CandidateStatus, Page, Platform, Streamer, StreamerSearchResult } from "@/types/api";
 import { getSession, listSessions, syncSessions } from "./sessions";
 import { deleteHighlight, getHighlight, listHighlights, setHighlightStatus, type LocalHighlight } from "./highlights";
-import { deleteClip, listClips, renameClip, type LocalClip } from "./clips";
+import { clipStats, deleteClip, listClips, updateClip, type LocalClip } from "./clips";
 import { ACTIVITY_KEY, type ChatActivity } from "@/background/chat-manager";
 import {
   addStreamer,
@@ -48,8 +48,27 @@ export function filterHighlights(all: LocalHighlight[], q: URLSearchParams): Loc
   return out;
 }
 
-function sortClips(all: LocalClip[], q: URLSearchParams): LocalClip[] {
-  return q.get("sort") === "score" ? [...all].sort((a, b) => b.score - a.score) : all;
+/** Duration buckets for the clip filters. */
+export const DURATION_BUCKETS = { short: [0, 30], medium: [30, 60], long: [60, Infinity] } as const;
+
+/**
+ * Clip filters: platform, streamer_id, category, duration (short|medium|long), type (a detection
+ * type), favorite, min_score; sort=score (highest first, default "recent").
+ */
+export function filterClips(all: LocalClip[], q: URLSearchParams): LocalClip[] {
+  const minScore = Number(q.get("min_score") ?? 0) || 0;
+  const bucket = DURATION_BUCKETS[(q.get("duration") ?? "") as keyof typeof DURATION_BUCKETS];
+  const out = all.filter(
+    (c) =>
+      c.score >= minScore &&
+      (!q.get("platform") || c.platform === q.get("platform")) &&
+      (!q.get("streamer_id") || c.streamer_id === Number(q.get("streamer_id"))) &&
+      (!q.get("category") || (c.category ?? "") === q.get("category")) &&
+      (!bucket || ((c.duration_seconds ?? 0) >= bucket[0] && (c.duration_seconds ?? 0) < bucket[1])) &&
+      (!q.get("type") || c.detection_types.includes(q.get("type") as LocalClip["detection_types"][number])) &&
+      (q.get("favorite") !== "true" || c.favorite),
+  );
+  return q.get("sort") === "score" ? [...out].sort((a, b) => b.score - a.score || b.created_at.localeCompare(a.created_at)) : out;
 }
 
 function platformParam(v: string | null): Platform {
@@ -102,8 +121,12 @@ export class LocalApi extends ApiClient {
       ["POST", /^\/api\/v1\/highlights\/(\d+)\/reject$/, (m) => setHighlightStatus(Number(m[1]), "rejected")],
       ["PATCH", /^\/api\/v1\/highlights\/(\d+)$/, (m, _q, b) => setHighlightStatus(Number(m[1]), ((b ?? {}) as { status: CandidateStatus }).status)],
       ["DELETE", /^\/api\/v1\/highlights\/(\d+)$/, async (m) => void (await deleteHighlight(Number(m[1])))],
-      ["GET", /^\/api\/v1\/clips$/, async (_m, q) => page(sortClips(await listClips(), q), q)],
-      ["PATCH", /^\/api\/v1\/clips\/(\d+)$/, (m, _q, b) => renameClip(Number(m[1]), String(((b ?? {}) as { title?: unknown }).title ?? ""))],
+      ["GET", /^\/api\/v1\/clips$/, async (_m, q) => page(filterClips(await listClips(), q), q)],
+      ["GET", /^\/api\/v1\/clips\/stats$/, async () => this.stats()],
+      ["PATCH", /^\/api\/v1\/clips\/(\d+)$/, (m, _q, b) => {
+        const body = (b ?? {}) as { title?: unknown; favorite?: unknown };
+        return updateClip(Number(m[1]), { title: body.title, favorite: body.favorite });
+      }],
       ["DELETE", /^\/api\/v1\/clips\/(\d+)$/, async (m) => void (await deleteClip(Number(m[1])))],
     ];
   }
@@ -149,6 +172,25 @@ export class LocalApi extends ApiClient {
     const a = all[String(session.streamer_id)];
     const base = a ?? { chat_state: "connecting", chat_reason: null };
     return { session_id: session.id, streamer_id: session.streamer_id, ...base, ...(session.status !== "active" ? { chat_state: "not_monitored" } : {}) };
+  }
+
+  /** Overview totals: clips, their size and length, recording time, browser storage use. */
+  private async stats() {
+    const [clips, rec, estimate] = await Promise.all([
+      clipStats(),
+      chrome.storage.local.get("sh.stats"),
+      navigator.storage?.estimate?.().catch(() => null) ?? Promise.resolve(null),
+    ]);
+    const recorded = (rec["sh.stats"] as { recordedSeconds?: number } | undefined)?.recordedSeconds ?? 0;
+    return {
+      clips: clips.count,
+      favorites: clips.favorites,
+      clip_bytes: clips.totalBytes,
+      clip_seconds: clips.totalSeconds,
+      recorded_seconds: recorded,
+      storage_used_bytes: estimate?.usage ?? null,
+      storage_quota_bytes: estimate?.quota ?? null,
+    };
   }
 
   private async capabilities() {

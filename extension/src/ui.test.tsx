@@ -12,7 +12,7 @@ import { getCredentials, setCredentials } from "@/platforms/credentials";
 import { LocalApi } from "@/local/local-api";
 import { db } from "@/local/db";
 import { createHighlight, listHighlights } from "@/local/highlights";
-import { saveClip } from "@/local/clips";
+import { listClips, saveClip } from "@/local/clips";
 import { ACTIVITY_KEY, KICK_CHAT_REASON } from "@/background/chat-manager";
 import { CAPTURE_KEY, INITIAL_CAPTURE_STATE } from "@/types/capture";
 import type { Streamer } from "@/types/api";
@@ -52,9 +52,9 @@ describe("popup capture (capture mode)", () => {
   function workerWithCapture(onStart: (msg: { tabId: number; url: string }) => void) {
     chrome.runtime.onMessage.addListener((msg: unknown, _sender, respond) => {
       const m = msg as { type: string; tabId: number; url: string; seconds?: number };
-      const capturing = { ...INITIAL_CAPTURE_STATE, status: "capturing", tabId: 42, platform: "twitch", channel: "streamerone", streamerId: 1,
+      const capturing = { ...INITIAL_CAPTURE_STATE, status: "capturing", recording: true, tabId: 42, platform: "twitch", channel: "streamerone", streamerId: 1,
         startedAt: "2026-11-17T12:00:00Z", bufferedSeconds: 45, levelDb: -21, message: "Buffering the last 2 minutes. Detected moments become clips." };
-      if (m.type === "capture/start") {
+      if (m.type === "capture/start" || m.type === "capture/arm") {
         onStart(m);
         void chrome.storage.local.set({ [CAPTURE_KEY]: capturing }).then(() => respond({ ok: true, data: capturing }));
         return true;
@@ -79,22 +79,33 @@ describe("popup capture (capture mode)", () => {
     const starts: unknown[] = [];
     workerWithCapture((m) => starts.push(m));
     render(<Popup />);
-    await userEvent.click(await screen.findByRole("button", { name: "Capture this stream (streamerone)" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Only capture this stream (streamerone)" }));
     expect(starts).toEqual([{ type: "capture/start", tabId: 42, url: "https://www.twitch.tv/StreamerOne" }]);
     expect(await screen.findByText("Recording")).toBeInTheDocument();
-    expect(screen.getByText(/45 s buffered · -21 dB/)).toBeInTheDocument();
+    expect(screen.getByText(/45 s buffered/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Save last 30 s" }));
     expect(await screen.findByText("Saving the last 30 s…")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Stop capture" }));
-    expect(await screen.findByRole("button", { name: "Capture this stream (streamerone)" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Only capture this stream (streamerone)" })).toBeInTheDocument();
+  });
+
+  it("arms any Twitch/Kick tab as the automatic recorder", async () => {
+    mockFetch(() => null);
+    fakeChrome.internals.setActiveTab({ id: 42, url: "https://www.twitch.tv/directory" });
+    const starts: unknown[] = [];
+    workerWithCapture((m) => starts.push(m));
+    render(<Popup />);
+    await userEvent.click(await screen.findByRole("button", { name: "Use this tab as the recorder" }));
+    expect(starts).toEqual([{ type: "capture/arm", tabId: 42 }]);
+    expect(screen.queryByRole("button", { name: /Only capture this stream/ })).not.toBeInTheDocument(); // a directory page is not a channel
   });
 
   it("explains what to do on other pages", async () => {
     mockFetch(() => null);
     fakeChrome.internals.setActiveTab({ id: 1, url: "https://example.com/" });
     render(<Popup />);
-    expect(await screen.findByText(/Open a Twitch or Kick channel in this tab to capture it/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Capture this stream/ })).not.toBeInTheDocument();
+    expect(await screen.findByText(/Open twitch.tv or kick.com in this tab to record from it/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /recorder|capture this stream/i })).not.toBeInTheDocument();
   });
 });
 
@@ -275,6 +286,8 @@ describe("monitoring, highlights and clips (local data)", () => {
     installWorker();
     window.location.hash = "/highlights";
     render(<App />);
+    expect(await screen.findByText("No clips yet")).toBeInTheDocument(); // a provisional moment is never shown as a clip
+    await userEvent.click(screen.getByRole("button", { name: /Show/ }));
     expect(await screen.findByText("'KEKW' used by 40 chatters (85% of chat)")).toBeInTheDocument();
     expect(screen.getByText("provisional · no video")).toBeInTheDocument();
     expect(screen.getByText("from chat")).toBeInTheDocument();
@@ -291,22 +304,27 @@ describe("monitoring, highlights and clips (local data)", () => {
     expect((await listHighlights())[0]!.status).toBe("pending_review");
   });
 
-  it("ranks highlights by score and filters to those with a clip", async () => {
+  it("Top Highlights ranks clips by score and filters them by detection type, platform and duration", async () => {
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:clip", revokeObjectURL: () => undefined }));
     await seedSession();
-    await seedHighlight(70, ["lower"]);
+    const low = await seedHighlight(70, ["lower"]);
     const top = await seedHighlight(95, ["higher"]);
-    await saveClip({ candidateId: top.id, sessionId: 1, streamerId: 1, streamerName: "Alpha", platform: "twitch", title: "Alpha · higher",
-      startedAt: T - 20_000, durationSec: 30, width: 1280, height: 720, score: 95, blob: new Blob(["mp4"], { type: "video/mp4" }) });
+    const base = { sessionId: 1, streamerId: 1, streamerName: "Alpha", platform: "twitch" as const, startedAt: T - 20_000, width: 1280, height: 720, blob: new Blob(["mp4"], { type: "video/mp4" }), category: "Chess" };
+    await saveClip({ ...base, candidateId: low.id, title: "Alpha · lower", durationSec: 70, score: 55, reasons: ["Fast on-screen action"], detectionTypes: ["visual", "viewers"] });
+    await saveClip({ ...base, candidateId: top.id, title: "Alpha · higher", durationSec: 40, score: 88, reasons: ["Laughter-like rhythmic bursts", "Chat is laughing"], detectionTypes: ["audio", "chat"] });
     mockFetch(() => null);
     installWorker();
     window.location.hash = "/highlights";
     render(<App />);
-    const rows = await screen.findAllByText(/^(higher|lower)$/);
-    expect(rows.map((r) => r.textContent)).toEqual(["higher", "lower"]);
-    expect(screen.getByText("clip ready")).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("Video"), "true");
-    await waitFor(() => expect(screen.queryByText("lower")).not.toBeInTheDocument());
-    expect(screen.getByText("higher")).toBeInTheDocument();
+    const titles = await screen.findAllByText(/^Alpha · (higher|lower)$/);
+    expect(titles.map((r) => r.textContent)).toEqual(["Alpha · higher", "Alpha · lower"]);
+    expect(screen.getByText("#1")).toBeInTheDocument();
+    expect(screen.getByText("· Laughter-like rhythmic bursts")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Detection type"), "visual");
+    await waitFor(() => expect(screen.queryByText("Alpha · higher")).not.toBeInTheDocument());
+    expect(screen.getByText("Alpha · lower")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Duration"), "short");
+    expect(await screen.findByText("No clips match these filters")).toBeInTheDocument();
   });
 
   it("clip library: preview, download as MP4, rename and delete with confirmation", async () => {
@@ -320,7 +338,15 @@ describe("monitoring, highlights and clips (local data)", () => {
     window.location.hash = "/clips";
     render(<App />);
     expect(await screen.findByText("Alpha · KEKW wave")).toBeInTheDocument();
-    expect(screen.getByText(/31.5 s · 1280×720 · 2.0 MB/)).toBeInTheDocument();
+    expect(screen.getByText("31.5 s")).toBeInTheDocument();
+    expect(screen.getByText("1280×720 · 2.0 MB")).toBeInTheDocument();
+    expect(screen.getByText("Alpha")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Mark as favourite" }));
+    expect(await screen.findByRole("button", { name: "Remove from favourites" })).toBeInTheDocument();
+    expect((await listClips())[0]!.favorite).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Preview Alpha · KEKW wave" }));
+    expect(screen.getByLabelText("Preview of Alpha · KEKW wave")).toHaveAttribute("src", "blob:clip-1");
     const download = await screen.findByRole("link", { name: /Download MP4/ });
     expect(download).toHaveAttribute("href", "blob:clip-1");
     expect(download.getAttribute("download")).toMatch(/^Alpha_2026-11-17-11-59-40_1\.mp4$/);
@@ -331,7 +357,7 @@ describe("monitoring, highlights and clips (local data)", () => {
     await userEvent.type(title, "Best laugh{Enter}");
     expect(await screen.findByText("Best laugh")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete clip" }));
     await userEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
     expect(await screen.findByText("No clips yet")).toBeInTheDocument();
     expect(await db.get("clipBlobs", 1)).toBeUndefined();

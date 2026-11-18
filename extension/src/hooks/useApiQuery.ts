@@ -4,7 +4,7 @@ import { LocalApi } from "@/local/local-api";
 
 const shared = new LocalApi();
 
-/** StreamHunter's local API (IndexedDB + Twitch/Kick). One instance for the whole page. */
+/** StreamHunter's local API (IndexedDB + Twitch/Kick/YouTube). One instance for the whole page. */
 export function useApiClient(): ApiClient {
   return shared;
 }

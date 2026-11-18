@@ -6,12 +6,12 @@ export const STATUS_META: Record<
   { label: string; tone: BadgeTone; dot: "live" | "warn" | "danger" | "neutral" | "accent"; description: string }
 > = {
   stopped: { label: "Stopped", tone: "neutral", dot: "neutral", description: "Monitoring is off." },
-  starting: { label: "Starting", tone: "accent", dot: "accent", description: "Checking your streamers on Twitch and Kick…" },
+  starting: { label: "Starting", tone: "accent", dot: "accent", description: "Checking your streamers on Twitch, Kick and YouTube…" },
   active: {
     label: "Active",
     tone: "live",
     dot: "live",
-    description: "Your monitoring list is checked on Twitch and Kick while Chrome is open. No stream has to be open.",
+    description: "Your monitoring list is checked on Twitch, Kick and YouTube while Chrome is open. No stream has to be open.",
   },
   degraded: {
     label: "Degraded",
@@ -24,7 +24,7 @@ export const STATUS_META: Record<
     label: "Not checking",
     tone: "danger",
     dot: "danger",
-    description: "Twitch/Kick couldn't be checked (setup, network or rate limit). Retrying with backoff.",
+    description: "Twitch/Kick/YouTube couldn't be checked (setup, network or rate limit). Retrying with backoff.",
   },
 };
 

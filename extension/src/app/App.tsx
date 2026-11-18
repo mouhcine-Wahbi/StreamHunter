@@ -9,6 +9,7 @@ import { MonitoringPage } from "@/pages/monitoring/MonitoringPage";
 import { HighlightsPage } from "@/pages/highlights/HighlightsPage";
 import { ClipsPage } from "@/pages/clips/ClipsPage";
 import { SettingsPage } from "@/pages/settings/SettingsPage";
+import { HealthPage } from "@/pages/health/HealthPage";
 import { NAV, ROUTES, type Route } from "./routes";
 
 export function App() {
@@ -39,6 +40,9 @@ export function App() {
       break;
     case "/clips":
       page = <ClipsPage />;
+      break;
+    case "/health":
+      page = <HealthPage monitoring={monitoring} />;
       break;
     case "/settings":
       page = <SettingsPage />;

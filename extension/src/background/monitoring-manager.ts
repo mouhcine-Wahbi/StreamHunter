@@ -1,3 +1,4 @@
+import { PLATFORM_LABEL, type Platform } from "@/types/api";
 import { getMonitoringState, getSettings, patchMonitoringState } from "@/store/storage";
 import type { MonitoringState } from "@/types/monitoring";
 import { backoffDelayMs } from "@/utils/backoff";
@@ -12,7 +13,7 @@ import type { MonitoringSession, Streamer } from "@/types/api";
 
 export interface MonitoringDeps {
   now: () => Date;
-  /** One live-status check of the monitoring list against Twitch/Kick. */
+  /** One live-status check of the monitoring list against Twitch/Kick/YouTube. */
   refresh: (at: Date) => Promise<RefreshResult>;
   /** After every check: chat connection sync (Twitch EventSub). */
   afterCheck?: () => Promise<void>;
@@ -39,7 +40,7 @@ function liveNotification(s: MonitoringSession, streamer: Streamer | undefined):
 
 /**
  * Drives background monitoring, entirely inside the extension. Each alarm runs one batched
- * live-status check of the monitoring list against Twitch and Kick (no video, no open tabs),
+ * live-status check of the monitoring list against Twitch, Kick and YouTube (no video, no open tabs),
  * opens/ends sessions on live/offline transitions and notifies. All state is persisted after
  * every step, so a suspended/restarted service worker continues where it left off.
  */
@@ -53,8 +54,8 @@ export function createMonitoringManager(overrides: Partial<MonitoringDeps> = {})
     const at = deps.now();
     try {
       const r = await deps.refresh(at);
-      const problems = Object.entries(r.unavailable).map(([p, msg]) => `${p === "twitch" ? "Twitch" : "Kick"}: ${msg}`);
-      return patchMonitoringState({ lastCheckAt: at.toISOString(), liveCount: r.live, lastError: problems.length ? problems.join(" ") : null });
+      const problems = Object.entries(r.unavailable).map(([p, msg]) => `${PLATFORM_LABEL[p as Platform] ?? p}: ${msg}`);
+      return patchMonitoringState({ lastCheckAt: at.toISOString(), liveCount: r.live, lastError: problems.length ? problems.join(" ") : null, platformErrors: r.unavailable });
     } catch (err) {
       return patchMonitoringState({ lastCheckAt: at.toISOString(), lastError: err instanceof Error ? err.message : "Unexpected error" });
     }
@@ -73,7 +74,7 @@ export function createMonitoringManager(overrides: Partial<MonitoringDeps> = {})
     try {
       const r = await deps.refresh(now);
       const sync = await syncSessions(new Set(r.checked_ids), now);
-      const problems = Object.entries(r.unavailable).map(([p, msg]) => `${p === "twitch" ? "Twitch" : "Kick"}: ${msg}`);
+      const problems = Object.entries(r.unavailable).map(([p, msg]) => `${PLATFORM_LABEL[p as Platform] ?? p}: ${msg}`);
       const allFailed = r.checked === 0 && problems.length > 0;
       if (sync.opened.length > 0) {
         const streamers = await db.all<Streamer>("streamers");
@@ -110,6 +111,7 @@ export function createMonitoringManager(overrides: Partial<MonitoringDeps> = {})
         liveCount: r.live,
         activeSessions: sync.active,
         lastError: problems.length ? problems.join(" ") : null,
+        platformErrors: r.unavailable,
         consecutiveFailures: failures,
         nextAttemptAt: wait > 0 ? new Date(now.getTime() + wait).toISOString() : null,
       });

@@ -48,7 +48,7 @@ describe("capture manager (worker side)", () => {
     fakePlatforms({});
     const { d } = deps();
     const m = createCaptureManager(d);
-    await expect(m.start(1, "https://example.com")).rejects.toThrow("Open a Twitch or Kick channel");
+    await expect(m.start(1, "https://example.com")).rejects.toThrow("Open a Twitch, Kick or YouTube channel");
     await m.start(1, "https://kick.com/somebody");
     expect(await db.all<Streamer>("streamers")).toMatchObject([{ platform: "kick", username: "somebody", platform_user_id: "local:somebody", monitoring_enabled: false }]);
   });

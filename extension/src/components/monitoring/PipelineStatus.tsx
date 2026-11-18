@@ -33,7 +33,7 @@ interface Stage {
   detail: string;
 }
 
-const ARM_HINT = "Open a Twitch or Kick tab, click the StreamHunter icon and choose Use this tab as a recorder.";
+const ARM_HINT = "Open a Twitch, Kick or YouTube tab, click the StreamHunter icon and choose Use this tab as a recorder.";
 
 /**
  * Honest state of the video stage across all slots: never "recording" unless frames are being

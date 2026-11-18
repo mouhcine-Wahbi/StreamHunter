@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Activity, Clapperboard, Film, HardDrive, Plug, Sparkles, Timer, Users } from "lucide-react";
+import { Activity, Clapperboard, Film, HardDrive, ListOrdered, Plug, Sparkles, Timer, Users, Video } from "lucide-react";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -9,6 +9,10 @@ import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
 import { STATUS_META } from "@/components/monitoring/MonitoringStatusPill";
 import { PipelineStatus, type ClipStats } from "@/components/monitoring/PipelineStatus";
 import { SystemCard } from "@/components/monitoring/SystemCard";
+import { SchedulerCard } from "@/components/monitoring/SchedulerCard";
+import { useStorageValue } from "@/hooks/useStorageValue";
+import type { SchedulerSnapshot } from "@/background/capture-manager";
+import { formatRelative } from "@/utils/format";
 import { useCapture } from "@/hooks/useCapture";
 import { useSettings } from "@/hooks/useSettings";
 import { ClipCard } from "@/pages/clips/ClipCard";
@@ -20,7 +24,7 @@ import type { useMonitoring } from "@/hooks/useMonitoring";
 import type { Page, Platform, Streamer } from "@/types/api";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-/** Whether Twitch and Kick are set up (the editor's own app credentials). */
+/** Whether Twitch, Kick and YouTube are set up (the editor's own app credentials). */
 function PlatformsCard() {
   const caps = useApiQuery<{ platform: Platform; configured: boolean }[]>("/api/v1/platforms/capabilities");
   return (
@@ -69,6 +73,7 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
   const s = stats.data;
   const limit = settings.settings.storage.maxTotalMb * 1_048_576;
   const status = STATUS_META[monitoring.state.status];
+  const snap = useStorageValue<SchedulerSnapshot>("sh.scheduler");
 
   return (
     <>
@@ -78,14 +83,21 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
         actions={<MonitoringToggle monitoring={monitoring} />}
       />
 
-      <section aria-label="Statistics" className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-6">
-        <StatTile label="Monitoring" icon={<Activity className="size-4" />} value={status.label} sub={recordingNames.length ? `Recording ${recordingNames.join(", ")}` : "Not recording"} />
+      <section aria-label="Statistics" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Monitoring" icon={<Activity className="size-4" />} value={status.label} sub={snap ? `Scheduled ${formatRelative(snap.at)}` : "Scheduler not run yet"} />
         <StatTile
-          label="Monitored streamers"
+          label="Tracked streamers"
           icon={<Users className="size-4" />}
           value={streamers.data ? monitored.length : null}
-          sub={`${monitored.filter((x) => x.auto_record).length} with Auto-record`}
+          sub={`${monitored.filter((x) => x.is_live).length} live now`}
         />
+        <StatTile
+          label="Recording"
+          icon={<Video className="size-4" />}
+          value={`${recordingNames.length} / ${settings.settings.recording.maxStreams}`}
+          sub={recordingNames.length ? recordingNames.join(", ") : "Not recording"}
+        />
+        <StatTile label="Queued" icon={<ListOrdered className="size-4" />} value={snap ? snap.queue.filter((q) => q.reason === "waiting_for_slot").length : null} sub="Live, waiting for a slot" />
         <StatTile label="Clips generated" icon={<Clapperboard className="size-4" />} value={s?.clips ?? null} sub={s ? `${s.favorites} favourite${s.favorites === 1 ? "" : "s"}` : ""} />
         <StatTile label="Recording time" icon={<Timer className="size-4" />} value={s ? formatSeconds(s.recorded_seconds) : null} sub="Total video recorded" />
         <StatTile label="Clip footage" icon={<Film className="size-4" />} value={s ? formatSeconds(s.clip_seconds) : null} sub="Total length of saved clips" />
@@ -132,6 +144,7 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
         </div>
 
         <div className="space-y-6">
+          <SchedulerCard monitoring={monitoring} compact />
           <PipelineStatus monitoring={monitoring} />
           <SystemCard />
           <MonitoringCard monitoring={monitoring} />

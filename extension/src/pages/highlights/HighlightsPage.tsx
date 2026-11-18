@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ChevronDown, Sparkles, Trophy } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
 import { Select } from "@/components/ui/Field";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiStateView } from "@/components/ApiStateView";
@@ -12,7 +13,8 @@ import type { HighlightCandidate, Page, Platform } from "@/types/api";
 import { ClipGrid } from "@/pages/clips/ClipsPage";
 import { DETECTION_LABEL } from "@/pages/clips/ClipCard";
 
-type Sort = "score" | "recent";
+type Sort = "score" | "recent" | "oldest";
+type Show = "all" | "favorites" | "recent" | "high";
 type Duration = "all" | "short" | "medium" | "long";
 
 /** Moments found from chat or viewers while nothing was recorded: no video, kept for reference. */
@@ -52,6 +54,31 @@ function ProvisionalMoments() {
   );
 }
 
+/** Automatic clips still being generated, and the ones that failed (never mixed with ready clips). */
+function ClipsInProgress() {
+  const query = useApiQuery<Page<HighlightCandidate & { clip_status?: string; clip_error?: string | null }>>("/api/v1/highlights?limit=50&clip_status=generating,failed");
+  const items = query.data?.items ?? [];
+  if (items.length === 0) return null;
+  return (
+    <Card className="mb-6">
+      <CardHeader icon={<Sparkles className="size-4" />} title="In progress and failed" description="Detected moments whose clip is being generated, or could not be saved. These have no downloadable video." />
+      <CardBody className="pt-0">
+        <ul className="divide-y divide-ink-700/70 text-xs">
+          {items.map((h) => (
+            <li key={h.id} className="flex flex-wrap items-center gap-2 py-2">
+              <Badge tone={h.clip_status === "failed" ? "danger" : "accent"}>{h.clip_status === "failed" ? "Failed" : "Generating"}</Badge>
+              <span className="font-medium text-fg">{h.streamer_display_name}</span>
+              <span className="text-fg-muted">{h.reasons[0]}</span>
+              <span className="ml-auto text-fg-subtle tabular">score {h.score}</span>
+              {h.clip_status === "failed" && h.clip_error && <p className="w-full text-danger">{h.clip_error}</p>}
+            </li>
+          ))}
+        </ul>
+      </CardBody>
+    </Card>
+  );
+}
+
 /** Top Highlights: every recorded clip, ranked by score, with filters. */
 export function HighlightsPage() {
   const [sort, setSort] = useState<Sort>("score");
@@ -60,6 +87,7 @@ export function HighlightsPage() {
   const [category, setCategory] = useState("all");
   const [duration, setDuration] = useState<Duration>("all");
   const [type, setType] = useState<DetectionType | "all">("all");
+  const [show, setShow] = useState<Show>("all");
 
   // All clips once, for the filter choices.
   const all = useApiQuery<Page<LocalClip>>("/api/v1/clips?limit=500");
@@ -78,8 +106,12 @@ export function HighlightsPage() {
     if (category !== "all") p.set("category", category);
     if (duration !== "all") p.set("duration", duration);
     if (type !== "all") p.set("type", type);
+    if (sort === "oldest") p.set("sort", "oldest");
+    if (show === "favorites") p.set("favorite", "true");
+    if (show === "recent") p.set("since", new Date(Date.now() - 24 * 3600_000).toISOString());
+    if (show === "high") p.set("min_score", "70");
     return `/api/v1/clips?${p.toString()}`;
-  }, [sort, streamer, platform, category, duration, type]);
+  }, [sort, streamer, platform, category, duration, type, show]);
   const query = useApiQuery<Page<LocalClip>>(path);
   const reload = () => {
     query.reload();
@@ -92,10 +124,17 @@ export function HighlightsPage() {
         title="Top Highlights"
         description="Recorded clips, ranked by their highlight score. Each score combines the signals that fired together: audio, chat, picture and viewers."
       />
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6" role="group" aria-label="Filters">
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7" role="group" aria-label="Filters">
         <Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
           <option value="score">Highest score</option>
-          <option value="recent">Most recent</option>
+          <option value="recent">Newest</option>
+          <option value="oldest">Oldest</option>
+        </Select>
+        <Select aria-label="Show" value={show} onChange={(e) => setShow(e.target.value as Show)}>
+          <option value="all">All clips</option>
+          <option value="high">High score (70+)</option>
+          <option value="recent">Last 24 hours</option>
+          <option value="favorites">Favourites</option>
         </Select>
         <Select aria-label="Streamer" value={streamer} onChange={(e) => setStreamer(e.target.value)}>
           <option value="all">All streamers</option>
@@ -109,6 +148,7 @@ export function HighlightsPage() {
           <option value="all">All platforms</option>
           <option value="twitch">Twitch</option>
           <option value="kick">Kick</option>
+          <option value="youtube">YouTube</option>
         </Select>
         <Select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
           <option value="all">All categories</option>
@@ -133,6 +173,7 @@ export function HighlightsPage() {
           ))}
         </Select>
       </div>
+      <ClipsInProgress />
       <ApiStateView query={query} feature="clips">
         {(page) =>
           page.items.length === 0 ? (

@@ -66,9 +66,12 @@ export function filterClips(all: LocalClip[], q: URLSearchParams): LocalClip[] {
       (!q.get("category") || (c.category ?? "") === q.get("category")) &&
       (!bucket || ((c.duration_seconds ?? 0) >= bucket[0] && (c.duration_seconds ?? 0) < bucket[1])) &&
       (!q.get("type") || c.detection_types.includes(q.get("type") as LocalClip["detection_types"][number])) &&
-      (q.get("favorite") !== "true" || c.favorite),
+      (q.get("favorite") !== "true" || c.favorite) &&
+      (!q.get("since") || c.created_at >= q.get("since")!),
   );
-  return q.get("sort") === "score" ? [...out].sort((a, b) => b.score - a.score || b.created_at.localeCompare(a.created_at)) : out;
+  if (q.get("sort") === "score") return [...out].sort((a, b) => b.score - a.score || b.created_at.localeCompare(a.created_at));
+  if (q.get("sort") === "oldest") return [...out].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return out;
 }
 
 function platformParam(v: string | null): Platform {
@@ -91,7 +94,7 @@ function searchResult(c: ChannelInfo): StreamerSearchResult & { viewer_count: nu
 }
 
 /**
- * StreamHunter's API, answered inside the extension (IndexedDB + the Twitch/Kick APIs). There is no
+ * StreamHunter's API, answered inside the extension (IndexedDB + the Twitch/Kick/YouTube APIs). There is no
  * server: the `/api/v1/...` paths are only an internal address scheme the pages use.
  */
 export class LocalApi extends ApiClient {
@@ -102,7 +105,13 @@ export class LocalApi extends ApiClient {
     this.routes = [
       ["GET", /^\/api\/v1\/streamers\/search$/, (_m, q) => this.search(q)],
       ["GET", /^\/api\/v1\/discover\/live$/, (_m, q) => this.discoverLive(q)],
-      ["GET", /^\/api\/v1\/streamers$/, async (_m, q) => page(await listStreamers(), q)],
+      ["GET", /^\/api\/v1\/streamers$/, async (_m, q) => {
+        // Each streamer with how many clips StreamHunter made of them.
+        const [list, clips] = await Promise.all([listStreamers(), listClips()]);
+        const count = new Map<number, number>();
+        for (const c of clips) count.set(c.streamer_id, (count.get(c.streamer_id) ?? 0) + 1);
+        return page(list.map((s) => ({ ...s, clip_count: count.get(s.id) ?? 0 })), q);
+      }],
       ["POST", /^\/api\/v1\/streamers$/, (_m, _q, b) => this.add(b)],
       ["PATCH", /^\/api\/v1\/streamers\/(\d+)$/, (m, _q, b) => updateStreamer(Number(m[1]), (b ?? {}) as Partial<Streamer>)],
       ["DELETE", /^\/api\/v1\/streamers\/(\d+)$/, async (m) => void (await removeStreamer(Number(m[1])))],

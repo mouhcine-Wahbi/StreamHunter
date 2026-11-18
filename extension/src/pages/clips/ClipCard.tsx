@@ -20,6 +20,43 @@ export const DETECTION_LABEL: Record<DetectionType, string> = {
   manual: "Saved by you",
 };
 
+const PART_LABEL = { audio: "Audio", chat: "Chat", visual: "Visual", viewers: "Viewers", multi: "Several signals together" } as const;
+
+/** How a clip's score was put together (points per signal, from Settings → Automatic clipping). */
+export function ScoreWhy({ c }: { c: LocalClip }) {
+  const parts = c.score_parts;
+  return (
+    <div className="rounded-lg border border-ink-700 bg-ink-850 p-2 text-[11px] text-fg-muted" aria-label="Why this score">
+      {c.detection_types.includes("manual") ? (
+        <p>Saved by you with Save last N s (fixed score 70).</p>
+      ) : parts ? (
+        <>
+          <ul className="space-y-0.5">
+            {(Object.keys(PART_LABEL) as (keyof typeof PART_LABEL)[])
+              .filter((k) => parts[k] > 0)
+              .map((k) => (
+                <li key={k} className="flex justify-between">
+                  <span>{PART_LABEL[k]}</span>
+                  <span className="tabular text-fg">+{parts[k]}</span>
+                </li>
+              ))}
+            <li className="flex justify-between border-t border-ink-700 pt-0.5 font-medium text-fg">
+              <span>Score</span>
+              <span className="tabular">{c.score}</span>
+            </li>
+          </ul>
+          <p className="mt-1">
+            Confidence {Math.round((c.confidence ?? 0) * 100)}% ({c.detection_types.length} independent signal{c.detection_types.length === 1 ? "" : "s"}) · event
+            lasted {c.event_seconds ?? "?"} s. Each signal adds up to its points at full strength; stronger reactions against the stream's own normal score closer to the maximum.
+          </p>
+        </>
+      ) : (
+        <p>Score {c.score} from: {c.detection_types.join(", ") || "unknown"}. (Recorded before score breakdowns were stored.)</p>
+      )}
+    </div>
+  );
+}
+
 function useObjectUrl(load: () => Promise<Blob | undefined>, key: number): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -52,6 +89,7 @@ export function ClipCard({ c, onChanged, rank }: { c: LocalClip; onChanged: () =
   const [title, setTitle] = useState(c.title ?? "");
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [why, setWhy] = useState(false);
 
   const rename = useAction(async (e: FormEvent) => {
     e.preventDefault();
@@ -173,6 +211,10 @@ export function ClipCard({ c, onChanged, rank }: { c: LocalClip; onChanged: () =
             {c.width}×{c.height} · {formatBytes(c.size_bytes)}
           </dd>
         </dl>
+        <button type="button" className="self-start text-[11px] text-accent underline" aria-expanded={why} onClick={() => setWhy((v) => !v)}>
+          {why ? "Hide why" : "Why this score?"}
+        </button>
+        {why && <ScoreWhy c={c} />}
         {c.error_message && <p className="text-[11px] text-warn">{c.error_message}</p>}
 
         <div className="mt-auto flex flex-wrap gap-1.5 pt-1">

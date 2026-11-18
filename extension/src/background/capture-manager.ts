@@ -20,7 +20,7 @@ const OFFSCREEN_URL = "offscreen.html";
 export const BUFFER_SECONDS = 120;
 
 export const REARM_MESSAGE =
-  "Video capture is inactive. Open a Twitch or Kick tab, click the StreamHunter icon and choose Use this tab as a recorder.";
+  "Video capture is inactive. Open a Twitch, Kick or YouTube tab, click the StreamHunter icon and choose Use this tab as a recorder.";
 
 export interface CaptureDeps {
   now: () => number;
@@ -215,7 +215,7 @@ export interface SchedulerSnapshot {
   recording: { slot: number; streamerId: number; name: string; platform: string; total: number | null; since: string | null }[];
   decisions: { slot: number; action: string; detail: string }[];
   queue: { streamerId: number; name: string; total: number | null; reason: string; detail: string }[];
-  priorities: { streamerId: number; name: string; platform: string; total: number; parts: Record<string, number>; explain: string[] }[];
+  priorities: { streamerId: number; name: string; platform: string; username: string; platformUserId: string; total: number; parts: Record<string, number>; explain: string[] }[];
   tracked: number;
   live: number;
   lastRecordingAt: string | null;
@@ -270,7 +270,10 @@ async function saveSchedule(p: ReturnType<typeof plan>, streamers: SchedStreamer
       }),
     decisions: p.decisions.map((d) => ({ slot: d.slot, action: d.action, detail: d.detail })),
     queue: p.queue,
-    priorities: p.priorities.map((x) => ({ ...x, name: byId.get(x.streamerId)?.display_name ?? "?", platform: byId.get(x.streamerId)?.platform ?? "twitch", parts: { ...x.parts } })),
+    priorities: p.priorities.map((x) => {
+      const s = byId.get(x.streamerId);
+      return { ...x, name: s?.display_name ?? "?", platform: s?.platform ?? "twitch", username: s?.username ?? "", platformUserId: s?.platform_user_id ?? "", parts: { ...x.parts } };
+    }),
     tracked: streamers.filter((s) => s.monitoring_enabled).length,
     live: streamers.filter((s) => s.monitoring_enabled && s.is_live).length,
     lastRecordingAt: recordingNow.length ? new Date(now).toISOString() : (prev?.lastRecordingAt ?? null),
@@ -361,7 +364,7 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
   /** Manual capture: the stream open in this tab, chosen from the popup. */
   async function start(tabId: number, url: string): Promise<CaptureState> {
     const channel = channelFromUrl(url);
-    if (!channel) throw new Error("Open a Twitch or Kick channel in this tab first");
+    if (!channel) throw new Error("Open a Twitch, Kick or YouTube channel in this tab first");
     await checkLimit(tabId);
     if ((await getCaptureState(tabId)).status !== "off") await stop(tabId);
     const streamer = await streamerFor(channel.platform, channel.channel);

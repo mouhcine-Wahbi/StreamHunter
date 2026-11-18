@@ -24,6 +24,8 @@ export interface MonitoringState {
   /** Counts from the latest status check (null until the first one). */
   liveCount: number | null;
   activeSessions: number | null;
+  /** Per platform: why the latest check couldn't reach it (absent = fine). */
+  platformErrors?: Record<string, string>;
 }
 
 export const INITIAL_MONITORING_STATE: MonitoringState = {

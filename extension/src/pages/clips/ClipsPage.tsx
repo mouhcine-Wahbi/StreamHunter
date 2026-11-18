@@ -20,9 +20,12 @@ export function ClipGrid({ items, onChanged, ranked = false }: { items: LocalCli
 }
 
 export function ClipsPage() {
-  const [sort, setSort] = useState<"recent" | "score">("recent");
+  const [sort, setSort] = useState<"recent" | "score" | "oldest">("recent");
   const [show, setShow] = useState<"all" | "favorites">("all");
-  const query = useApiQuery<Page<LocalClip>>(`/api/v1/clips?limit=500${sort === "score" ? "&sort=score" : ""}${show === "favorites" ? "&favorite=true" : ""}`);
+  const [platform, setPlatform] = useState<"all" | "twitch" | "kick" | "youtube">("all");
+  const query = useApiQuery<Page<LocalClip>>(
+    `/api/v1/clips?limit=500${sort !== "recent" ? `&sort=${sort}` : ""}${show === "favorites" ? "&favorite=true" : ""}${platform !== "all" ? `&platform=${platform}` : ""}`,
+  );
   return (
     <>
       <PageHeader
@@ -34,8 +37,15 @@ export function ClipsPage() {
               <option value="all">All clips</option>
               <option value="favorites">Favourites</option>
             </Select>
-            <Select aria-label="Sort clips" value={sort} onChange={(e) => setSort(e.target.value as "recent" | "score")} className="w-36">
-              <option value="recent">Most recent</option>
+            <Select aria-label="Platform" value={platform} onChange={(e) => setPlatform(e.target.value as typeof platform)} className="w-36">
+              <option value="all">All platforms</option>
+              <option value="twitch">Twitch</option>
+              <option value="kick">Kick</option>
+              <option value="youtube">YouTube</option>
+            </Select>
+            <Select aria-label="Sort clips" value={sort} onChange={(e) => setSort(e.target.value as "recent" | "score" | "oldest")} className="w-36">
+              <option value="recent">Newest</option>
+              <option value="oldest">Oldest</option>
               <option value="score">Highest score</option>
             </Select>
           </>

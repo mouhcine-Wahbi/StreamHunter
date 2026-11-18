@@ -2,7 +2,7 @@ import type { Platform } from "@/types/api";
 
 export type PlatformErrorKind = "not_configured" | "unauthorized" | "rate_limited" | "http" | "network";
 
-/** A failed call to Twitch or Kick, with a message that can be shown as is. */
+/** A failed call to Twitch, Kick or YouTube, with a message that can be shown as is. */
 export class PlatformError extends Error {
   constructor(
     readonly platform: Platform,

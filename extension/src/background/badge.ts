@@ -5,7 +5,7 @@ const BADGES: Record<MonitoringState["status"], { text: string; color: string; t
   starting: { text: "…", color: "#6366f1", title: "StreamHunter — starting monitoring" },
   active: { text: "ON", color: "#16a34a", title: "StreamHunter — monitoring active" },
   degraded: { text: "!", color: "#f97316", title: "StreamHunter — monitoring degraded" },
-  offline: { text: "!", color: "#dc2626", title: "StreamHunter — Twitch/Kick unreachable" },
+  offline: { text: "!", color: "#dc2626", title: "StreamHunter — Twitch/Kick/YouTube unreachable" },
   paused: { text: "II", color: "#64748b", title: "StreamHunter — monitoring paused" },
 };
 

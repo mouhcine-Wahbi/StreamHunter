@@ -10,6 +10,7 @@ import { MonitoringCard } from "@/components/monitoring/MonitoringCard";
 import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
 import { PipelineStatus } from "@/components/monitoring/PipelineStatus";
 import { StreamsGrid } from "@/components/monitoring/StreamsGrid";
+import { SchedulerCard } from "@/components/monitoring/SchedulerCard";
 import { SystemCard } from "@/components/monitoring/SystemCard";
 import { SessionActivity } from "@/components/monitoring/SessionActivity";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
@@ -78,7 +79,7 @@ export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof u
     <>
       <PageHeader
         title="Live Monitoring"
-        description="StreamHunter checks your monitoring list on Twitch and Kick while Chrome is open, without opening the streams. Closing Chrome pauses it."
+        description="StreamHunter checks your monitoring list on Twitch, Kick and YouTube while Chrome is open, without opening the streams. Closing Chrome pauses it."
         actions={<MonitoringToggle monitoring={monitoring} />}
       />
       <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
@@ -89,6 +90,7 @@ export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof u
           <LiveNow refreshKey={refreshKey} />
         </div>
         <div className="space-y-6">
+        <SchedulerCard monitoring={monitoring} />
         <StreamsGrid />
         <Card>
           <CardHeader icon={<History className="size-4" />} title="Sessions" description="One session per streamer broadcast." />

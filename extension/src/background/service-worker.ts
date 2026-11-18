@@ -75,7 +75,7 @@ const governor = createGovernor({
   save: (load) => chrome.storage.local.set({ [SYSTEM_KEY]: load }),
 });
 
-/** Keyboard shortcut (Alt+Shift+R by default): arm the current Twitch/Kick tab as a recorder. */
+/** Keyboard shortcut (Alt+Shift+R by default): arm the current Twitch/Kick/YouTube tab as a recorder. */
 chrome.commands?.onCommand?.addListener((command, tab) => {
   if (command !== "arm-recorder" || tab?.id === undefined) return;
   const id = tab.id;
@@ -126,11 +126,10 @@ function log(event: string, data?: Record<string, unknown>) {
 chrome.runtime.onInstalled.addListener((details) => {
   log("installed", { reason: details.reason });
   void (async () => {
+    // Show the workspace first; the clean-up after an install/update runs behind it.
+    if (details.reason === "install") await chrome.tabs.create({ url: chrome.runtime.getURL("app.html#/overview") });
     await manager.restore();
     await capture.reset();
-    if (details.reason === "install") {
-      await chrome.tabs.create({ url: chrome.runtime.getURL("app.html#/overview") });
-    }
   })();
 });
 

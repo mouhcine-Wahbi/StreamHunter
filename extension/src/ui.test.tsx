@@ -363,3 +363,90 @@ describe("monitoring, highlights and clips (local data)", () => {
     expect(await db.get("clipBlobs", 1)).toBeUndefined();
   });
 });
+
+describe("2.0 dashboard: scheduler, streamers, score explanations, health", () => {
+  it("Live Monitoring shows slots, who records, the queue with reasons and explained priorities", async () => {
+    mockFetch(() => null);
+    installWorker();
+    await chrome.storage.local.set({
+      [CAPTURES_KEY]: { slots: { 5: { ...INITIAL_CAPTURE_STATE, status: "capturing", mode: "recorder", recording: true, tabId: 5, streamerId: 1, channel: "alpha", platform: "twitch", armedAt: "a", assignedAt: new Date(Date.now() - 12 * 60_000).toISOString() } } },
+      "sh.scheduler": {
+        at: new Date().toISOString(), maxSlots: 3, armedSlots: 1, tracked: 3, live: 3, lastRecordingAt: new Date().toISOString(), failures: [{ streamerId: 3, name: "Charlie", error: "the player shows a black screen", failures: 1, retryAt: new Date(Date.now() + 120_000).toISOString() }],
+        recording: [], decisions: [],
+        queue: [
+          { streamerId: 2, name: "Bravo", total: 61, reason: "waiting_for_slot", detail: "Waiting for a slot." },
+          { streamerId: 3, name: "Charlie", total: 40, reason: "retry_wait", detail: "Recording failed (the player shows a black screen); retrying 12:02." },
+        ],
+        priorities: [{ streamerId: 1, name: "Alpha", platform: "twitch", username: "alpha", platformUserId: "1", total: 72, parts: {}, explain: ["Highlight potential 88: 6.0 clips per recorded hour here, average score 70."] }],
+      },
+    });
+    window.location.hash = "/monitoring";
+    render(<App />);
+    expect(await screen.findByText("1 recording / 3")).toBeInTheDocument();
+    expect(screen.getByText(/2 of 3 slots have no recorder tab/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open 2 recorder tabs" })).toBeInTheDocument();
+    expect(screen.getByText("Waiting for a slot.")).toBeInTheDocument();
+    expect(screen.getByText("Retrying later")).toBeInTheDocument();
+    expect(screen.getByText(/Charlie: the player shows a black screen \(1×, retry/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Alpha\s*72/ }));
+    expect(screen.getByText(/Highlight potential 88: 6.0 clips per recorded hour here/)).toBeInTheDocument();
+  });
+
+  it("My Streamers: add by link (platform read from the link), set priority, favourite", async () => {
+    await configurePlatforms();
+    fakePlatforms({ kick: [{ id: "77", login: "kickstar", live: true, viewers: 900 }] });
+    installWorker();
+    window.location.hash = "/streamers";
+    render(<App />);
+    await userEvent.type(await screen.findByLabelText("Channel name or link"), "https://kick.com/kickstar");
+    expect(screen.getByLabelText("Platform")).toHaveValue("kick");
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByText("Added kickstar (Kick).")).toBeInTheDocument();
+    expect(await screen.findByText("0 clips")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Priority for kickstar"), "2");
+    await waitFor(async () => expect((await db.all<Streamer>("streamers"))[0]).toMatchObject({ priority: 2, auto_record: true }));
+    await userEvent.click(screen.getByRole("button", { name: "Mark kickstar as favourite" }));
+    await waitFor(async () => expect((await db.all<Streamer>("streamers"))[0]!.is_favorite).toBe(true));
+  });
+
+  it("Top Highlights explains a clip's score and lists failed clips separately", async () => {
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:clip", revokeObjectURL: () => undefined }));
+    await seedSession();
+    const h = await seedHighlight(80, ["Laughter-like rhythmic bursts"]);
+    await saveClip({ candidateId: h.id, sessionId: 1, streamerId: 1, streamerName: "Alpha", platform: "twitch", title: "Alpha · laugh", startedAt: T, durationSec: 45, width: 1280, height: 720, score: 51,
+      blob: new Blob(["mp4"], { type: "video/mp4" }), detectionTypes: ["audio", "chat"], explain: { parts: { audio: 20, chat: 21, visual: 0, viewers: 0, multi: 10 }, confidence: 0.7, eventSeconds: 6 } });
+    const failed = await createHighlight({ streamer: { id: 1, display_name: "Alpha", username: "alpha", platform: "twitch" }, session: null, origin: "capture", peakAt: T, startAt: T, endAt: T, score: 48, confidence: 0.7, category: "x", reasons: ["Loud"], breakdown: {}, clipStatus: "generating" });
+    const { markClipFailed } = await import("@/local/highlights");
+    await markClipFailed(failed.id, "Browser storage is full: delete clips or lower the storage limit in Settings.");
+    mockFetch(() => null);
+    installWorker();
+    window.location.hash = "/highlights";
+    render(<App />);
+    expect(await screen.findByText("In progress and failed")).toBeInTheDocument();
+    expect(screen.getByText("Browser storage is full: delete clips or lower the storage limit in Settings.")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Why this score?" }));
+    const why = screen.getByLabelText("Why this score");
+    expect(within(why).getByText("+20")).toBeInTheDocument();
+    expect(within(why).getByText("+21")).toBeInTheDocument();
+    expect(within(why).getByText("+10")).toBeInTheDocument();
+    expect(within(why).getByText(/Confidence 70% \(2 independent signals\) · event lasted 6 s/)).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Platform"), "youtube");
+    expect(await screen.findByText("No clips match these filters")).toBeInTheDocument();
+  });
+
+  it("System Health shows only measured values and per-platform connectivity", async () => {
+    await configurePlatforms();
+    mockFetch(() => null);
+    installWorker();
+    await chrome.storage.local.set({
+      "sh.monitoring": { enabled: true, paused: false, status: "degraded", platformErrors: { kick: "Kick asked StreamHunter to slow down." }, lastSuccessAt: new Date().toISOString() },
+    });
+    window.location.hash = "/health";
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "System Health" })).toBeInTheDocument();
+    expect(screen.getByText("Measured once a recording runs.")).toBeInTheDocument(); // no fabricated CPU numbers
+    expect(await screen.findByText("Kick asked StreamHunter to slow down.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply storage limits now" })).toBeInTheDocument();
+    expect(screen.getByText(/No clip was lost to a restart/)).toBeInTheDocument();
+  });
+});

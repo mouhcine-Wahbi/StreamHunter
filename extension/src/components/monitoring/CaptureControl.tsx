@@ -9,7 +9,7 @@ import { formatRelative } from "@/utils/format";
 
 const PLATFORM_HOST = { twitch: "twitch.tv", kick: "kick.com", youtube: "youtube.com" } as const;
 
-/** Twitch or Kick page (any path): can become the recorder tab. */
+/** Twitch, Kick or YouTube page (any path): can become the recorder tab. */
 export function isStreamSite(url: string | undefined | null): boolean {
   if (!url) return false;
   try {

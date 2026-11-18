@@ -11,6 +11,7 @@ import { cn } from "@/utils/cn";
 import { NumberField, Section } from "./sections";
 import { maxSingleSignalScore } from "@/detection/fusion";
 
+const SCHED_LABEL = { potential: "Highlight potential", activity: "Recent activity", growth: "Viewer growth", user: "Your priority / favourite", reliability: "Reliability" } as const;
 const WEIGHT_LABEL = { audio: "Audio reaction", chat: "Chat activity", visual: "Visual activity", viewers: "Viewer spike", multi: "Several signals together" } as const;
 import { PlatformConnections } from "./PlatformConnections";
 
@@ -125,7 +126,7 @@ export function SettingsPage() {
         <Section
           id="connections"
           title="Platforms"
-          description="StreamHunter talks to Twitch and Kick directly from this browser, with your own free developer app for each platform."
+          description="StreamHunter talks to Twitch, Kick and YouTube directly from this browser, with your own free developer app for each platform."
         >
           <PlatformConnections />
         </Section>
@@ -253,8 +254,45 @@ export function SettingsPage() {
           </Field>
         </Section>
 
+        <Section
+          id="scheduler"
+          title="Scheduler"
+          description="Which live streamers get the recording slots. Priority is a weighted average of the parts below (shown as percentages of their total). These are starting weights, not a proven predictor: every streamer's score shows its parts in Live Monitoring."
+        >
+          {(["potential", "activity", "growth", "user", "reliability"] as const).map((k) => {
+            const total = Object.values(s.scheduler.weights).reduce((a, b) => a + b, 0) || 1;
+            return (
+              <Field key={k} inline label={SCHED_LABEL[k]} hint={`${Math.round((s.scheduler.weights[k] / total) * 100)}% of the priority`}>
+                {({ id, describedBy }) => (
+                  <NumberField id={id} describedBy={describedBy} value={s.scheduler.weights[k]} min={0} max={100} onCommit={(v) => void update({ scheduler: { weights: { [k]: v } } })} />
+                )}
+              </Field>
+            );
+          })}
+          <Field inline label="Minimum recording time" hint="A recording is never replaced before it has run this long.">
+            {({ id, describedBy }) => (
+              <NumberField id={id} describedBy={describedBy} value={s.scheduler.minRecordMinutes} min={LIMITS.minRecordMinutes.min} max={LIMITS.minRecordMinutes.max} suffix="min" onCommit={(minRecordMinutes) => void update({ scheduler: { minRecordMinutes } })} />
+            )}
+          </Field>
+          <Field inline label="Switching cooldown" hint="A slot doesn't switch streamer again within this time.">
+            {({ id, describedBy }) => (
+              <NumberField id={id} describedBy={describedBy} value={s.scheduler.cooldownMinutes} min={LIMITS.cooldownMinutes.min} max={LIMITS.cooldownMinutes.max} suffix="min" onCommit={(cooldownMinutes) => void update({ scheduler: { cooldownMinutes } })} />
+            )}
+          </Field>
+          <Field inline label="Switch margin" hint="A waiting streamer must score this many points more to replace a recording (hysteresis).">
+            {({ id, describedBy }) => (
+              <NumberField id={id} describedBy={describedBy} value={s.scheduler.switchMargin} min={LIMITS.switchMargin.min} max={LIMITS.switchMargin.max} suffix="pts" onCommit={(switchMargin) => void update({ scheduler: { switchMargin } })} />
+            )}
+          </Field>
+          <Field inline label="Retries per broadcast" hint="A streamer whose recording fails is retried after 2, 5 and 15 minutes, up to this many times.">
+            {({ id, describedBy }) => (
+              <NumberField id={id} describedBy={describedBy} value={s.scheduler.maxRetries} min={LIMITS.maxRetries.min} max={LIMITS.maxRetries.max} onCommit={(maxRetries) => void update({ scheduler: { maxRetries } })} />
+            )}
+          </Field>
+        </Section>
+
         <Section id="recording" title="Recording" description="How many streams are recorded at once. Each one needs its own recorder tab, armed with one click. Measured on an Apple M5: each stream costs about 0.1–0.15 of a CPU core to record plus the Twitch player itself (roughly 0.15–0.3 core and 300–600 MB), and 6–8 Mbit/s of download.">
-          <Field inline label="Simultaneous streams" hint="1 keeps today's single-recorder behaviour. 3 is comfortable on a 16 GB Mac; 5 works if little else runs.">
+          <Field inline label="Simultaneous streams" hint="Default 3. Each needs its own recorder tab. 3 is comfortable on a 16 GB Mac; 5 works if little else runs.">
             {({ id, describedBy }) => (
               <Select id={id} aria-describedby={describedBy} className="w-40" value={String(s.recording.maxStreams)} onChange={(e) => void update({ recording: { maxStreams: Number(e.target.value) } })}>
                 {[1, 2, 3, 4, 5, 6, 8].map((n) => (

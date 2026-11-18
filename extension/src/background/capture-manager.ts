@@ -1,5 +1,5 @@
 import { db } from "@/local/db";
-import { createHighlight, type LocalHighlight } from "@/local/highlights";
+import { createHighlight, failInterruptedClips, type LocalHighlight } from "@/local/highlights";
 import { enforceStorageLimits } from "@/local/clips";
 import { activeSessionFor } from "@/local/sessions";
 import { addStreamer, platformClients, resolveChannel, streamUrl } from "@/local/streamers";
@@ -559,6 +559,7 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
       streamer, session: session ?? null, origin: "capture", peakAt: now, startAt: now - seconds * 1000, endAt: now,
       score: 70, confidence: 1, category: "other", reasons: ["Saved by you"],
       breakdown: { chat: null, audio: null, visual: null, context: null, active_signals: [], manual: true },
+      clipStatus: "generating",
     });
     const request: ClipRequest = { highlightId: h.id, start: h.window_start_ms, end: h.window_end_ms, title: `${streamer.display_name} · Saved by you`, score: h.score };
     await send({ target: "offscreen", type: "capture/clip", slot: s.tabId, request });
@@ -682,6 +683,7 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
 
   /** After a browser restart every capture is gone; never show a stale "capturing". */
   async function reset() {
+    await failInterruptedClips().catch(() => undefined);
     const slots = await getSlots();
     if (slots.length === 0) return;
     const recorder = slots.some((s) => s.mode === "recorder");

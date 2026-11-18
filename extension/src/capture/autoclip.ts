@@ -2,7 +2,7 @@
  * Automatic clipping for one capture: signals in → fused moments → planned clips → cut requests.
  * No WebCodecs or Chrome here, so it is tested directly; the engine supplies storage and cutting.
  */
-import { ClipPlanner, dedupeReasons, FusionEngine, type FusedMoment, type Signal, type SignalKind } from "@/detection/fusion";
+import { ClipPlanner, dedupeReasons, FusionEngine, scoreParts, type FusedMoment, type Signal, type SignalKind } from "@/detection/fusion";
 import type { NewHighlight } from "@/local/highlights";
 import type { CaptureOptions, CaptureTarget } from "@/types/capture";
 
@@ -17,6 +17,8 @@ export interface CutJob {
   title: string;
   reasons: string[];
   kinds: SignalKind[];
+  /** Why the clip got its score (from its strongest moment). */
+  explain: { parts: Record<SignalKind | "multi", number>; confidence: number; eventSeconds: number };
 }
 
 export interface AutoClipDeps {
@@ -107,6 +109,10 @@ export class AutoClipper {
     return this.planner.pending().length;
   }
 
+  private explain(m: FusedMoment): CutJob["explain"] {
+    return { parts: scoreParts(m.intensities, this.fusion.cfg), confidence: confidenceOf(m), eventSeconds: Math.round((m.end - m.start) / 100) / 10 };
+  }
+
   private async cutPlanned(key: number): Promise<void> {
     this.planner.markCut(key);
     const job = this.jobs.get(key);
@@ -139,19 +145,21 @@ export class AutoClipper {
         startAt: c.start,
         endAt: c.end,
         score: m.score,
-        confidence: Math.min(0.95, 0.4 + 0.15 * m.kinds.length),
+        confidence: confidenceOf(m),
         category: CATEGORY[strongest],
         reasons: m.reasons,
         breakdown,
+        clipStatus: "generating",
       });
       this.jobs.set(c.key, {
         key: c.key, target, highlightId: h.id, start: c.start, end: c.end, peakAt: m.peakAt, score: m.score,
-        title: `${target.displayName} · ${m.reasons[0] ?? "Highlight"}`, reasons: m.reasons, kinds: m.kinds,
+        title: `${target.displayName} · ${m.reasons[0] ?? "Highlight"}`, reasons: m.reasons, kinds: m.kinds, explain: this.explain(m),
       });
     } else {
       const job = this.jobs.get(c.key);
       if (!job) return;
       job.end = c.end;
+      if (m.score >= job.score) job.explain = this.explain(m);
       job.score = c.score;
       job.peakAt = c.peakAt;
       job.reasons = dedupeReasons([...job.reasons, ...m.reasons]).slice(0, 8);
@@ -163,6 +171,11 @@ export class AutoClipper {
     // Chat/viewer highlights that were fused into this clip are now part of it.
     for (const id of m.highlightIds) await this.deps.deleteHighlight(id).catch(() => undefined);
   }
+}
+
+/** Confidence grows with independent evidence: 0.4 + 0.15 per kind of signal, capped at 0.95. */
+export function confidenceOf(m: Pick<FusedMoment, "kinds">): number {
+  return Math.round(Math.min(0.95, 0.4 + 0.15 * m.kinds.length) * 100) / 100;
 }
 
 function fusionConfig(o: CaptureOptions) {

@@ -30,6 +30,10 @@ export type LocalClip = Clip & {
   stream_offset_sec: number | null;
   favorite: boolean;
   has_thumbnail: boolean;
+  /** Why this score: points per signal kind (+ multi-signal bonus), confidence, how long the event lasted. */
+  score_parts?: Record<"audio" | "chat" | "visual" | "viewers" | "multi", number> | null;
+  confidence?: number | null;
+  event_seconds?: number | null;
 };
 
 export interface NewClip {
@@ -51,6 +55,7 @@ export interface NewClip {
   peakAt?: number | null;
   broadcastStartedAt?: string | null;
   thumbnail?: Blob | null;
+  explain?: { parts: Record<"audio" | "chat" | "visual" | "viewers" | "multi", number>; confidence: number; eventSeconds: number } | null;
 }
 
 /** Older clips (saved before these fields existed) read with safe defaults. */
@@ -105,6 +110,9 @@ export async function saveClip(c: NewClip): Promise<LocalClip> {
     stream_offset_sec: offset !== null && Number.isFinite(offset) ? offset : null,
     favorite: false,
     has_thumbnail: Boolean(c.thumbnail),
+    score_parts: c.explain?.parts ?? null,
+    confidence: c.explain?.confidence ?? null,
+    event_seconds: c.explain?.eventSeconds ?? null,
   });
   await db.putBlob(clip.id, c.blob);
   if (c.thumbnail) await db.putBlob(clip.id, c.thumbnail, "clipThumbs");
@@ -144,6 +152,13 @@ export async function deleteClip(id: number): Promise<void> {
   await db.delete("clipBlobs", id);
   await db.delete("clipThumbs", id);
   await db.delete("clips", id);
+}
+
+/** What to tell the editor when a clip could not be written to browser storage. */
+export function saveFailureReason(e: unknown): string {
+  const err = e as { name?: string; message?: string } | null;
+  if (err?.name === "QuotaExceededError" || /quota/i.test(err?.message ?? "")) return "Browser storage is full: delete clips or lower the storage limit in Settings.";
+  return `The clip could not be stored (${err?.message ?? "unknown error"}).`;
 }
 
 /** A safe file name for the download. */

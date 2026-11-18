@@ -41,6 +41,7 @@ export function filterHighlights(all: LocalHighlight[], q: URLSearchParams): Loc
       (!q.get("status") || h.status === q.get("status")) &&
       (!q.get("streamer_id") || h.streamer_id === Number(q.get("streamer_id"))) &&
       (!q.get("has_video") || h.has_video === (q.get("has_video") === "true")) &&
+      (!q.get("clip_status") || q.get("clip_status")!.split(",").includes(h.clip_status ?? "")) &&
       (!from || h.timestamp >= from),
   );
   if (q.get("sort") === "score") out = [...out].sort((a, b) => b.score - a.score || b.timestamp.localeCompare(a.timestamp));

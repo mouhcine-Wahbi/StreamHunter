@@ -16,6 +16,12 @@ export type LocalHighlight = HighlightCandidate & {
   /** The moment's window (pre/post roll included), wall-clock ms: what a capture clip covers. */
   window_start_ms: number;
   window_end_ms: number;
+  /**
+   * Automatic clips: generating (waiting for its post-roll / being saved), ready, or failed (with
+   * clip_error). Undefined for provisional highlights that never had video.
+   */
+  clip_status?: "generating" | "ready" | "failed";
+  clip_error?: string | null;
 };
 
 export interface NewHighlight {
@@ -30,6 +36,7 @@ export interface NewHighlight {
   category: string;
   reasons: string[];
   breakdown: Record<string, unknown>;
+  clipStatus?: "generating";
 }
 
 const offset = (session: NewHighlight["session"], t: number) =>
@@ -59,6 +66,7 @@ export async function createHighlight(h: NewHighlight): Promise<LocalHighlight> 
     created_at: now,
     window_start_ms: h.startAt,
     window_end_ms: h.endAt,
+    ...(h.clipStatus ? { clip_status: h.clipStatus, clip_error: null } : {}),
   });
 }
 
@@ -68,7 +76,12 @@ export async function listHighlights(): Promise<LocalHighlight[]> {
   return all
     .map((h) => {
       const c = byCandidate.get(h.id);
-      return { ...h, has_video: Boolean(c), clip: c ? { id: c.id, status: c.status, platform_clip_url: null, error_message: c.error_message } : null };
+      return {
+        ...h,
+        has_video: Boolean(c),
+        clip_status: c ? ("ready" as const) : h.clip_status,
+        clip: c ? { id: c.id, status: c.status, platform_clip_url: null, error_message: c.error_message } : null,
+      };
     })
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
@@ -127,4 +140,26 @@ export async function updateHighlight(
     window_end_ms: Math.max(h.window_end_ms, patch.endAt ?? h.window_end_ms),
     signal_breakdown: patch.breakdown ? ({ ...h.signal_breakdown, ...patch.breakdown } as LocalHighlight["signal_breakdown"]) : h.signal_breakdown,
   });
+}
+
+/** A clip for this highlight could not be saved: say so instead of leaving it "generating". */
+export async function markClipFailed(id: number, reason: string): Promise<void> {
+  const h = await db.get<LocalHighlight>("highlights", id);
+  if (h) await db.put("highlights", { ...h, clip_status: "failed", clip_error: reason });
+}
+
+/**
+ * After Chrome or the extension restarted: clips that were still generating are lost (their
+ * footage lived in memory). Mark them failed so the library never shows a phantom clip.
+ */
+export async function failInterruptedClips(reason = "Chrome or StreamHunter stopped before this clip was saved."): Promise<number> {
+  const [all, clips] = await Promise.all([db.all<LocalHighlight>("highlights"), db.all<Clip>("clips")]);
+  const withClip = new Set(clips.map((c) => c.candidate_id));
+  let n = 0;
+  for (const h of all)
+    if (h.clip_status === "generating" && !withClip.has(h.id)) {
+      await db.put("highlights", { ...h, clip_status: "failed", clip_error: reason });
+      n += 1;
+    }
+  return n;
 }

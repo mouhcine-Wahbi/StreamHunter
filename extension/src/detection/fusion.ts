@@ -82,6 +82,20 @@ export function fusedScore(intensities: Partial<Record<SignalKind, number | null
   return Math.round(Math.min(100, score));
 }
 
+/** Points each kind contributed to a fused score (what "Why this score" shows). */
+export function scoreParts(intensities: Partial<Record<SignalKind, number | null>>, cfg: Pick<FusionConfig, "weights" | "minIntensity">): Record<SignalKind | "multi", number> {
+  const out = { audio: 0, chat: 0, visual: 0, viewers: 0, multi: 0 };
+  let kinds = 0;
+  for (const k of SIGNAL_KINDS) {
+    const v = intensities[k];
+    if (v === null || v === undefined || v < cfg.minIntensity) continue;
+    kinds += 1;
+    out[k] = Math.round(((cfg.weights[k] * Math.min(100, v)) / 100) * 10) / 10;
+  }
+  if (kinds >= 2) out.multi = cfg.weights.multi;
+  return out;
+}
+
 /** The best a single signal can score with these weights (used to warn in Settings). */
 export function maxSingleSignalScore(w: FusionWeights): number {
   return Math.max(w.audio, w.chat, w.visual, w.viewers);

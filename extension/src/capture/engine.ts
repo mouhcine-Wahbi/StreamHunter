@@ -12,8 +12,8 @@
  * nothing is encoded or detected. Nothing leaves the browser.
  */
 import type { Signal } from "@/detection/fusion";
-import { createHighlight, deleteHighlight, updateHighlight } from "@/local/highlights";
-import { saveClip, updateClip, type DetectionType } from "@/local/clips";
+import { createHighlight, deleteHighlight, markClipFailed, updateHighlight } from "@/local/highlights";
+import { saveClip, saveFailureReason, updateClip, type DetectionType } from "@/local/clips";
 import type { CaptureOptions, CaptureTarget, ClipRequest, SlotHealth } from "@/types/capture";
 import { AutoClipper, type CutJob } from "./autoclip";
 import { ChunkRing } from "./buffer";
@@ -291,20 +291,29 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
     return best?.blob ?? null;
   }
 
-  async function save(job: { target: CaptureTarget; highlightId: number; start: number; end: number; peakAt: number; title: string; score: number; reasons: string[]; types: DetectionType[] }): Promise<number | null> {
+  async function fail(highlightId: number, reason: string): Promise<null> {
+    await markClipFailed(highlightId, reason).catch(() => undefined);
+    on.clipFailed({ highlightId, reason });
+    return null;
+  }
+
+  async function save(job: { target: CaptureTarget; highlightId: number; start: number; end: number; peakAt: number; title: string; score: number; reasons: string[]; types: DetectionType[]; explain?: CutJob["explain"] }): Promise<number | null> {
     const sel = ring.select(job.start, job.end);
-    if (!sel) {
-      on.clipFailed({ highlightId: job.highlightId, reason: "That moment is no longer in the capture buffer." });
-      return null;
+    if (!sel) return fail(job.highlightId, "That moment is no longer in the recording buffer.");
+    let blob: Blob;
+    try {
+      blob = muxMp4(sel.video, sel.audio, configs);
+    } catch (e) {
+      return fail(job.highlightId, `The MP4 could not be built (${e instanceof Error ? e.message : "error"}).`);
     }
-    const blob = muxMp4(sel.video, sel.audio, configs);
     const t = job.target;
     const clip = await saveClip({
       candidateId: job.highlightId, sessionId: t.sessionId, streamerId: t.streamerId, streamerName: t.displayName, platform: t.platform,
       title: job.title, startedAt: sel.from, durationSec: (sel.to - sel.from) / 1000, width, height, score: job.score, blob,
       category: t.category ?? null, reasons: job.reasons, detectionTypes: job.types, peakAt: job.peakAt,
-      broadcastStartedAt: t.broadcastStartedAt, thumbnail: thumbFor(job.peakAt, sel.from, sel.to),
-    });
+      broadcastStartedAt: t.broadcastStartedAt, thumbnail: thumbFor(job.peakAt, sel.from, sel.to), explain: job.explain ?? null,
+    }).catch((e: unknown) => e as Error);
+    if (clip instanceof Error) return fail(job.highlightId, saveFailureReason(clip));
     on.clipSaved({ clipId: clip.id, highlightId: job.highlightId, durationSec: (sel.to - sel.from) / 1000 });
     return clip.id;
   }

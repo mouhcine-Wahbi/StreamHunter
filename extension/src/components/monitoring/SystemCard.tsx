@@ -59,6 +59,7 @@ export function SystemCard() {
               text={load.storageUsedBytes === null ? "—" : `${formatBytes(load.storageUsedBytes)} of ${formatBytes(load.storageQuotaBytes)}`}
             />
             {load.overloaded && load.reason && <p className="text-xs text-danger">Overloaded: {load.reason}. New streams won't start until it recovers.</p>}
+            {!load.overloaded && load.reason && <p className="text-xs text-warn">High load: {load.reason}. StreamHunter acts if it lasts about 30 s.</p>}
             {load.lastAction && <p className="text-xs text-fg-muted">{load.lastAction}</p>}
             <p className="text-[11px] text-fg-subtle">Updated {formatRelative(load.at)}</p>
           </>

@@ -24,6 +24,8 @@ export interface SlotHealth {
   fps: number;
   /** Frames dropped because the encoder was behind, since the slot started. */
   dropped: number;
+  /** Frames dropped since the previous report (~3 s): the real "falling behind" signal. */
+  droppedRecent?: number;
   /** Encoder queue at the last report. */
   queue: number;
   /** Recording at half frame rate to save CPU (overload protection). */

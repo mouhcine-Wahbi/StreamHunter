@@ -27,5 +27,7 @@ Privacy) deletes highlights without a clip and ended sessions older than N days.
 | `sh.appTokens` | Cached app access tokens with expiry |
 | `sh.twitchUser` | Sign in with Twitch: user token, user id, login, scopes, expiry |
 | `sh.chatActivity` | Per-streamer chat state and aggregates for the Live Monitoring page |
-| `sh.capture` | Capture state: status, mode (`manual` / `recorder`), recording, paused, waiting reason, tab, channel, buffered seconds, silent seconds, recorded seconds, last detection, clips saved, message |
+| `sh.captures` | All recording slots `{slots: {[tabId]: state}, note, clips}`; each state as below plus `pauseReason`, `listening`, `health` (fps, dropped, throttled), `armedAt` |
+| `sh.system` | Last load measurement: CPU %, available/total memory, storage used/quota, overloaded + reason, last protective action |
+| `sh.capture` | (v1.1, replaced by `sh.captures`) Capture state: status, mode (`manual` / `recorder`), recording, paused, waiting reason, tab, channel, buffered seconds, silent seconds, recorded seconds, last detection, clips saved, message |
 | `sh.stats` | Lifetime totals: `recordedSeconds` |

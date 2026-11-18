@@ -165,7 +165,7 @@ describe("overload protection", () => {
     let mem = fresh;
     for (let i = 1; i < LIMITS.overloadedSamples; i++) {
       const d = decide(hot, slots, mem);
-      expect(d).toMatchObject({ overloaded: true, reason: "CPU at 96%", actions: [] });
+      expect(d).toMatchObject({ overloaded: false, reason: "CPU at 96%", actions: [] }); // a spike, not yet overload
       mem = d.memory;
     }
     let d = decide(hot, slots, mem);
@@ -187,9 +187,12 @@ describe("overload protection", () => {
     }
   });
 
-  it("counts low memory and a stream falling behind as overload", () => {
-    expect(decide({ ...ok, memAvailableBytes: 1 * GB }, [slot(1)], fresh).reason).toBe("only 1.0 GB of memory free");
-    expect(decide(ok, [slot(1), slot(2, { health: { fps: 12, dropped: 40, queue: 8, throttled: false } })], fresh).reason).toBe("s2 is encoding at 12 fps");
+  it("counts low memory and dropped frames as overload, but not a low frame rate (static page)", () => {
+    expect(decide({ ...ok, memAvailableBytes: 0.8 * GB }, [slot(1)], fresh).reason).toBe("only 0.8 GB of memory free");
+    expect(decide({ ...ok, memAvailableBytes: 2 * GB }, [slot(1)], fresh).reason).toBeNull(); // normal on a busy Mac
+    expect(decide(ok, [slot(1), slot(2, { health: { fps: 12, dropped: 40, droppedRecent: 25, queue: 8, throttled: false } })], fresh).reason).toBe("s2 is dropping frames (the encoder is behind)");
+    // Seen in real Chrome: an offline Twitch page only changes a few times a second → 3 fps, no drops.
+    expect(decide(ok, [slot(1, { health: { fps: 2.7, dropped: 0, droppedRecent: 0, queue: 0, throttled: false } })], fresh).reason).toBeNull();
     expect(decide({ ...ok, cpuPercent: null, memAvailableBytes: null }, [slot(1)], fresh).overloaded).toBe(false);
   });
 
@@ -237,6 +240,6 @@ describe("overload protection", () => {
     now += 10_000;
     await g.maybeRun();
     expect(saved).toHaveLength(2);
-    expect(saved[1]).toMatchObject({ cpuPercent: 95, memAvailableBytes: 6 * GB, memCapacityBytes: 16 * GB, storageQuotaBytes: 200 * GB, overloaded: true, reason: "CPU at 95%" });
+    expect(saved[1]).toMatchObject({ cpuPercent: 95, memAvailableBytes: 6 * GB, memCapacityBytes: 16 * GB, storageQuotaBytes: 200 * GB, overloaded: false, reason: "CPU at 95%" });
   });
 });

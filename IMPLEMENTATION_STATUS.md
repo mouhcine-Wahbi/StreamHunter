@@ -1,10 +1,37 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-18_
+_Last updated: 2026-11-18 (v1.2)_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
-## v1.1 — Automatic clipping ✅ (current)
+## v1.2 — Several streams at once ✅ (current)
+
+| Item | Status | Notes |
+|---|---|---|
+| One engine per recorder tab in the offscreen document; slot-addressed messages | ✅ verified in Chrome | 5 tabs at 30 fps each in a capability test; a tab can't be captured twice |
+| Assignment of live Auto-record streamers to slots (priority, sticky, no duplicates), limit 1–8 (default 1) | ✅ | Default keeps v1.1 behaviour; lowering the limit stops the newest slots |
+| Per-stream Pause/Resume/Stop/Listen; global Pause keeps the editor's own pauses | ✅ | Found by a test: Pause → Resume monitoring used to clear a stream you had paused yourself |
+| Overload protection (CPU, memory, dropped frames, storage) | ✅ tested on rules; ran in Chrome without false alarms after the fix below | |
+| Streams grid, System card, Settings → Recording (limit, 720p/480p, sound, protection), Alt+Shift+R | ✅ | |
+| Tests | ✅ | 125 |
+
+**Real-Chrome check (Chrome 157, Apple M5, 16 GB):**
+
+* Two recorder tabs, two live Auto-record streamers → each tab navigated itself to a different real
+  Twitch channel, 2 engines, only the first played sound.
+* Three streams of the scripted test page at once: each slot fused and clipped its own laugh +
+  action (score 55 ×3), none clipped action alone (20), and only the slot that also got a chat signal
+  clipped its later laugh (56; the others scored 25). 4 MP4s (1280×720 + AAC, 48–49 s) play cleanly;
+  the Top Highlights ranking spans all three streamers. All three at 30 fps with 0 dropped frames;
+  Chrome used ≈ 0.7 of one core in total, the Mac 24–29% CPU. A fourth stream was refused at the limit.
+* *Found and fixed:* real offline Twitch pages deliver only 3–14 fps (static page), which the first
+  version took for overload and then refused new streams with a stale verdict. Overload now means
+  dropped frames, CPU or memory sustained for ~30 s; the verdict is cleared when recording stops; the
+  memory floor is 1 GB because macOS reports ~2 GB "available" on a busy 16 GB Mac.
+
+**Not measured:** several real live Twitch players at once over hours (player decode cost, network).
+
+## v1.1 — Automatic clipping ✅
 
 Plan: [docs/AUTO_CLIPPING_PLAN.md](docs/AUTO_CLIPPING_PLAN.md). Start monitoring, leave Chrome
 running, come back to ranked clips.

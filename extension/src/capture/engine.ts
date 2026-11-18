@@ -120,6 +120,7 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
   let latestDb: number | null = null;
   let throttled = false;
   let dropped = 0;
+  let droppedAtReport = 0;
   let encodedSinceReport = 0;
   let lastReport = Date.now();
   let lastEncodedAt = 0;
@@ -356,13 +357,15 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
       const fps = Math.round((encodedSinceReport / secs) * 10) / 10;
       encodedSinceReport = 0;
       lastReport = now;
+      const droppedRecent = dropped - droppedAtReport;
+      droppedAtReport = dropped;
       on.status({
         bufferedSeconds: Math.round(((ring.newest ?? now) - (ring.oldest ?? now)) / 1000),
         levelDb: isActive() ? latestDb : null,
         recording: isActive(),
         recordedSeconds: Math.round(recordedMs / 1000),
         silentSeconds,
-        health: { fps: isActive() ? fps : 0, dropped, queue: vEnc.state === "configured" ? vEnc.encodeQueueSize : 0, throttled },
+        health: { fps: isActive() ? fps : 0, dropped, droppedRecent, queue: vEnc.state === "configured" ? vEnc.encodeQueueSize : 0, throttled },
       });
     }
   }, 1000);

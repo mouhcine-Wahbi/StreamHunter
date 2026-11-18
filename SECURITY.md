@@ -35,6 +35,8 @@
 | `activeTab` | Read the URL of the tab the popup was opened on (which channel to capture) |
 | `tabCapture`, `offscreen` | Capture that tab in an offscreen document |
 | `identity` | Sign in with Twitch (`launchWebAuthFlow`) |
+| `system.cpu`, `system.memory` | Overload protection while recording several streams (whole-machine CPU and free memory; nothing is sent anywhere) |
+| Keyboard shortcut (`commands`, Alt+Shift+R) | Arm the current tab as a recorder; it counts as the click Chrome requires |
 | Host access: `api.twitch.tv`, `id.twitch.tv`, `api.kick.com`, `id.kick.com` | The official APIs. The Twitch chat WebSocket (`eventsub.wss.twitch.tv`) needs no host permission |
 
 No `tabs`, `<all_urls>`, `downloads`, `cookies` or content scripts.

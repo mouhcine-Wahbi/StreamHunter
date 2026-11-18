@@ -44,9 +44,10 @@ The video itself is read from the `clipBlobs` store (`clipBlob(id)` in `src/loca
 ### Worker messages
 Pages talk to the service worker with `chrome.runtime.sendMessage` (`src/types/messages.ts`):
 `monitoring/get|start|stop|pause|resume|check-now`, `app/open`,
-`capture/get|start {tabId, url}|arm {tabId}|sync|stop|save-last {seconds}`.
-The worker sends the offscreen engine `capture/start|target|signal|pause|options|clip|stop`; the engine
-reports `capture/status`, `capture/detection`, `capture/clip-saved`, `capture/clip-failed`, `capture/ended`.
+`capture/get {tabId?}|list|start {tabId, url}|arm {tabId}|sync|stop {tabId?}|pause-slot {tabId, paused}|listen {tabId, on}|save-last {seconds, tabId?}`, `system/get`.
+The worker sends the offscreen engines `capture/start|target|signal|pause|listen|throttle|options|clip|stop`,
+each with `slot` (the captured tab id; `capture/stop` without one stops all); the engines report
+`capture/status` (with `health`), `capture/detection`, `capture/clip-saved`, `capture/clip-failed`, `capture/ended`, each with `slot`.
 
 ## 2. Platform endpoints used
 

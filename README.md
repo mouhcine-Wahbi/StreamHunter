@@ -12,7 +12,7 @@ Everything runs **inside your browser**. There is no StreamHunter server, no acc
 your monitoring list, highlights and clips live in this browser (IndexedDB), and StreamHunter talks
 to Twitch and Kick directly through their official APIs with your own free developer apps.
 
-> **Status:** v1.1, automatic clipping, local-first. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for what is
+> **Status:** v1.2, automatic clipping of several streams at once, local-first. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for what is
 > verified and how.
 
 ## How it works
@@ -59,7 +59,8 @@ StreamHunter never says a clip exists when it only saw chat or viewer numbers.
 | Overview (status, streamers, clips, recording time, storage), Top Highlights (ranked clips, filters: score, recent, streamer, platform, category, duration, detection type), Clip Library (preview, download MP4, rename, delete, favourite) | ✅ |
 | Storage limit and age limit with automatic cleanup (favourites kept) | ✅ |
 | Optional native Twitch clip for each clip | ✅ opt-in (needs `clips:edit`) |
-| Several streams recorded at once | ⏳ one recorder tab for now; the engine is per tab, so more tabs can be added later |
+| Several streams recorded at once (Settings → Recording: 1–8, default 1), one recorder tab each, independent detection and clips, per-stream Pause/Resume/Stop/Listen | ✅ verified with 3 in Chrome |
+| Overload protection: CPU, free memory, dropped frames, storage → half frame rate, then pause the lowest-priority stream | ✅ |
 | Kick chat | 🚫 Kick only sends chat to servers (webhooks) |
 
 ## Requirements
@@ -121,6 +122,9 @@ platform's token endpoint.
 3. Open `twitch.tv` (or `kick.com`) in a tab, click the StreamHunter icon and choose **Use this tab
    as the recorder**. Chrome requires this one click; leave the tab open (it can be in the
    background) and the player unmuted.
+   For several streams at once, set **Settings → Recording → Simultaneous streams** and arm one tab
+   per stream (the icon, or **Alt+Shift+R** on the tab). Each tab records a different live
+   Auto-record streamer (favourites first, then most viewers).
 4. **Start monitoring** and leave the computer running. The **Pipeline** panel shows each stage:
    channel discovery, chat, video capture, detection, clip export.
 5. Come back to **Top Highlights** (ranked) and the **Clip Library** to preview, favourite and
@@ -148,8 +152,11 @@ simulator. The MP4 muxer runs for real.
 * **Video only exists while a recorder tab runs.** Chrome needs one click on a tab before it can be
   captured; after a Chrome restart or if the recorder tab is closed, arm it again (the Pipeline
   panel says so). A moment found from chat while nothing was recorded has no video.
-* **One stream is recorded at a time** (the live Auto-record streamer with the most viewers,
-  favourites first; the current one is kept while it is live).
+* **One recorder tab per simultaneous stream**, each armed with one click per Chrome session (a tab
+  can't be captured twice). Measured on an Apple M5 / 16 GB: recording costs about 0.1–0.15 CPU core
+  per stream; each real Twitch player adds roughly 0.15–0.3 core and 300–600 MB (estimate) and
+  6–8 Mbit/s of download. 3 streams are comfortable on such a Mac, 5 if little else runs.
+* With several streams, only one plays its sound (Listen per stream); all are recorded with sound.
 * The recorder tab plays the stream: pre-roll ads and "mature content" gates on the platform's page
   are recorded too or can block playback. Muting the player mutes the capture (a warning appears
   after 20 s of silence).

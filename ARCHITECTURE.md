@@ -69,6 +69,33 @@ chat as unavailable and rely on live status and viewer spikes.
 
 ## 3. Recording and automatic clipping
 
+### Several streams at once (v1.2)
+
+Each recorder tab is a **slot**: the offscreen document (one per extension) runs one engine per slot,
+each with its own buffer, signals, fusion and clips; messages carry `slot` (the tab id). Verified in
+Chrome 157: 5 tabs captured at once by one extension, 30 fps each, also in background tabs and a
+minimized window; a tab can't be captured twice. The worker keeps all slots in `sh.captures` (one
+store, writes serialised because every engine reports every 3 s) and assigns streamers:
+
+```text
+assignTargets(): live + monitored + Auto-record streamers, favourites then viewers
+  → a slot keeps its streamer while it is live (sticky), never two slots for one streamer,
+    streamers in a manual capture are skipped, free slots take the rest; extra slots wait
+limit (Settings → Recording, default 1): arming beyond it is refused; lowering it stops the newest
+per slot: Pause/Resume (reason: you / monitoring / overload / storage), Stop, Listen (one at a time)
+chat/viewer signals → the slot recording that streamer
+```
+
+**Overload protection** (`resource-governor.ts`, every ~10 s while recording): whole-machine CPU
+(`chrome.system.cpu`), available memory (`chrome.system.memory`), browser storage, and each slot's
+dropped frames. Sustained ~30 s over the limits (CPU ≥ 90%, < 1 GB free memory, > 10 frames dropped
+per 3 s) → new slots refused, the lowest-priority stream records at half frame rate, then pauses (the
+last running stream is never paused for load). A minute of normal load undoes one step at a time.
+Disk almost full (< 2 GB) → cleanup, then every stream pauses until space is back. A low frame rate
+alone is not overload: Chrome only produces frames when a page changes.
+
+### One stream
+
 Chrome lets an extension capture a tab only after the user invokes it on that tab. Verified in
 Chrome 157: once running, a tab capture **continues when the tab navigates** (same site or
 another). So the editor arms one **recorder tab** once (popup → *Use this tab as the recorder*), and

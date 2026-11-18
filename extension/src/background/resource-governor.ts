@@ -14,8 +14,11 @@ import type { CaptureState, SystemLoad } from "@/types/capture";
 
 export const LIMITS = {
   cpuPercent: 90, // sustained whole-machine CPU
-  minFreeMemBytes: 1.5 * 1024 ** 3,
-  minFps: 20, // a 30 fps recording below this is falling behind
+  // macOS reports little "available" memory even when healthy (≈ 2 GB on a busy 16 GB Mac).
+  minFreeMemBytes: 1 * 1024 ** 3,
+  // Frames dropped per report (~3 s) because the encoder is behind. A low frame rate alone is not
+  // overload: Chrome only delivers frames when the page changes (an offline channel page is static).
+  maxDroppedRecent: 10,
   minFreeStorageBytes: 2 * 1024 ** 3,
   overloadedSamples: 3, // ~30 s before acting
   healthySamples: 6, // ~60 s before undoing
@@ -51,8 +54,8 @@ export function overloadReason(s: Sample, slots: CaptureState[]): string | null 
   if (s.cpuPercent !== null && s.cpuPercent >= LIMITS.cpuPercent) return `CPU at ${Math.round(s.cpuPercent)}%`;
   if (s.memAvailableBytes !== null && s.memAvailableBytes < LIMITS.minFreeMemBytes)
     return `only ${(s.memAvailableBytes / 1024 ** 3).toFixed(1)} GB of memory free`;
-  const slow = slots.find((x) => x.recording && x.health && !x.health.throttled && x.health.fps > 0 && x.health.fps < LIMITS.minFps);
-  if (slow) return `${slow.channel ?? "a stream"} is encoding at ${slow.health!.fps} fps`;
+  const behind = slots.find((x) => x.recording && x.health && (x.health.droppedRecent ?? 0) > LIMITS.maxDroppedRecent);
+  if (behind) return `${behind.channel ?? "a stream"} is dropping frames (the encoder is behind)`;
   return null;
 }
 
@@ -80,7 +83,8 @@ export function decide(s: Sample, slots: CaptureState[], mem: GovernorMemory): D
   if (reason) {
     const runs = mem.overloadedRuns + 1;
     const memory = { overloadedRuns: runs, healthyRuns: 0 };
-    if (runs < LIMITS.overloadedSamples) return { overloaded: true, reason, actions, memory, note: null };
+    // One bad sample is a spike, not overload: nothing is refused or changed for ~30 s.
+    if (runs < LIMITS.overloadedSamples) return { overloaded: false, reason, actions, memory, note: null };
     const active = slots.filter((x) => x.recording && x.tabId !== null);
     const lowest = [...active].reverse();
     const toThrottle = lowest.find((x) => !x.health?.throttled);

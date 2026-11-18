@@ -222,8 +222,10 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
           ? "Already recording one stream. Stop it first, or allow more simultaneous streams in Settings → Recording."
           : `Already recording ${slots.length} streams (the limit). Stop one, or raise the limit in Settings → Recording.`,
       );
-    const system = (await chrome.storage.local.get("sh.system"))["sh.system"] as { overloaded?: boolean; reason?: string } | undefined;
-    if (system?.overloaded && slots.length > 0) throw new Error(`Not starting another stream: ${system.reason ?? "the Mac is overloaded"}.`);
+    // Only a recent, sustained overload measured while streams were running blocks a new one.
+    const system = (await chrome.storage.local.get("sh.system"))["sh.system"] as { overloaded?: boolean; reason?: string; at?: string } | undefined;
+    const fresh = system?.at ? deps.now() - Date.parse(system.at) < 30_000 : false;
+    if (system?.overloaded && fresh && slots.length > 0) throw new Error(`Not starting another stream: ${system.reason ?? "the Mac is overloaded"}.`);
   }
 
   /** Whether this new slot should play its sound (Settings → Recording → sound). */
@@ -390,7 +392,12 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
     await send({ target: "offscreen", type: "capture/stop", ...(tabId === undefined ? {} : { slot: tabId }) });
     for (const s of slots) if (s.tabId !== null) await removeSlot(s.tabId, message);
     if (tabId === undefined) await mutate((store) => void (store.note = message));
-    if ((await activeCount()) === 0) await deps.closeOffscreen().catch(() => undefined);
+    if ((await activeCount()) === 0) {
+      await deps.closeOffscreen().catch(() => undefined);
+      // Nothing records any more: an old overload verdict no longer applies.
+      const sys = (await chrome.storage.local.get("sh.system"))["sh.system"] as Record<string, unknown> | undefined;
+      if (sys?.overloaded) await chrome.storage.local.set({ "sh.system": { ...sys, overloaded: false, reason: null } });
+    }
     // Hand the speakers to another slot when the listened one stops.
     if (slots.some((s) => s.listening) && (await getSettings()).recording.audio === "first") {
       const next = (await getSlots())[0];

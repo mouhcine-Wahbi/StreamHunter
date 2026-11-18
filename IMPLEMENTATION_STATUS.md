@@ -1,10 +1,58 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-18 (v1.2)_
+_Last updated: 2026-11-18 (v2.0)_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
-## v1.2 — Several streams at once ✅ (current)
+## v2.0 — Multi-platform automatic clipping (current)
+
+Labels: **✅ tested for real** (real Chrome, real live pages) · **🧪 implemented, tested against documented
+responses** (simulated platform, not the real service) · **⚠️ partial** · **❌ not implemented** · **🚫 blocked
+by the platform or browser**.
+
+| Feature | Status | Evidence / notes |
+|---|---|---|
+| Platform adapter interface (Twitch, Kick, YouTube) | ✅ code + 🧪 | One interface; capabilities report support and how each was verified |
+| Twitch: search, live status, viewers, live-now | 🧪 | Real API needs your app; documented shapes tested |
+| Twitch without a client secret (Sign in with Twitch token) | 🧪 | Helix calls use the user token, no token endpoint |
+| Twitch chat signals | 🧪 | EventSub after Sign in with Twitch |
+| Kick: lookup, live status, viewers, live-now | 🧪 | Real API needs your app |
+| Kick chat | 🚫 | Kick delivers chat only to servers (webhooks) |
+| YouTube: add by link/@handle/ID/video, live status (feed + videos.list), viewers, quota budget, errors | 🧪 | Real Data API needs your key; no search for live checks (≈ 1 unit per check) |
+| YouTube search / live now | ⚠️ 🧪 | 100 units each, on request only |
+| YouTube chat | 🚫 | Polling cost would exhaust the daily quota |
+| Recording a real Twitch, Kick and YouTube live page | ✅ | Three slots at once: Kick (eray), Twitch (typicalgamer), YouTube (Lofi Girl), ~30 fps each, real sound (−14 to −45 dB) |
+| Scheduler: explainable priority, queue, fill free slots, keep healthy recordings | ✅ + unit tests | Real run: 3 highest-priority streamers recorded, the lower-priority one queued with its reason |
+| Automatic slot reassignment when a stream ends | ✅ | Real run: Kick streamer marked offline → its slot moved to the queued Twitch streamer |
+| Switch safeguards (minimum time, cooldown, margin, pending clips, one switch per run) | unit tests | Pure scheduler tests; a priority-driven switch was not exercised in real Chrome |
+| Failure detection and retry (no picture / black / silent+motionless → release, retry 2/5/15 min) | ✅ no picture · unit tests for the rest | Real run: YouTube tab frozen → failed after 45 s, slot released, retry scheduled. The silent+motionless rule was added after the real run showed a YouTube "Something went wrong" page that the frozen rule missed |
+| Clips: MP4 + sound, thumbnail at the peak, metadata, score explanation | ✅ | Real clips from all three platforms play in Chrome (1280×720 + AAC); an automatic 43 s clip of a real Kick stream |
+| Clip lifecycle (generating / ready / failed) and restart recovery | ✅ | Real run: Chrome killed while a clip was generating → after restart it is "failed: Chrome or StreamHunter stopped…" |
+| MP4 download from the Clip Library | ✅ | Real run: a 16 MB MP4 saved by Chrome's download |
+| Storage limits and cleanup (favourites kept) | ✅ | Real run: an old clip deleted, an old favourite kept |
+| Storage-full errors, low-disk warning, persistence request | unit tests | Quota exhaustion was not reproduced for real |
+| Dashboard: Overview, My Streamers, Live Monitoring (scheduler), Top Highlights, Clip Library, System Health, Settings | ✅ renders (preview) + UI tests | |
+| Overload protection with real CPU/memory readings | ✅ readings (v1.2 run) + unit tests | |
+| Several real players for hours, Mac sleep | ❌ not tested | Recording stops if Chrome closes or the Mac sleeps |
+| Excluded on purpose: Shorts/vertical, subtitles, editor/timeline, learning from feedback, social transforms, ZIP/batch download | ❌ by design | |
+
+**Found and fixed during the 2.0 real-Chrome runs:**
+* A scheduling error (a streamer without a channel name) could leave an engine encoding while its slot
+  showed "not recording". Each slot is now isolated; an error stops encoding and is shown.
+* The worker dropped the engine's `droppedRecent`, so v1.2's overload protection never saw dropped
+  frames.
+* A YouTube player error page wasn't detected as a failure: added the silent+motionless rule.
+* A saved clip's stored status stayed "generating" (only the computed one was right); fixed.
+* Restart clean-up now runs before the first live check.
+
+**Known limitation seen in the real run: Chrome records the whole tab**, including the platform's
+page around the player (chat column, menus, a cookie banner). Player-only pages were tried: Twitch's
+popout player and Kick's player page don't start playing without a click inside the page, and
+YouTube's embed refuses to load without a referring page (Error 153). So StreamHunter records the
+normal channel page. Switching each recorder tab to theater mode once (the platforms remember it)
+makes clips mostly the stream.
+
+## v1.2 — Several streams at once ✅
 
 | Item | Status | Notes |
 |---|---|---|

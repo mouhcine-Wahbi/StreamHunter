@@ -116,6 +116,9 @@ export async function saveClip(c: NewClip): Promise<LocalClip> {
   });
   await db.putBlob(clip.id, c.blob);
   if (c.thumbnail) await db.putBlob(clip.id, c.thumbnail, "clipThumbs");
+  // Its highlight is no longer "generating".
+  const h = await db.get<{ id: number; clip_status?: string }>("highlights", c.candidateId);
+  if (h?.clip_status && h.clip_status !== "ready") await db.put("highlights", { ...h, clip_status: "ready", clip_error: null });
   return clip;
 }
 

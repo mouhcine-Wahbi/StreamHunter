@@ -4,7 +4,11 @@
 
 1. **Local-first.** There is no StreamHunter server and no account. The monitoring list, highlights,
    clips, settings and credentials stay in the browser profile where the extension is installed.
-2. **Your own platform apps.** Twitch/Kick client IDs and secrets belong to the editor's own developer
+2. **Your own platform credentials, no secrets in the code.** Nothing secret is in the source or the
+   repository. Twitch can run with no secret at all (Sign in with Twitch, implicit grant with a
+   checked `state`). YouTube uses an API key for public data only (restrict it to the YouTube Data API
+   in Google Cloud). Kick's app-token flow needs your app's secret, kept only in this browser.
+   **Own apps (details).** Twitch/Kick client IDs and secrets belong to the editor's own developer
    apps. They are stored in `chrome.storage.local` and sent only to that platform's token endpoint
    (`id.twitch.tv`, `id.kick.com`). They are never logged or shown again after saving (the secret
    field stays empty).
@@ -37,7 +41,7 @@
 | `identity` | Sign in with Twitch (`launchWebAuthFlow`) |
 | `system.cpu`, `system.memory` | Overload protection while recording several streams (whole-machine CPU and free memory; nothing is sent anywhere) |
 | Keyboard shortcut (`commands`, Alt+Shift+R) | Arm the current tab as a recorder; it counts as the click Chrome requires |
-| Host access: `api.twitch.tv`, `id.twitch.tv`, `api.kick.com`, `id.kick.com` | The official APIs. The Twitch chat WebSocket (`eventsub.wss.twitch.tv`) needs no host permission |
+| Host access: `api.twitch.tv`, `id.twitch.tv`, `api.kick.com`, `id.kick.com`, `www.googleapis.com/youtube/v3/*`, `www.youtube.com/feeds/*` | The official APIs and YouTube's public upload feed. The Twitch chat WebSocket (`eventsub.wss.twitch.tv`) needs no host permission |
 
 No `tabs`, `<all_urls>`, `downloads`, `cookies` or content scripts.
 

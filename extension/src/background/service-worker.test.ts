@@ -63,9 +63,8 @@ describe("service worker wiring", () => {
     await chrome.storage.local.set({ [STORAGE_KEYS.monitoring]: { enabled: true, status: "active" } });
     await loadWorker();
     (chrome.runtime.onStartup as unknown as { emit: () => void }).emit();
-    await flush();
-    await flush();
-    expect(fakeChrome.internals.alarms.has(ALARMS.heartbeat)).toBe(true);
+    // Interrupted clips are marked failed first, then monitoring resumes.
+    await vi.waitFor(() => expect(fakeChrome.internals.alarms.has(ALARMS.heartbeat)).toBe(true));
   });
 
   it("opens the full workspace on first install", async () => {

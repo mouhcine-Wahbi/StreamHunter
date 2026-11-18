@@ -18,11 +18,11 @@ Lists return `{items, total, limit, offset}` and accept `limit` / `offset`.
 |---|---|
 | `GET /api/v1/streamers/search?platform=twitch\|kick&username=` | Twitch: Search Channels (exact match first, viewer counts for live ones). Kick: exact channel lookup |
 | `GET /api/v1/discover/live?platform=&limit=` | Live channels, most viewers first |
-| `GET /api/v1/streamers` · `POST /api/v1/streamers {platform, username}` | Monitoring list / add (resolved on the platform; 409 `already_in_watchlist`) |
-| `PATCH /api/v1/streamers/{id} {monitoring_enabled?, is_favorite?}` · `DELETE /api/v1/streamers/{id}` | Update / remove |
+| `GET /api/v1/streamers` (with `clip_count`) · `POST /api/v1/streamers {platform, username}` | Monitoring list / add; `username` may be a name, link, @handle or channel ID (resolved by the adapter; 409 `already_in_watchlist`) |
+| `PATCH /api/v1/streamers/{id} {monitoring_enabled?, is_favorite?, auto_record?, priority?}` · `DELETE /api/v1/streamers/{id}` | Update / remove |
 | `GET /api/v1/streams/live` | Live streamers on the list |
 | `POST /api/v1/streams/refresh` | Check live status now → `{checked, live, skipped_recent, unavailable: {platform: reason}}` |
-| `GET /api/v1/platforms/capabilities` | Per platform: `configured` (app credentials saved) and what is supported |
+| `GET /api/v1/platforms/capabilities` | Per platform: `configured`, `auth_message`, and per feature `{support: supported/partial/unsupported, verified: verified/simulated/untested, note}` |
 
 ### Monitoring
 | | |
@@ -35,7 +35,8 @@ Lists return `{items, total, limit, offset}` and accept `limit` / `offset`.
 |---|---|
 | `GET /api/v1/highlights?platform&status&min_score&date_from&streamer_id&has_video&sort=score` | Highlights; `sort=score` ranks them. Each has `origin` (`chat` / `viewers` / `capture`), `has_video`, `clip`, `reasons`, `signal_breakdown`, `window_start_ms` / `window_end_ms` |
 | `GET /api/v1/highlights/{id}` · `POST …/approve` · `POST …/reject` · `PATCH {status: "pending_review"}` · `DELETE` | Review |
-| `GET /api/v1/clips?sort=score&platform&streamer_id&category&duration=short\|medium\|long&type=audio\|chat\|visual\|viewers\|manual&favorite=true&min_score` | Clips with their metadata; default newest first |
+| `GET /api/v1/clips?sort=score|oldest&since=&platform&streamer_id&category&duration=short\|medium\|long&type=audio\|chat\|visual\|viewers\|manual&favorite=true&min_score` | Clips with their metadata; default newest first |
+| `GET /api/v1/highlights?clip_status=generating,failed` | Clips being generated or failed (with `clip_error`); never in the clip lists |
 | `GET /api/v1/clips/stats` | Clip count, favourites, total bytes and seconds, recorded seconds, browser storage estimate |
 | `PATCH /api/v1/clips/{id} {title?, favorite?}` · `DELETE /api/v1/clips/{id}` | Rename / favourite / delete (also deletes the video and thumbnail) |
 
@@ -63,6 +64,17 @@ each with `slot` (the captured tab id; `capture/stop` without one stops all); th
 | Kick | `POST https://id.kick.com/oauth/token` (client_credentials) | client id + secret | App token |
 | Kick | `GET https://api.kick.com/public/v1/channels?slug=…(≤50)` | app token | Lookup, live status |
 | Kick | `GET /public/v1/users?id=…` · `GET /public/v1/livestreams?limit=&sort=viewer_count` | app token | Avatars, live now |
+
+| YouTube | `GET https://www.youtube.com/feeds/videos.xml?channel_id=` | none (public feed) | Newest video IDs per channel (live check, no quota) |
+| YouTube | `GET /youtube/v3/videos?part=snippet,liveStreamingDetails&id=…(≤50)` | API key, 1 unit | Which are live: title, category id, concurrentViewers, actualStartTime/EndTime |
+| YouTube | `GET /youtube/v3/channels?part=snippet&id=…` · `&forHandle=@…` | API key, 1 unit | Resolve a channel (name, handle, avatar) |
+| YouTube | `GET /youtube/v3/playlistItems?part=contentDetails&playlistId=UU…` | API key, 1 unit | Fallback when the feed can't be read |
+| YouTube | `GET /youtube/v3/videoCategories?part=snippet&id=` | API key, 1 unit | Category names (cached) |
+| YouTube | `GET /youtube/v3/search?part=snippet&type=channel&q=` · `&type=video&eventType=live&order=viewCount` | API key, **100 units** | Search, live now: only when the editor clicks |
+
+Twitch Helix calls use the app token, or the Sign in with Twitch user token when no secret is saved.
+YouTube errors are read from the documented `error.errors[0].reason` (`quotaExceeded`, `keyInvalid`,
+`accessNotConfigured`); the key is never logged or echoed.
 
 Kick's per-field response shapes come from its OpenAPI spec and are parsed defensively (unknown
 fields ignored, ids as numbers or strings, Go zero times treated as "never").

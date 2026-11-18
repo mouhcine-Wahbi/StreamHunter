@@ -4,6 +4,23 @@ StreamHunter is a single Chrome extension (Manifest V3, React 19, TypeScript, Vi
 is no server. Until v1.0 a FastAPI backend existed; it was retired in the local-first migration
 ([docs/LOCAL_FIRST_MIGRATION.md](docs/LOCAL_FIRST_MIGRATION.md)) and is in git history before that.
 
+## 0. What changed in 2.0
+
+* **Platform adapters** (`src/platforms/adapter.ts`, `registry.ts`, `youtube.ts`): Twitch, Kick and
+  YouTube behind one interface: `search`, `resolve` (name/link/handle/ID), `status` (live state +
+  stream metadata, batched), `discoverLive`, `capabilities()` (support + how it was verified),
+  `authStatus()`, `watchUrl`, `parseUrl`. Monitoring, the scheduler and the pages only use this
+  interface. Adding/removing a channel is local (IndexedDB); the adapter resolves it.
+* **YouTube** uses the Data API v3 with the editor's own API key (public data, so no OAuth). For
+  live checks it reads each channel's public upload feed (no quota), then makes one `videos.list` per
+  50 IDs (1 unit); it falls back to `playlistItems.list` (1 unit). Search and live-now use
+  `search.list` (100 units), only on request. A daily budget (8,000 of 10,000 units, reset at
+  midnight Pacific) stops calls before the key is exhausted.
+* **Scheduler** (`src/background/scheduler.ts`, pure): explainable priority and slot decisions; see §3.
+* **Clip lifecycle**: generating → ready / failed (with the reason). Interrupted clips are marked
+  failed at startup.
+* **Twitch without a secret**: Helix calls use the Sign in with Twitch user token.
+
 ## 1. Pieces
 
 ```text
@@ -68,6 +85,34 @@ Kick's official API delivers chat only via webhooks to a public HTTPS server, so
 chat as unavailable and rely on live status and viewer spikes.
 
 ## 3. Recording and automatic clipping
+
+### Scheduler (v2.0)
+
+After every live check (and on arm, settings changes and failures) `runSync` → `plan()`:
+
+```text
+priority(streamer) = Σ weight × part / Σ weights            (default 45 / 20 / 15 / 15 / 5)
+  potential   clips per recorded hour ×20 (capped) ·0.6 + average clip score ·0.4; 50 until 10 min recorded
+  activity    0 / 40 / 70 / 100 for 0 / 1 / 2 / 3+ moments in the last 30 min
+  growth      viewer growth over this broadcast's median (+50% = 100) ·0.7 + log10(viewers)/5 ·0.3
+  user        50 + 20 × priority(−2…+2) + 30 if favourite
+  reliability 100 − 30 × recent failures
+eligible = live ∧ monitored ∧ Auto-record ∧ not waiting to retry ∧ not given up ∧ not in a manual capture
+1. keep slots whose streamer is still eligible (paused slots keep theirs)
+2. free/released slots take the highest-priority eligible streamers
+3. at most one switch per run: best waiting vs weakest recording, only if
+   gap ≥ switchMargin (12) ∧ recorded ≥ minRecordMinutes (10) ∧ since last switch ≥ cooldown (5)
+   ∧ no clip of it pending
+4. everyone live but not recorded → queue with a reason (waiting for slot, retry wait, gave up,
+   Auto-record off, manual capture)
+```
+
+Failures: a slot whose player shows no picture for 45 s or a black picture for 60 s fails its
+streamer. The slot is released and the streamer retried after 2, 5 and 15 minutes (`maxRetries`, 3),
+then not again for that broadcast; a new broadcast resets it. A 10-minute healthy recording clears
+failures. Every run is saved to `sh.scheduler` for the dashboard. Each slot's decision is applied in
+isolation: an error stops that slot's encoding and is shown, never a silent "not recording" while
+encoding.
 
 ### Several streams at once (v1.2)
 

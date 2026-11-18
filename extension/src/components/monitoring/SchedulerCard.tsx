@@ -86,6 +86,10 @@ export function SchedulerCard({ monitoring, compact = false }: { monitoring: Ret
               on it once: open the tabs, then press <kbd className="rounded bg-ink-800 px-1 text-fg">Alt+Shift+R</kbd> in each (or click the StreamHunter icon → Use this tab
               as a recorder).
             </p>
+            <p className="mt-1.5 text-warn/90">
+              Chrome records the whole tab. In each recorder tab, accept the cookie banner once and switch the player to theater mode (Twitch Alt+T, YouTube T): the
+              platforms remember it, so clips show mostly the stream.
+            </p>
             <Button className="mt-2" size="sm" variant="secondary" icon={<AppWindow className="size-3.5" />} onClick={() => void openRecorderWindow(setupUrls())}>
               Open {missing} recorder tab{missing === 1 ? "" : "s"}
             </Button>

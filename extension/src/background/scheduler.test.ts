@@ -179,4 +179,15 @@ describe("scheduler in the worker (slots, failures, reassignment)", () => {
     expect(slot).toMatchObject({ recording: false, streamerId: null, message: "Scheduling error: S1 has no channel name" });
     expect(sent.filter((x) => x.type === "capture/target" && x.slot === 10).map((x) => (x as { capture: unknown }).capture)).toEqual([null]);
   });
+
+  it("recognises a broken player: no picture, black picture, or silent and motionless (YouTube error page)", async () => {
+    const { playerProblem } = await import("./capture-manager");
+    const h = (o: object) => ({ fps: 10, dropped: 0, queue: 0, throttled: false, ...o });
+    expect(playerProblem(h({ noVideoSeconds: 44 }), 0)).toBeNull();
+    expect(playerProblem(h({ noVideoSeconds: 45 }), 0)).toMatch(/no picture/);
+    expect(playerProblem(h({ blackSeconds: 60 }), 0)).toMatch(/black screen/);
+    expect(playerProblem(h({ staticSeconds: 40 }), 10)).toBeNull(); // a calm stream with sound is fine
+    expect(playerProblem(h({ staticSeconds: 5 }), 60)).toBeNull(); // a quiet streamer who moves is fine
+    expect(playerProblem(h({ staticSeconds: 30 }), 30)).toMatch(/stalled/);
+  });
 });

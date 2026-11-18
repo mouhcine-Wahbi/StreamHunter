@@ -2,74 +2,66 @@
 
 **Find the moment. Capture the clip.**
 
-StreamHunter is an automatic clipping assistant for video editors, for Twitch and Kick. Pick the
-streamers, arm a recorder tab once, click **Start monitoring** and leave the computer running.
-StreamHunter switches the recorder tab to whichever selected streamer is live, listens to the
-sound, watches the picture, reads Twitch chat and viewer numbers, and when several of those react
-together it saves an MP4 clip. Come back to a library of ranked clips ready to review and download.
+StreamHunter is an automatic livestream clipping assistant for video editors, for **Twitch, Kick and
+YouTube Live**. Add the streamers you care about, start monitoring and leave the Mac running.
+StreamHunter checks who is live and picks the most promising streams for its recording slots (3 by
+default). It records them in the browser and watches for moments: sound, picture, Twitch chat and
+viewer spikes. When several of those react together, it saves an MP4 clip. Come back to a ranked list
+of individual clips, ready to download into your editor.
 
-Everything runs **inside your browser**. There is no StreamHunter server, no account and no upload:
-your monitoring list, highlights and clips live in this browser (IndexedDB), and StreamHunter talks
-to Twitch and Kick directly through their official APIs with your own free developer apps.
+Everything runs **inside Chrome**. There is no StreamHunter server, no account, no upload and no
+subscription. Your list, clips and settings stay in this browser. StreamHunter talks to each
+platform's official API with your own free developer credentials.
 
-> **Status:** v1.2, automatic clipping of several streams at once, local-first. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for what is
-> verified and how.
+> **Status:** v2.0. What is tested for real, against documented responses, or not yet is listed in
+> [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Settings → Platforms shows it per feature too.
 
 ## How it works
 
-| Mode | What it uses | What you get |
-|---|---|---|
-| **Discovery** (background) | Live status, title, category and viewers of your monitoring list (one batched request per platform every couple of minutes); Twitch chat over EventSub after "Sign in with Twitch" | Go-live notifications and **provisional highlights** (a time, a score, the reasons, **Open stream**). No video, and they are labelled that way |
-| **Automatic recording** (recorder tab) | One tab you arm once from the popup. StreamHunter navigates it to the live **Auto-record** streamer, encodes video and audio into a rolling buffer (2 minutes by default), and records nothing while nobody is live | Moments where several signals fire together become **MP4 clips** with a thumbnail, stored in the browser |
-| **Manual capture** | The stream open in the current tab | Same detection, plus **Save last 30 s** |
+```text
+My Streamers ──► Discovery (live checks every 2 min, official APIs, quota-aware)
+                     │ live streamers
+                     ▼
+                Scheduler ── priority = highlight potential 45% · activity 20% · viewer growth 15%
+                     │                   · your priority/favourite 15% · reliability 5%
+                     │ best N (default 3), queue for the rest, no needless switching
+                     ▼
+        Recorder tabs (one per slot) ──► engine per tab: video + audio → 2-minute buffer
+                     │                   sound / picture / chat / viewer signals → combined score
+                     ▼
+                MP4 clips (20 s before + 20 s after, thumbnail, why it scored) → ranked library
+```
 
-### How a clip is decided
+* **No single signal makes a clip** with the default settings. Audio is worth up to 25 points, chat 30,
+  picture 20, viewers 15, plus 10 when several fire together; a clip needs 40.
+* **The scheduler explains itself.** Every streamer's priority shows its parts. It keeps healthy
+  recordings and switches a slot only when a waiting streamer scores clearly more (12+ points), the
+  current recording has run 10 minutes, and no clip of it is still being saved.
+* **Honest status.** "Recording" means frames are being encoded right now. A frozen, black or muted
+  player is detected and shown. Live streamers that aren't recorded are listed with the reason.
 
-Each signal is measured against the stream's own normal and gets an intensity (0–100):
+## Platform support
 
-| Signal | What counts | Points at full strength (configurable) |
-|---|---|---|
-| Audio | Louder than usual, sudden bursts, shouting-like, cheer-like and laughter-like sound | 25 |
-| Chat (Twitch) | Message-rate spikes, repeated reactions (LOL, LMAO, WTF…), emote waves, many chatters at once | 30 |
-| Visual | Fast motion, rapid scene changes, flashes | 20 |
-| Viewers | Sudden viewer-count jumps (raids) | 15 |
-| Several kinds together | Bonus | 10 |
+| | Twitch | Kick | YouTube Live |
+|---|---|---|---|
+| Add by name / link / ID | ✅ | ✅ exact name or link | ✅ link, @handle, channel ID, video link |
+| Search | ✅ | ⚠️ no search API: exact name | ⚠️ costs 100 of 10,000 daily quota units, on request only |
+| Live status, title, category, viewers | ✅ | ✅ | ✅ public upload feed + 1 batched API call (≈ 1 unit per check) |
+| Chat signals | ✅ after Sign in with Twitch | 🚫 Kick sends chat only to servers | 🚫 chat polling would exhaust the daily quota |
+| Viewer spikes | ✅ | ✅ | ✅ |
+| Recording (tab capture) and automatic clips | ✅ | ✅ | ✅ (ads and autoplay muting apply) |
+| Native platform clips | ⚠️ optional (`clips:edit`) | 🚫 | 🚫 |
 
-Signals close together form one moment. A clip is saved when the moment's score reaches the
-threshold (40 by default), so **no single signal makes a clip on its own**. Overlapping moments
-extend one clip (up to 90 s) instead of saving the same footage twice. A clip covers 20 s before
-and 20 s after the moment. Audio cues are signal-processing heuristics, not a trained classifier,
-and are labelled "-like".
-
-StreamHunter never says a clip exists when it only saw chat or viewer numbers.
-
-## Features
-
-| | Status |
-|---|---|
-| Search Twitch channels by name; look up Kick channels by exact name; live-now lists for both | ✅ |
-| Monitoring list: live/offline, title, category, viewers, avatar, last check, Open stream | ✅ |
-| Background live-status checks (batched, rate-limit aware), sessions per broadcast, go-live notifications | ✅ |
-| Chat-based detection: spikes vs each stream's own normal, emote waves, repeated messages, "clip it", reactions in 8 languages, mood shifts | ✅ Twitch (needs Sign in with Twitch) |
-| Viewer-spike detection (raids, sudden attention) | ✅ Twitch and Kick |
-| Recorder tab: automatic channel switching, idle while offline, stream restarts | ✅ |
-| Signal fusion with configurable weights and threshold, no duplicate clips | ✅ |
-| Rolling buffer (60–300 s), 20 s / 20 s around each moment, MP4 + JPEG thumbnail | ✅ |
-| Start / Pause / Resume / Stop monitoring, five-stage pipeline status | ✅ |
-| Overview (status, streamers, clips, recording time, storage), Top Highlights (ranked clips, filters: score, recent, streamer, platform, category, duration, detection type), Clip Library (preview, download MP4, rename, delete, favourite) | ✅ |
-| Storage limit and age limit with automatic cleanup (favourites kept) | ✅ |
-| Optional native Twitch clip for each clip | ✅ opt-in (needs `clips:edit`) |
-| Several streams recorded at once (Settings → Recording: 1–8, default 1), one recorder tab each, independent detection and clips, per-stream Pause/Resume/Stop/Listen | ✅ verified with 3 in Chrome |
-| Overload protection: CPU, free memory, dropped frames, storage → half frame rate, then pause the lowest-priority stream | ✅ |
-| Kick chat | 🚫 Kick only sends chat to servers (webhooks) |
+✅ supported · ⚠️ partial · 🚫 not possible with the official API. Real-world verification per item: see
+[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ## Requirements
 
-* Google Chrome 116+ (or another Chromium browser with WebCodecs)
+* Google Chrome 116+ on a Mac (or any desktop Chromium with WebCodecs)
 * Node.js 20+ and npm 10+ to build
-* A free **Twitch** developer app and/or **Kick** developer app (see below)
+* Free developer credentials for the platforms you use (below)
 
-## Build and load the extension
+## Install
 
 ```bash
 cd extension
@@ -83,52 +75,96 @@ npm ci
 npm run build
 ```
 
-Then in Chrome:
+1. Open `chrome://extensions`, turn on **Developer mode**.
+2. **Load unpacked** → select `extension/dist`. Pin StreamHunter to the toolbar.
 
-1. Open `chrome://extensions` and turn on **Developer mode**.
-2. Click **Load unpacked** and select `extension/dist`.
-3. Pin StreamHunter in the toolbar. The workspace opens on first install.
+To update later, rebuild and click the reload icon on the extension card.
 
-During development, `npm run dev` rebuilds `dist/` on every change (reload the extension card to
-pick up service-worker or manifest changes).
+## Platform setup
 
-## Set up Twitch and Kick
-
-StreamHunter uses **your own** developer apps: an extension can't keep a shared secret, and your own
-app gives you your own rate limit. Both are free.
+Each platform uses **your own** free credentials. An extension can't keep a shared secret, and your
+own credentials give you your own rate limits and quota. They're stored only in this browser
+(`chrome.storage.local`) and sent only to that platform.
 
 **Twitch**
-
-1. Go to [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps) → **Register Your Application**.
-2. OAuth Redirect URL: copy the one shown in **Settings → Platforms → Twitch** (it looks like
-   `https://<extension-id>.chromiumapp.org/`). Category: anything. Client type: **Confidential**.
-3. Copy the **Client ID**, create a **Client Secret**, paste both in **Settings → Platforms → Twitch**
-   and click **Save and test**.
-4. For chat-based highlights, click **Sign in with Twitch** (permission: read chat).
+1. [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps) → Register Your Application. OAuth Redirect URL: the one shown
+   in Settings → Platforms → Twitch (`https://<extension-id>.chromiumapp.org/`).
+2. Paste the **Client ID** in Settings → Platforms → Twitch. You then have two options:
+   * **No secret (recommended):** leave the secret empty and click **Sign in with Twitch**. API calls
+     use your sign-in token, so no secret is stored. This also enables chat signals.
+   * **With secret:** create a Client Secret and paste it too (app token). Sign in only for chat.
+3. **Save and test.**
 
 **Kick**
+1. [kick.com/settings/developer](https://kick.com/settings/developer) → create an app (redirect URL: any, e.g. `http://localhost`).
+2. Paste the Client ID and Client Secret in Settings → Platforms → Kick → **Save and test**.
+   StreamHunter uses Kick's app-token (client credentials) flow, which needs the secret.
 
-1. Go to [kick.com/settings/developer](https://kick.com/settings/developer) and create an app
-   (redirect URL: any, e.g. `http://localhost`).
-2. Paste the **Client ID** and **Client Secret** in **Settings → Platforms → Kick** → **Save and test**.
-
-The credentials are stored only in this browser (`chrome.storage.local`) and sent only to that
-platform's token endpoint.
+**YouTube**
+1. [console.cloud.google.com](https://console.cloud.google.com/) → create a project → APIs & Services → **Enable APIs** → *YouTube Data
+   API v3*.
+2. Credentials → **Create credentials → API key**. Restrict it to the YouTube Data API v3.
+3. Paste it in Settings → Platforms → YouTube → **Save and test**. No Google sign-in is needed: only
+   public data is read.
 
 ## Using it
 
-1. **Discover**: pick Twitch or Kick, browse who's live or search a channel, click **Add**.
-2. **My Streamers**: turn on **Auto-record** for the streamer(s) you want clipped.
-3. Open `twitch.tv` (or `kick.com`) in a tab, click the StreamHunter icon and choose **Use this tab
-   as the recorder**. Chrome requires this one click; leave the tab open (it can be in the
-   background) and the player unmuted.
-   For several streams at once, set **Settings → Recording → Simultaneous streams** and arm one tab
-   per stream (the icon, or **Alt+Shift+R** on the tab). Each tab records a different live
-   Auto-record streamer (favourites first, then most viewers).
-4. **Start monitoring** and leave the computer running. The **Pipeline** panel shows each stage:
-   channel discovery, chat, video capture, detection, clip export.
-5. Come back to **Top Highlights** (ranked) and the **Clip Library** to preview, favourite and
-   download.
+1. **Add streamers:** in My Streamers, paste names or links, or use Discover. New streamers have
+   Auto-record on. Set their priority (−2…+2) or favourite them if you like.
+2. **Arm the recorder tabs (once per Chrome session).** Live Monitoring → Scheduler → **Open 3
+   recorder tabs**, then press **Alt+Shift+R** in each tab (or click the StreamHunter icon → Use this
+   tab as a recorder). Chrome only records a tab after one action of yours on it. StreamHunter then
+   moves each tab to the streamer it should record.
+3. **Start monitoring** and leave the Mac running and awake.
+4. Come back to **Top Highlights** (ranked; click **Why this score?** on a clip) and the **Clip
+   Library** to preview, favourite, rename and **Download MP4**.
+
+Controls: Start / Pause / Resume / Stop monitoring. Each recording slot also has its own Pause,
+Stop and Listen (only one stream plays sound; all are recorded with sound).
+
+## Settings worth knowing
+
+| Setting | Default |
+|---|---|
+| Simultaneous streams | 3 (one recorder tab each) |
+| Scheduler weights | 45 / 20 / 15 / 15 / 5, plus minimum recording 10 min, cooldown 5 min, switch margin 12 points, 3 retries |
+| Clip | 20 s before, 20 s after, at most 90 s, 2-minute buffer |
+| Detection | audio 25, chat 30, visual 20, viewers 15, multi-signal bonus 10, clip at 40 |
+| Storage | 5 GB; oldest non-favourite clips deleted first; optional age limit |
+| Overload protection | on: half frame rate, then pause the lowest-priority stream |
+
+## Known limitations
+
+* **Recording needs Chrome open, the Mac awake and one action per recorder tab per Chrome session.**
+  After a restart, monitoring resumes by itself but the tabs must be armed again. System Health says
+  so. Clips that were still being saved at that moment are marked failed, never shown as clips.
+* **One tab per simultaneous stream.** A tab can't be recorded twice. Measured on an Apple M5 /
+  16 GB: about 0.1–0.15 CPU core per recorded stream plus the platform's own player, and 6–8 Mbit/s
+  download per stream. 3 is comfortable, 5 if little else runs.
+* **Chrome records the whole recorder tab**, including the page around the player (chat column,
+  menus). Player-only pages don't autoplay or refuse to load outside the platform, so StreamHunter
+  uses the normal channel page. **Switch each recorder tab to theater mode once** (Twitch Alt+T,
+  YouTube T) and accept its cookie banner. The platforms remember it, so clips show mostly the stream.
+* **The recorder tab plays the platform's page.** Pre-roll ads, mature-content gates and a muted
+  player affect the recording. Muting is detected; a frozen or black player releases the slot and is
+  retried after 2, 5 and 15 minutes.
+* **YouTube quota:** about 1 unit per live check. Searches and the "live now" list cost 100 units and
+  only run when you click.
+* **Clips live in browser storage.** StreamHunter asks Chrome to keep it (System Health shows
+  whether Chrome agreed), pauses recording below 2 GB free, and deletes the oldest non-favourites at
+  your limit. Download the clips you want to keep.
+* Audio cues (laughter-, cheer-, shouting-like) are signal-processing heuristics, not a trained model.
+
+## Troubleshooting
+
+| Symptom | What to do |
+|---|---|
+| "No recorder tab is armed" | Live Monitoring → Open recorder tabs → Alt+Shift+R in each |
+| "Live but not recorded: all slots busy" | Raise Settings → Recording → Simultaneous streams, or set priorities |
+| "the player shows no picture / a black screen / looks stalled" | Check the tab: player error, ad, consent page, mature-content gate, or the stream ended. It's retried after 2, 5, 15 min |
+| "No sound … is the player muted?" | Unmute the platform's player in that tab |
+| A platform shows "Problem" in System Health | Read the message: credentials, rate limit (it waits), or YouTube quota (resets at midnight Pacific) |
+| "Browser storage is full" | Delete clips, lower the storage limit, or free disk space |
 
 ## Tests
 
@@ -140,37 +176,14 @@ npm test
 npm run typecheck
 ```
 
-The tests run against an in-memory fake of the Chrome APIs, a fake IndexedDB and a fake Twitch/Kick
-that follows the documented request and response shapes. Chat detection is tested on a seeded chat
-simulator. The MP4 muxer runs for real.
-
-## Known limitations
-
-* Monitoring runs **only while Chrome is open**.
-* **Kick chat isn't available**: Kick delivers chat only to a public server via webhooks. Kick
-  discovery uses live status and viewer spikes.
-* **Video only exists while a recorder tab runs.** Chrome needs one click on a tab before it can be
-  captured; after a Chrome restart or if the recorder tab is closed, arm it again (the Pipeline
-  panel says so). A moment found from chat while nothing was recorded has no video.
-* **One recorder tab per simultaneous stream**, each armed with one click per Chrome session (a tab
-  can't be captured twice). Measured on an Apple M5 / 16 GB: recording costs about 0.1–0.15 CPU core
-  per stream; each real Twitch player adds roughly 0.15–0.3 core and 300–600 MB (estimate) and
-  6–8 Mbit/s of download. 3 streams are comfortable on such a Mac, 5 if little else runs.
-* With several streams, only one plays its sound (Listen per stream); all are recorded with sound.
-* The recorder tab plays the stream: pre-roll ads and "mature content" gates on the platform's page
-  are recorded too or can block playback. Muting the player mutes the capture (a warning appears
-  after 20 s of silence).
-* Clips are cut on keyframes (every 2 s), so they can start up to 2 s early. They keep the tab's
-  framing (no 9:16 reframing or subtitles; edit them in your editor).
-* Twitch's Sign in with Twitch token can expire; sign in again when chat shows as unavailable.
-* Clips live in this browser's storage. Download the ones you want to keep; clearing site data for
-  the extension deletes them.
+151 unit and integration tests (fake Chrome APIs, fake IndexedDB, fake platforms following each
+API's documented responses) plus real-Chrome runs on real live pages. See IMPLEMENTATION_STATUS.md.
 
 ## Documentation
 
-* [ARCHITECTURE.md](ARCHITECTURE.md): how the pieces fit, platform APIs, Chrome constraints
-* [API_DOCUMENTATION.md](API_DOCUMENTATION.md): the internal local API and the platform endpoints used
-* [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md): IndexedDB stores and chrome.storage keys
-* [SECURITY.md](SECURITY.md): permissions, credentials, privacy
-* [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): what works and how it was verified
-* [docs/LOCAL_FIRST_MIGRATION.md](docs/LOCAL_FIRST_MIGRATION.md): why and how StreamHunter moved from a backend to local-first
+* [ARCHITECTURE.md](ARCHITECTURE.md): adapters, scheduler, recording, detection, Chrome constraints
+* [API_DOCUMENTATION.md](API_DOCUMENTATION.md): the internal local API and every platform endpoint used
+* [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md): IndexedDB stores and storage keys
+* [SECURITY.md](SECURITY.md): permissions (and why), credentials, privacy
+* [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): what is tested, how, and what isn't
+* [docs/AUTO_CLIPPING_PLAN.md](docs/AUTO_CLIPPING_PLAN.md), [docs/LOCAL_FIRST_MIGRATION.md](docs/LOCAL_FIRST_MIGRATION.md): earlier design notes

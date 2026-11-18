@@ -37,6 +37,8 @@ export interface SlotHealth {
   noVideoSeconds?: number;
   /** Consecutive seconds of an (almost) black picture. */
   blackSeconds?: number;
+  /** Consecutive seconds with almost no movement in the picture (error page, still frame). */
+  staticSeconds?: number;
 }
 
 /**

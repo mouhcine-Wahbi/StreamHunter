@@ -17,6 +17,8 @@ describe("clip lifecycle: detected → generating → ready / failed", () => {
     await saveClip({ candidateId: ready.id, sessionId: null, streamerId: 1, streamerName: "A", platform: "twitch", title: "t", startedAt: T, durationSec: 40, width: 2, height: 2, score: 60, blob: new Blob(["v"]),
       explain: { parts: { audio: 20, chat: 21, visual: 0, viewers: 0, multi: 10 }, confidence: 0.7, eventSeconds: 6.5 } });
     await markClipFailed(bad.id, "That moment is no longer in the recording buffer.");
+    const { db } = await import("./db");
+    expect((await db.get<LocalHighlight>("highlights", ready.id))?.clip_status).toBe("ready"); // stored, not only computed
     const list = await listHighlights();
     const st = (id: number) => list.find((h) => h.id === id)!;
     expect([st(ready.id).clip_status, st(gen.id).clip_status, st(bad.id).clip_status, st(provisional.id).clip_status]).toEqual(["ready", "generating", "failed", undefined]);

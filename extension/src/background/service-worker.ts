@@ -128,15 +128,14 @@ chrome.runtime.onInstalled.addListener((details) => {
   void (async () => {
     // Show the workspace first; the clean-up after an install/update runs behind it.
     if (details.reason === "install") await chrome.tabs.create({ url: chrome.runtime.getURL("app.html#/overview") });
+    await capture.reset(); // local and quick: interrupted clips are marked failed before anything else
     await manager.restore();
-    await capture.reset();
   })();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   log("browser_startup");
-  void manager.restore();
-  void capture.reset();
+  void capture.reset().then(() => manager.restore());
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {

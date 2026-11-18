@@ -203,6 +203,21 @@ async function targetFor(streamer: Streamer): Promise<CaptureTarget & { sessionK
   };
 }
 
+/**
+ * Is this recording actually showing the stream? Checked on every engine report.
+ * - no frame at all for 45 s: the player froze, paused or was blocked;
+ * - a black picture for 60 s;
+ * - no sound and almost no movement for 30 s: an error page ("Something went wrong"), a still
+ *   frame or an ended stream (seen in real Chrome on YouTube).
+ */
+export function playerProblem(h: SlotHealth | undefined, silentSeconds: number): string | null {
+  if (!h) return null;
+  if ((h.noVideoSeconds ?? 0) >= 45) return "the player shows no picture (frozen, paused or blocked)";
+  if ((h.blackSeconds ?? 0) >= 60) return "the player shows a black screen";
+  if (silentSeconds >= 30 && (h.staticSeconds ?? 0) >= 30) return "the player looks stalled (no sound and no movement for 30 s: an error, a still frame or an ended stream)";
+  return null;
+}
+
 // --- scheduler inputs and outputs ----------------------------------------------------------------
 
 export const SCHEDULER_KEY = "sh.scheduler";
@@ -629,7 +644,7 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
     await db.put("streamers", next);
     // The player isn't showing the stream: a failed recording of this streamer (the slot moves on).
     const h = st.health;
-    const reason = h && (h.noVideoSeconds ?? 0) >= 45 ? "the player shows no picture (frozen, paused or blocked)" : h && (h.blackSeconds ?? 0) >= 60 ? "the player shows a black screen" : null;
+    const reason = playerProblem(h, st.silentSeconds ?? 0);
     if (reason) await recordingFailed(tabId, s.streamerId, reason);
   }
 

@@ -126,6 +126,7 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
   let lastEncodedAt = 0;
   let noVideoSeconds = 0;
   let blackSeconds = 0;
+  let staticSeconds = 0;
 
   // --- video -----------------------------------------------------------------------------------
   let vBase: { wall: number; ts: number } | null = null;
@@ -337,6 +338,8 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
       noVideoSeconds = secBright.length === 0 ? noVideoSeconds + 1 : 0;
       blackSeconds = secBright.length > 0 && Math.max(...secBright) < 12 ? blackSeconds + 1 : secBright.length > 0 ? 0 : blackSeconds;
       const sorted = [...secMotion].sort((a, b) => a - b);
+      // Almost nothing changes on screen (≤ 0.4 of 255 per pixel): an error page, a still frame…
+      staticSeconds = secMotion.length === 0 || Math.max(...secMotion) <= 0.4 ? staticSeconds + 1 : 0;
       signals.add({
         t: now,
         db: f?.db ?? null,
@@ -379,7 +382,8 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
         recordedSeconds: Math.round(recordedMs / 1000),
         silentSeconds,
         health: { fps: isActive() ? fps : 0, dropped, droppedRecent, queue: vEnc.state === "configured" ? vEnc.encodeQueueSize : 0, throttled,
-          pendingClips: clipper.pendingCount() + manual.length, noVideoSeconds: isActive() ? noVideoSeconds : 0, blackSeconds: isActive() ? blackSeconds : 0 },
+          pendingClips: clipper.pendingCount() + manual.length, noVideoSeconds: isActive() ? noVideoSeconds : 0, blackSeconds: isActive() ? blackSeconds : 0,
+          staticSeconds: isActive() ? staticSeconds : 0 },
       });
     }
   }, 1000);
@@ -419,6 +423,7 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
     async setTarget(next: CaptureTarget | null) {
       noVideoSeconds = 0;
       blackSeconds = 0;
+      staticSeconds = 0;
       if (target && next && target.streamerId === next.streamerId) {
         target = next; // same streamer, fresher session/category
         return;

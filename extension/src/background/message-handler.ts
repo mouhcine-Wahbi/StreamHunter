@@ -86,6 +86,8 @@ export async function handleMessage(
           health: message.health && typeof message.health === "object" ? {
             fps: Number(message.health.fps) || 0, dropped: Number(message.health.dropped) || 0,
             queue: Number(message.health.queue) || 0, throttled: Boolean(message.health.throttled),
+            droppedRecent: Number(message.health.droppedRecent) || 0, pendingClips: Number(message.health.pendingClips) || 0,
+            noVideoSeconds: Number(message.health.noVideoSeconds) || 0, blackSeconds: Number(message.health.blackSeconds) || 0,
           } : undefined,
         });
         await onLoad?.();

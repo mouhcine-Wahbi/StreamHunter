@@ -37,6 +37,14 @@ export interface Streamer extends StreamerSearchResult {
   is_favorite: boolean;
   /** Recorder mode records this streamer automatically while live. */
   auto_record?: boolean;
+  /** Your priority for recording, −2 … +2 (scheduler). */
+  priority?: number;
+  /** Seconds this streamer has been recorded (scheduler history). */
+  recorded_seconds?: number;
+  /** Recording failures of the current broadcast, next retry and why (scheduler). */
+  record_failures?: number;
+  record_retry_at?: string | null;
+  record_error?: string | null;
   updated_at: string;
 }
 

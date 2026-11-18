@@ -43,6 +43,18 @@ export interface Settings {
     /** Also create a clip on Twitch itself (needs Sign in with Twitch with the clips:edit permission). */
     twitchNativeClips: boolean;
   };
+  scheduler: {
+    /** Priority weights (any scale; shown as percentages). */
+    weights: { potential: number; activity: number; growth: number; user: number; reliability: number };
+    /** A recording is never replaced before it has run this long. */
+    minRecordMinutes: number;
+    /** A slot doesn't switch streamer again within this time. */
+    cooldownMinutes: number;
+    /** A waiting streamer must score this many points more to replace a recording. */
+    switchMargin: number;
+    /** Failed recordings of a broadcast are retried this many times (2, 5, 15 min apart). */
+    maxRetries: number;
+  };
   recording: {
     /** How many streams may be recorded at the same time (one recorder tab each). */
     maxStreams: number;
@@ -85,7 +97,8 @@ export const DEFAULT_SETTINGS: Settings = {
     clipThreshold: 40,
   },
   clips: { preRollSeconds: 20, postRollSeconds: 20, bufferSeconds: 120, maxClipSeconds: 90, twitchNativeClips: false },
-  recording: { maxStreams: 1, quality: "720p", audio: "first", protectResources: true },
+  scheduler: { weights: { potential: 45, activity: 20, growth: 15, user: 15, reliability: 5 }, minRecordMinutes: 10, cooldownMinutes: 5, switchMargin: 12, maxRetries: 3 },
+  recording: { maxStreams: 3, quality: "720p", audio: "first", protectResources: true },
   storage: { maxTotalMb: 5120, maxAgeDays: 0 },
   notifications: { onHighlight: true, onStreamerLive: false },
   locale: { timeZone: "auto", language: "en" },
@@ -103,6 +116,10 @@ export const LIMITS = {
   maxTotalMb: { min: 200, max: 102_400 },
   maxAgeDays: { min: 0, max: 365 },
   maxStreams: { min: 1, max: 8 },
+  minRecordMinutes: { min: 0, max: 120 },
+  cooldownMinutes: { min: 0, max: 60 },
+  switchMargin: { min: 0, max: 100 },
+  maxRetries: { min: 0, max: 10 },
   customKeywords: { maxItems: 50, maxLength: 40 },
 } as const;
 

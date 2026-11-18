@@ -31,6 +31,12 @@ export interface SlotHealth {
   queue: number;
   /** Recording at half frame rate to save CPU (overload protection). */
   throttled: boolean;
+  /** Clips of this slot still waiting for their post-roll. */
+  pendingClips?: number;
+  /** Consecutive seconds without any video frame (player frozen, paused or gone). */
+  noVideoSeconds?: number;
+  /** Consecutive seconds of an (almost) black picture. */
+  blackSeconds?: number;
 }
 
 /**
@@ -46,6 +52,9 @@ export interface CaptureState {
   health: SlotHealth | null;
   /** When the slot was armed/started (ordering). */
   armedAt: string | null;
+  /** When the slot started recording its current streamer, and when it last switched (scheduler). */
+  assignedAt: string | null;
+  switchedAt: string | null;
   /** Encoding into the buffer right now (false while the recorder waits for a streamer or is paused). */
   recording: boolean;
   paused: boolean;
@@ -77,6 +86,8 @@ export const INITIAL_CAPTURE_STATE: CaptureState = {
   listening: false,
   health: null,
   armedAt: null,
+  assignedAt: null,
+  switchedAt: null,
   recording: false,
   paused: false,
   waitingReason: null,

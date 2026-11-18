@@ -64,7 +64,7 @@ describe("recorder tab (automatic recording)", () => {
     await db.put("streamers", streamer(2));
     s = await m.sync();
     expect(navigations.at(-1)).toBe("https://www.twitch.tv/s2");
-    expect(s).toMatchObject({ recording: true, streamerId: 2, message: "Recording S2." });
+    expect(s).toMatchObject({ recording: true, streamerId: 2, message: expect.stringMatching(/^S2 gets this slot \(priority \d+\)\.$/) });
 
     // Nobody live → stop encoding, say why.
     await db.put("streamers", streamer(2, { is_live: false }));

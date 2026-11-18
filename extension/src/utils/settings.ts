@@ -69,6 +69,9 @@ export function sanitizeSettings(input: unknown): Settings {
   const priv = isRecord(s.privacy) ? s.privacy : {};
   const store = isRecord(s.storage) ? s.storage : {};
   const rec = isRecord(s.recording) ? s.recording : {};
+  const sch = isRecord(s.scheduler) ? s.scheduler : {};
+  const sw = isRecord(sch.weights) ? sch.weights : {};
+  const sweight = (k: keyof Settings["scheduler"]["weights"]) => clampInt(sw[k], 0, 100, d.scheduler.weights[k]);
   const w = isRecord(det.weights) ? det.weights : {};
   const weight = (k: keyof Settings["detection"]["weights"]) => clampInt(w[k], LIMITS.weight.min, LIMITS.weight.max, d.detection.weights[k]);
 
@@ -112,6 +115,13 @@ export function sanitizeSettings(input: unknown): Settings {
       bufferSeconds: clampInt(clips.bufferSeconds, LIMITS.bufferSeconds.min, LIMITS.bufferSeconds.max, d.clips.bufferSeconds),
       maxClipSeconds: clampInt(clips.maxClipSeconds, LIMITS.maxClipSeconds.min, LIMITS.maxClipSeconds.max, d.clips.maxClipSeconds),
       twitchNativeClips: bool(clips.twitchNativeClips, d.clips.twitchNativeClips),
+    },
+    scheduler: {
+      weights: { potential: sweight("potential"), activity: sweight("activity"), growth: sweight("growth"), user: sweight("user"), reliability: sweight("reliability") },
+      minRecordMinutes: clampInt(sch.minRecordMinutes, LIMITS.minRecordMinutes.min, LIMITS.minRecordMinutes.max, d.scheduler.minRecordMinutes),
+      cooldownMinutes: clampInt(sch.cooldownMinutes, LIMITS.cooldownMinutes.min, LIMITS.cooldownMinutes.max, d.scheduler.cooldownMinutes),
+      switchMargin: clampInt(sch.switchMargin, LIMITS.switchMargin.min, LIMITS.switchMargin.max, d.scheduler.switchMargin),
+      maxRetries: clampInt(sch.maxRetries, LIMITS.maxRetries.min, LIMITS.maxRetries.max, d.scheduler.maxRetries),
     },
     recording: {
       maxStreams: clampInt(rec.maxStreams, LIMITS.maxStreams.min, LIMITS.maxStreams.max, d.recording.maxStreams),

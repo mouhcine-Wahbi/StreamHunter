@@ -50,6 +50,9 @@ export async function addStreamer(info: ChannelInfo): Promise<Streamer> {
     status_checked_at: now(),
     monitoring_enabled: true,
     is_favorite: false,
+    // 2.0: StreamHunter records what you add, unless you turn Auto-record off.
+    auto_record: true,
+    priority: 0,
     updated_at: now(),
   });
 }
@@ -65,12 +68,15 @@ export async function resolveChannel(clients: Clients, platform: Platform, input
   }
 }
 
-export async function updateStreamer(id: number, patch: Partial<Pick<Streamer, "monitoring_enabled" | "is_favorite" | "auto_record">>): Promise<Streamer> {
+export async function updateStreamer(id: number, patch: Partial<Pick<Streamer, "monitoring_enabled" | "is_favorite" | "auto_record" | "priority">>): Promise<Streamer> {
   const s = await getStreamer(id);
   const next = { ...s, updated_at: now() };
   if (typeof patch.monitoring_enabled === "boolean") next.monitoring_enabled = patch.monitoring_enabled;
   if (typeof patch.is_favorite === "boolean") next.is_favorite = patch.is_favorite;
   if (typeof patch.auto_record === "boolean") next.auto_record = patch.auto_record;
+  if (typeof patch.priority === "number" && Number.isFinite(patch.priority)) next.priority = Math.max(-2, Math.min(2, Math.round(patch.priority)));
+  // Turning Auto-record back on gives a streamer that kept failing a fresh chance.
+  if (patch.auto_record === true) Object.assign(next, { record_failures: 0, record_retry_at: null, record_error: null });
   return db.put("streamers", next);
 }
 

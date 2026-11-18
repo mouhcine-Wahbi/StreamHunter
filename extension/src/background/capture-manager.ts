@@ -6,6 +6,8 @@ import { addStreamer, platformClients, resolveChannel, streamUrl } from "@/local
 import { getMonitoringState, getSettings } from "@/store/storage";
 import type { Streamer } from "@/types/api";
 import type { Signal } from "@/detection/fusion";
+import { listClips } from "@/local/clips";
+import { nextRetry, plan, type SchedStreamer, type StreamerHistory } from "./scheduler";
 import {
   CAPTURES_KEY, channelFromUrl, INITIAL_CAPTURE_STATE, STATS_KEY,
   type CaptureOptions, type CaptureState, type CaptureTarget, type ClipRequest, type PauseReason, type SlotHealth,
@@ -201,6 +203,84 @@ async function targetFor(streamer: Streamer): Promise<CaptureTarget & { sessionK
   };
 }
 
+// --- scheduler inputs and outputs ----------------------------------------------------------------
+
+export const SCHEDULER_KEY = "sh.scheduler";
+
+/** What the dashboard shows about the scheduler (written after every run). */
+export interface SchedulerSnapshot {
+  at: string;
+  maxSlots: number;
+  armedSlots: number;
+  recording: { slot: number; streamerId: number; name: string; platform: string; total: number | null; since: string | null }[];
+  decisions: { slot: number; action: string; detail: string }[];
+  queue: { streamerId: number; name: string; total: number | null; reason: string; detail: string }[];
+  priorities: { streamerId: number; name: string; platform: string; total: number; parts: Record<string, number>; explain: string[] }[];
+  tracked: number;
+  live: number;
+  lastRecordingAt: string | null;
+  failures: { streamerId: number; name: string; error: string; failures: number; retryAt: string | null }[];
+}
+
+/** Local record per streamer: recording time, clips, recent moments (scheduler potential/activity). */
+async function streamerHistory(now: number): Promise<Map<number, StreamerHistory>> {
+  const [streamers, clips, highlights] = await Promise.all([db.all<SchedStreamer & { recorded_seconds?: number }>("streamers"), listClips(), db.all<LocalHighlight>("highlights")]);
+  const since = new Date(now - 30 * 60_000).toISOString();
+  const out = new Map<number, StreamerHistory>();
+  for (const s of streamers) {
+    const own = clips.filter((c) => c.streamer_id === s.id && c.status === "ready");
+    out.set(s.id, {
+      recordedSeconds: s.recorded_seconds ?? 0,
+      clips: own.length,
+      avgClipScore: own.length ? own.reduce((a, c) => a + c.score, 0) / own.length : null,
+      recentMoments: highlights.filter((h) => h.streamer_id === s.id && h.timestamp >= since).length,
+    });
+  }
+  return out;
+}
+
+/** A new broadcast gets a clean slate: failures of the previous one don't count. */
+async function resetFailuresOnNewBroadcast(list: SchedStreamer[]): Promise<SchedStreamer[]> {
+  const out: SchedStreamer[] = [];
+  for (const s of list) {
+    const x = s as SchedStreamer & { record_failure_broadcast?: string | null };
+    if ((x.record_failures ?? 0) > 0 && x.record_failure_broadcast !== undefined && x.record_failure_broadcast !== s.stream_started_at && s.is_live) {
+      const clean = { ...x, record_failures: 0, record_retry_at: null, record_error: null, record_failure_broadcast: null };
+      await db.put("streamers", clean);
+      out.push(clean);
+    } else out.push(s);
+  }
+  return out;
+}
+
+async function saveSchedule(p: ReturnType<typeof plan>, streamers: SchedStreamer[], slots: CaptureState[], maxSlots: number, now: number) {
+  const byId = new Map(streamers.map((s) => [s.id, s]));
+  const total = new Map(p.priorities.map((x) => [x.streamerId, x.total]));
+  const prev = (await chrome.storage.local.get(SCHEDULER_KEY))[SCHEDULER_KEY] as SchedulerSnapshot | undefined;
+  const recordingNow = slots.filter((s) => s.recording && s.streamerId !== null);
+  const snap: SchedulerSnapshot = {
+    at: new Date(now).toISOString(),
+    maxSlots,
+    armedSlots: slots.filter((s) => s.mode === "recorder").length,
+    recording: p.decisions
+      .filter((d) => d.streamerId !== null)
+      .map((d) => {
+        const s = byId.get(d.streamerId!)!;
+        return { slot: d.slot, streamerId: s.id, name: s.display_name, platform: s.platform, total: total.get(s.id) ?? null, since: slots.find((x) => x.tabId === d.slot)?.assignedAt ?? null };
+      }),
+    decisions: p.decisions.map((d) => ({ slot: d.slot, action: d.action, detail: d.detail })),
+    queue: p.queue,
+    priorities: p.priorities.map((x) => ({ ...x, name: byId.get(x.streamerId)?.display_name ?? "?", platform: byId.get(x.streamerId)?.platform ?? "twitch", parts: { ...x.parts } })),
+    tracked: streamers.filter((s) => s.monitoring_enabled).length,
+    live: streamers.filter((s) => s.monitoring_enabled && s.is_live).length,
+    lastRecordingAt: recordingNow.length ? new Date(now).toISOString() : (prev?.lastRecordingAt ?? null),
+    failures: streamers
+      .filter((s) => (s.record_failures ?? 0) > 0)
+      .map((s) => ({ streamerId: s.id, name: s.display_name, error: s.record_error ?? "unknown", failures: s.record_failures ?? 0, retryAt: s.record_retry_at ?? null })),
+  };
+  await chrome.storage.local.set({ [SCHEDULER_KEY]: snap });
+}
+
 // --- manager ---------------------------------------------------------------------------------------
 
 /** Recording slots, driven by the worker. State lives in storage (the worker may sleep in between). */
@@ -348,14 +428,26 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
       return getCaptureState();
     }
 
-    const streamers = await db.all<Streamer>("streamers");
+    const streamers = await resetFailuresOnNewBroadcast(await db.all<SchedStreamer>("streamers"));
     const manualIds = new Set(slots.filter((s) => s.mode === "manual" && s.streamerId !== null).map((s) => s.streamerId!));
-    const plan = assignTargets(streamers, recorders.map((r) => ({ slot: r.tabId!, current: r.streamerId })), manualIds);
+    const nowMs = deps.now();
+    const schedule = plan(
+      streamers,
+      await streamerHistory(nowMs),
+      recorders.map((r) => ({ slot: r.tabId!, streamerId: r.streamerId, assignedAt: r.assignedAt, pendingClips: r.health?.pendingClips ?? 0, paused: r.paused && r.pauseReason !== "monitoring" })),
+      { maxSlots: settings.recording.maxStreams, ...settings.scheduler },
+      nowMs,
+      manualIds,
+      new Map(recorders.filter((r) => r.switchedAt).map((r) => [r.tabId!, r.switchedAt!])),
+    );
+    await saveSchedule(schedule, streamers, slots, settings.recording.maxStreams, nowMs);
     const anyAuto = streamers.some((x) => x.auto_record && x.monitoring_enabled);
+    const byId = new Map(streamers.map((x) => [x.id, x]));
 
     for (const r of recorders) {
       const tabId = r.tabId!;
-      const next = plan[tabId] ?? null;
+      const decision = schedule.decisions.find((d) => d.slot === tabId);
+      const next = decision?.streamerId != null ? (byId.get(decision.streamerId) ?? null) : null;
       // Resume slots paused only because monitoring was paused.
       const pausedNow = r.paused && r.pauseReason !== "monitoring";
       if (r.paused && r.pauseReason === "monitoring") await send({ target: "offscreen", type: "capture/pause", slot: tabId, paused: false });
@@ -363,7 +455,8 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
         if (r.streamerId !== null || r.recording) await send({ target: "offscreen", type: "capture/target", slot: tabId, capture: null });
         sessionKeys.delete(tabId);
         await patchSlot(tabId, {
-          recording: false, paused: pausedNow, pauseReason: pausedNow ? r.pauseReason : null, streamerId: null, channel: null,
+          recording: false, paused: pausedNow, pauseReason: pausedNow ? r.pauseReason : null, streamerId: null, channel: null, assignedAt: null,
+          message: decision?.action === "release" ? decision.detail : r.message,
           waitingReason: anyAuto
             ? recorders.length > 1 ? "Waiting for another Auto-record streamer to go live." : "Waiting for an Auto-record streamer to go live."
             : "No streamer has Auto-record on. Turn it on in My Streamers.",
@@ -377,10 +470,13 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
       if (switching || restarted) await deps.navigate(tabId, streamUrl(next)).catch(() => undefined);
       sessionKeys.set(tabId, sessionKey);
       await send({ target: "offscreen", type: "capture/target", slot: tabId, capture: target });
+      const at = new Date(nowMs).toISOString();
       await patchSlot(tabId, {
         recording: !pausedNow, paused: pausedNow, pauseReason: pausedNow ? r.pauseReason : null,
         streamerId: next.id, platform: next.platform, channel: next.username.toLowerCase(), waitingReason: null,
-        message: switching ? `Recording ${next.display_name}.` : restarted ? `${next.display_name} restarted the stream; recording again.` : r.message,
+        assignedAt: switching ? at : (r.assignedAt ?? at),
+        switchedAt: switching && r.streamerId !== null ? at : r.switchedAt,
+        message: switching ? (decision?.action === "switch" && r.streamerId !== null ? decision.detail : `Recording ${next.display_name}.`) : restarted ? `${next.display_name} restarted the stream; recording again.` : r.message,
       });
     }
     return getCaptureState();
@@ -505,6 +601,40 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
       bufferedSeconds: st.bufferedSeconds, levelDb: st.levelDb, recordedSeconds: recorded, silentSeconds: st.silentSeconds ?? 0,
       ...(st.health ? { health: st.health } : {}),
     });
+    if (s.streamerId === null || !s.recording) return;
+    const streamer = await db.get<SchedStreamer & { recorded_seconds?: number; record_failure_broadcast?: string | null }>("streamers", s.streamerId);
+    if (!streamer) return;
+    // Per-streamer recording time (scheduler: clips per recorded hour).
+    let next = { ...streamer, recorded_seconds: (streamer.recorded_seconds ?? 0) + delta };
+    // A healthy recording of 10 minutes clears earlier failures.
+    const healthyFor = s.assignedAt ? (deps.now() - Date.parse(s.assignedAt)) / 1000 : 0;
+    if ((next.record_failures ?? 0) > 0 && healthyFor >= 600 && !(st.health?.noVideoSeconds || st.health?.blackSeconds))
+      next = { ...next, record_failures: 0, record_retry_at: null, record_error: null };
+    await db.put("streamers", next);
+    // The player isn't showing the stream: a failed recording of this streamer (the slot moves on).
+    const h = st.health;
+    const reason = h && (h.noVideoSeconds ?? 0) >= 45 ? "the player shows no picture (frozen, paused or blocked)" : h && (h.blackSeconds ?? 0) >= 60 ? "the player shows a black screen" : null;
+    if (reason) await recordingFailed(tabId, s.streamerId, reason);
+  }
+
+  /** A recording of `streamerId` in slot `tabId` failed: release the slot, retry later (2, 5, 15 min). */
+  async function recordingFailed(tabId: number, streamerId: number, reason: string): Promise<void> {
+    const settings = await getSettings();
+    const streamer = await db.get<SchedStreamer & { record_failure_broadcast?: string | null }>("streamers", streamerId);
+    if (!streamer) return;
+    const failures = (streamer.record_failures ?? 0) + 1;
+    const retryAt = nextRetry(failures, deps.now(), settings.scheduler.maxRetries);
+    await db.put("streamers", {
+      ...streamer, record_failures: failures, record_retry_at: retryAt, record_error: reason, record_failure_broadcast: streamer.stream_started_at,
+    });
+    await send({ target: "offscreen", type: "capture/target", slot: tabId, capture: null });
+    sessionKeys.delete(tabId);
+    await patchSlot(tabId, {
+      recording: false, streamerId: null, channel: null, assignedAt: null,
+      message: `Couldn't record ${streamer.display_name}: ${reason}. ${retryAt ? `Retrying at ${new Date(retryAt).toLocaleTimeString()}.` : "Not retried until the next broadcast."}`,
+    });
+    await deps.notify("Recording problem", `${streamer.display_name}: ${reason}.`, `sh-fail-${streamerId}-${failures}`);
+    await sync();
   }
 
   async function onDetection(tabId: number, d: { at: number; reasons: string[]; score: number; clipped: boolean }) {
@@ -563,7 +693,7 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
   }
 
   return {
-    start, arm, sync, stop, setPaused, setListening, setThrottled, applySettings, saveLast,
+    start, arm, sync, stop, setPaused, setListening, setThrottled, applySettings, saveLast, recordingFailed,
     onHighlight, onStatus, onDetection, onClipSaved, onClipFailed, onEnded, onTabRemoved, reset,
   };
 }

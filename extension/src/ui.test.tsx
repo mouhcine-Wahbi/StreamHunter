@@ -95,7 +95,7 @@ describe("popup capture (capture mode)", () => {
     const starts: unknown[] = [];
     workerWithCapture((m) => starts.push(m));
     render(<Popup />);
-    await userEvent.click(await screen.findByRole("button", { name: "Use this tab as a recorder" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Use this tab as a recorder (1 of 3)" }));
     expect(starts).toEqual([{ type: "capture/arm", tabId: 42 }]);
     expect(screen.queryByRole("button", { name: /Only capture this stream/ })).not.toBeInTheDocument(); // a directory page is not a channel
   });

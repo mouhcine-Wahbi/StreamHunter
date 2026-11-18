@@ -124,6 +124,8 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
   let encodedSinceReport = 0;
   let lastReport = Date.now();
   let lastEncodedAt = 0;
+  let noVideoSeconds = 0;
+  let blackSeconds = 0;
 
   // --- video -----------------------------------------------------------------------------------
   let vBase: { wall: number; ts: number } | null = null;
@@ -323,6 +325,8 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
       const f = meter.take();
       latestDb = f?.db ?? null;
       silentSeconds = f && f.db > SILENT_DB ? 0 : silentSeconds + 1;
+      noVideoSeconds = secBright.length === 0 ? noVideoSeconds + 1 : 0;
+      blackSeconds = secBright.length > 0 && Math.max(...secBright) < 12 ? blackSeconds + 1 : secBright.length > 0 ? 0 : blackSeconds;
       const sorted = [...secMotion].sort((a, b) => a - b);
       signals.add({
         t: now,
@@ -365,7 +369,8 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
         recording: isActive(),
         recordedSeconds: Math.round(recordedMs / 1000),
         silentSeconds,
-        health: { fps: isActive() ? fps : 0, dropped, droppedRecent, queue: vEnc.state === "configured" ? vEnc.encodeQueueSize : 0, throttled },
+        health: { fps: isActive() ? fps : 0, dropped, droppedRecent, queue: vEnc.state === "configured" ? vEnc.encodeQueueSize : 0, throttled,
+          pendingClips: clipper.pendingCount() + manual.length, noVideoSeconds: isActive() ? noVideoSeconds : 0, blackSeconds: isActive() ? blackSeconds : 0 },
       });
     }
   }, 1000);
@@ -403,6 +408,8 @@ export async function startEngine(streamId: string, initialTarget: CaptureTarget
     },
     /** Switch streamer (or null = wait). Pending clips of the previous streamer are cut first. */
     async setTarget(next: CaptureTarget | null) {
+      noVideoSeconds = 0;
+      blackSeconds = 0;
       if (target && next && target.streamerId === next.streamerId) {
         target = next; // same streamer, fresher session/category
         return;

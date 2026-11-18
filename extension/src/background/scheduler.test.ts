@@ -169,4 +169,14 @@ describe("scheduler in the worker (slots, failures, reassignment)", () => {
     expect((await getSlots())[0]!.channel).toBe("s1");
     expect(await db.get<SchedStreamer>("streamers", 1)).toMatchObject({ record_failures: 0 });
   });
+
+  it("a scheduling error never leaves an engine encoding while the slot says it isn't (found in real Chrome)", async () => {
+    await db.put("streamers", { ...s(1), username: undefined } as unknown as SchedStreamer);
+    const { d, sent } = deps();
+    const m = createCaptureManager(d);
+    await m.arm(10);
+    const slot = (await getSlots())[0]!;
+    expect(slot).toMatchObject({ recording: false, streamerId: null, message: "Scheduling error: S1 has no channel name" });
+    expect(sent.filter((x) => x.type === "capture/target" && x.slot === 10).map((x) => (x as { capture: unknown }).capture)).toEqual([null]);
+  });
 });

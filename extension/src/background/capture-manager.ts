@@ -448,6 +448,18 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
     const byId = new Map(streamers.map((x) => [x.id, x]));
 
     for (const r of recorders) {
+      try {
+        await applyDecision(r);
+      } catch (e) {
+        // Never leave an engine encoding while the dashboard says otherwise.
+        await send({ target: "offscreen", type: "capture/target", slot: r.tabId!, capture: null });
+        sessionKeys.delete(r.tabId!);
+        await patchSlot(r.tabId!, { recording: false, streamerId: null, channel: null, assignedAt: null, message: `Scheduling error: ${e instanceof Error ? e.message : "unknown"}` });
+      }
+    }
+    return getCaptureState();
+
+    async function applyDecision(r: CaptureState): Promise<void> {
       const tabId = r.tabId!;
       const decision = schedule.decisions.find((d) => d.slot === tabId);
       const next = decision?.streamerId != null ? (byId.get(decision.streamerId) ?? null) : null;
@@ -464,8 +476,9 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
             ? recorders.length > 1 ? "Waiting for another Auto-record streamer to go live." : "Waiting for an Auto-record streamer to go live."
             : "No streamer has Auto-record on. Turn it on in My Streamers.",
         });
-        continue;
+        return;
       }
+      if (!next.username) throw new Error(`${next.display_name ?? "A streamer"} has no channel name`);
       const { sessionKey, ...target } = await targetFor(next);
       const switching = next.id !== r.streamerId;
       const last = sessionKeys.get(tabId);
@@ -482,7 +495,6 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
         message: switching ? (decision?.action === "switch" && r.streamerId !== null ? decision.detail : `Recording ${next.display_name}.`) : restarted ? `${next.display_name} restarted the stream; recording again.` : r.message,
       });
     }
-    return getCaptureState();
   }
 
   /** Stop one slot (tabId) or all of them. */

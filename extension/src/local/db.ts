@@ -8,12 +8,12 @@
  */
 
 export const DB_NAME = "streamhunter";
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 export type StoreName =
   | "streamers" | "sessions" | "highlights" | "clips" | "clipBlobs" | "clipThumbs"
-  // v3 (3.0): discovery, authorized sources, output assets, publishing, rights
-  | "candidates" | "sources" | "sourceBlobs" | "assets" | "assetBlobs" | "jobs" | "rights";
+  // v3 (3.0): discovery, authorized sources, output assets, rights
+  | "candidates" | "sources" | "sourceBlobs" | "assets" | "assetBlobs" | "rights";
 export type BlobStore = "clipBlobs" | "clipThumbs" | "sourceBlobs" | "assetBlobs";
 
 function upgrade(db: IDBDatabase, oldVersion: number): void {
@@ -21,6 +21,8 @@ function upgrade(db: IDBDatabase, oldVersion: number): void {
   // v2: a JPEG thumbnail per clip (key = clip id → Blob image/jpeg).
   if (!db.objectStoreNames.contains("clipThumbs")) db.createObjectStore("clipThumbs");
   if (oldVersion < 3) createV3(db);
+  // v4: StreamHunter doesn't publish (you upload clips yourself); the publishing jobs store is removed.
+  if (oldVersion < 4 && db.objectStoreNames.contains("jobs")) db.deleteObjectStore("jobs");
 }
 
 /** 3.0: existing stores and data are untouched; only new stores are added. */
@@ -36,10 +38,6 @@ function createV3(db: IDBDatabase): void {
   const assets = db.createObjectStore("assets", { keyPath: "id", autoIncrement: true });
   assets.createIndex("clip", "clip_id");
   db.createObjectStore("assetBlobs");
-  // One publishing job per asset and destination.
-  const jobs = db.createObjectStore("jobs", { keyPath: "id", autoIncrement: true });
-  jobs.createIndex("asset", "asset_id");
-  jobs.createIndex("clip", "clip_id");
   // Rights per creator (key "platform:platform_user_id").
   db.createObjectStore("rights", { keyPath: "key" });
 }

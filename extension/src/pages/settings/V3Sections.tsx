@@ -12,7 +12,6 @@ import { FACTOR_LABEL, type FactorKey } from "@/scoring/score";
 import { sendRequest } from "@/services/runtime";
 import type { DeepPartial, Settings } from "@/types/settings";
 import { KeywordEditor, NumberField, Section } from "./sections";
-import { PublishingSection } from "./PublishingSection";
 
 export interface V3SectionProps {
   s: Settings;
@@ -148,7 +147,7 @@ export function ScoringSection({ s, update }: V3SectionProps) {
     <Section
       id="scoring"
       title="Viral-potential score"
-      description="An estimate from what StreamHunter measured about each clip (reactions, timing, fit for each platform), never a prediction of views. Weights are relative; the score is the weighted average. High: eligible for automatic publishing when every check passes. Medium: needs your approval. Low: manual review only. Low confidence never publishes automatically."
+      description="An estimate from what StreamHunter measured about each clip (reactions, timing, fit for each platform), never a prediction of views. Weights are relative; the score is the weighted average. High: a strong candidate to upload. Medium: worth reviewing. Low: probably not worth posting. A high score with low confidence (few measurements) shows as medium."
     >
       {(Object.keys(sc.weights) as FactorKey[]).map((k) => (
         <Field key={k} inline label={FACTOR_LABEL[k]} hint={sum ? `${Math.round((sc.weights[k] / sum) * 100)}% of the score` : undefined}>
@@ -156,10 +155,10 @@ export function ScoringSection({ s, update }: V3SectionProps) {
         </Field>
       ))}
       <Field inline label="High potential from" hint="Initially 85.">
-        {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={sc.publishThreshold} min={1} max={100} onCommit={(publishThreshold) => void update({ scoring: { publishThreshold } })} />}
+        {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={sc.highThreshold} min={1} max={100} onCommit={(highThreshold) => void update({ scoring: { highThreshold } })} />}
       </Field>
       <Field inline label="Medium potential from" hint="Below this: low potential.">
-        {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={sc.reviewThreshold} min={0} max={99} onCommit={(reviewThreshold) => void update({ scoring: { reviewThreshold } })} />}
+        {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={sc.mediumThreshold} min={0} max={99} onCommit={(mediumThreshold) => void update({ scoring: { mediumThreshold } })} />}
       </Field>
     </Section>
   );
@@ -255,8 +254,8 @@ export function AiSection({ s, update }: V3SectionProps) {
           {msg && <p className="text-xs text-fg-muted">{msg}</p>}
         </>
       )}
-      <Field inline label="Credit the creator" hint={'Adds "Credit: <creator> on <platform> <link>" to every description and post.'}>
-        {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Credit the creator" checked={s.publishing.attribution} onChange={(attribution) => void update({ publishing: { attribution } })} />}
+      <Field inline label="Credit the creator" hint={'Adds "Credit: <creator> on <platform> <link>" to every generated description.'}>
+        {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Credit the creator" checked={s.metadata.attribution} onChange={(attribution) => void update({ metadata: { attribution } })} />}
       </Field>
     </Section>
   );
@@ -269,7 +268,6 @@ export function V3Sections(props: V3SectionProps) {
       <FormatsSection {...props} />
       <ScoringSection {...props} />
       <AiSection {...props} />
-      <PublishingSection {...props} />
     </>
   );
 }

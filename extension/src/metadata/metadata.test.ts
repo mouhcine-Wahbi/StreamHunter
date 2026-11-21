@@ -256,10 +256,10 @@ describe("viral-potential score", () => {
     const s = scoreClip(detected(), [vertical, landscape], settings());
     expect(s.total).toBeGreaterThanOrEqual(85);
     expect(s.tier).toBe("high");
-    expect(s.summary).toMatch(/eligible for automatic publishing/);
-    const stricter = scoreClip(detected(), [vertical, landscape], settings((x) => (x.scoring.publishThreshold = 99)));
+    expect(s.summary).toMatch(/strong candidate to upload/);
+    const stricter = scoreClip(detected(), [vertical, landscape], settings((x) => (x.scoring.highThreshold = 99)));
     expect(stricter.tier).toBe("medium");
-    expect(stricter.summary).toMatch(/needs your approval/);
+    expect(stricter.summary).toMatch(/worth reviewing/);
   });
 
   it("weights change the score", () => {
@@ -269,14 +269,14 @@ describe("viral-potential score", () => {
     expect(platformOnly.total).not.toBe(base.total);
   });
 
-  it("weak clips are low and never auto-publish", () => {
+  it("weak clips are low", () => {
     const s = scoreClip(detected({ score_parts: { audio: 10, chat: 5, visual: 5, viewers: 0, multi: 0 }, reasons: [], detection_types: ["audio"], category: null, event_seconds: 0 }), [], settings());
     expect(s.tier).toBe("low");
   });
 
   it("high scores with low confidence become medium", () => {
     // A manual clip from a file: nothing about the live audience was measured.
-    const s = scoreClip(detected({ confidence: 0.4 }), [vertical, landscape], settings((x) => (x.scoring.publishThreshold = 50)));
+    const s = scoreClip(detected({ confidence: 0.4 }), [vertical, landscape], settings((x) => (x.scoring.highThreshold = 50)));
     expect(s.total).toBeGreaterThanOrEqual(50);
     expect(s.confidence).toBeLessThan(0.5);
     expect(s.tier).toBe("medium");

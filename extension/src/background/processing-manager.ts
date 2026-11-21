@@ -15,7 +15,7 @@ export interface ProcessingDeps {
   kick: () => Promise<unknown>;
   /** Close the offscreen document when nothing records and nothing is processed. */
   closeIfIdle: () => Promise<void>;
-  /** A finished asset (phase 6/7 hook: metadata, scoring, publishing). */
+  /** A finished asset (hook for metadata and scoring). */
   onAssetReady?: (assetId: number, clipId: number) => Promise<void>;
 }
 

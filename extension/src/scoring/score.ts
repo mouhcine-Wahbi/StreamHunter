@@ -159,13 +159,25 @@ export function scoreClip(
   const measuredShare = factors.filter((f) => f.measured).reduce((a, f) => a + f.weight, 0) / wsum;
   const confidence = Math.round(measuredShare * (clip.confidence ?? (detected ? 0.7 : 0.5)) * 100) / 100;
 
-  const { publishThreshold, reviewThreshold } = settings.scoring;
-  let tier: Tier = total >= publishThreshold ? "high" : total >= reviewThreshold ? "medium" : "low";
+  const { highThreshold, mediumThreshold } = settings.scoring;
+  let tier: Tier = total >= highThreshold ? "high" : total >= mediumThreshold ? "medium" : "low";
   let summary =
-    tier === "high" ? `${total} ≥ ${publishThreshold}: eligible for automatic publishing when every check passes.` : tier === "medium" ? `${total} is between ${reviewThreshold} and ${publishThreshold}: needs your approval.` : `${total} < ${reviewThreshold}: kept out of automatic publishing; you can still review it.`;
+    tier === "high" ? `${total} ≥ ${highThreshold}: a strong candidate to upload.` : tier === "medium" ? `${total} is between ${mediumThreshold} and ${highThreshold}: worth reviewing before you upload it.` : `${total} < ${mediumThreshold}: probably not worth posting, but it's your call.`;
   if (tier === "high" && confidence < 0.5) {
     tier = "medium";
-    summary = `${total} ≥ ${publishThreshold}, but confidence is only ${Math.round(confidence * 100)}% (few measurements), so it needs your approval.`;
+    summary = `${total} ≥ ${highThreshold}, but confidence is only ${Math.round(confidence * 100)}% (few measurements), so review it before you upload it.`;
   }
   return { total, confidence, tier, factors, summary, fitBy, computed_at: now.toISOString() };
+}
+
+/**
+ * Where a clip fits best, from the platform-fit factor already in its score: destinations sorted by
+ * fit, best first. Only destinations whose version (vertical for YouTube Shorts and TikTok,
+ * landscape for X) is ready count as a recommendation; this says where to upload, it uploads nothing.
+ */
+export function recommendPlatforms(score: Pick<ClipScore, "fitBy">, ready: { vertical: boolean; landscape: boolean }): { dest: Destination; points: number; inputs: string[] }[] {
+  return (Object.entries(score.fitBy) as [Destination, { points: number; inputs: string[] }][])
+    .filter(([d]) => (d === "x" ? ready.landscape : ready.vertical))
+    .map(([dest, f]) => ({ dest, points: f.points, inputs: f.inputs }))
+    .sort((a, b) => b.points - a.points);
 }

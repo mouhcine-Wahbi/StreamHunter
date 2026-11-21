@@ -110,21 +110,15 @@ export interface Settings {
   /** 3.0 viral-potential score (estimated, never a guarantee). */
   scoring: {
     weights: { hook: number; emotion: number; engagement: number; story: number; share: number; platform: number };
-    /** High potential: auto-publish when every check passes. */
-    publishThreshold: number;
-    /** Medium potential (≥ this, below publishThreshold): needs your approval. Below: low, manual review only. */
-    reviewThreshold: number;
+    /** High potential (strong candidate) from this score. */
+    highThreshold: number;
+    /** Medium potential (worth reviewing) from this score, below highThreshold. Below: low. */
+    mediumThreshold: number;
   };
-  /** 3.0 publishing. */
-  publishing: {
-    autoPublish: boolean;
-    destinations: Record<"youtube" | "tiktok" | "x", { enabled: boolean; dailyLimit: number }>;
-    youtubePrivacy: "private" | "unlisted" | "public";
-    /** TikTok privacy level; must be one TikTok offers for the account (unaudited apps: only SELF_ONLY works). */
-    tiktokPrivacy: "SELF_ONLY" | "MUTUAL_FOLLOW_FRIENDS" | "FOLLOWER_OF_CREATOR" | "PUBLIC_TO_EVERYONE";
+  /** 3.0 titles, descriptions and hashtags (you upload the clips yourself). */
+  metadata: {
     /** Adds "Credit: <creator> on <platform>" with the source link to every description. */
     attribution: boolean;
-    maxRetries: number;
   };
   /** 3.0 metadata generation: on-device AI → your provider → templates. */
   ai: {
@@ -165,12 +159,8 @@ export const DEFAULT_SETTINGS: Settings = {
     keywords: [], keywordYouTube: false, language: "", maxAgeDays: 7, minViews: 0, minEngagementPct: 0, perSourceMax: 20,
   },
   formats: { vertical: true, landscape: true, verticalLayout: "facecam_top" },
-  scoring: { weights: { hook: 25, emotion: 20, engagement: 20, story: 15, share: 10, platform: 10 }, publishThreshold: 85, reviewThreshold: 60 },
-  publishing: {
-    autoPublish: true,
-    destinations: { youtube: { enabled: true, dailyLimit: 5 }, tiktok: { enabled: true, dailyLimit: 10 }, x: { enabled: true, dailyLimit: 20 } },
-    youtubePrivacy: "public", tiktokPrivacy: "SELF_ONLY", attribution: true, maxRetries: 3,
-  },
+  scoring: { weights: { hook: 25, emotion: 20, engagement: 20, story: 15, share: 10, platform: 10 }, highThreshold: 85, mediumThreshold: 60 },
+  metadata: { attribution: true },
   ai: { onDevice: true, external: "none", model: "", endpoint: "" },
   locale: { timeZone: "auto", language: "en" },
   privacy: { retentionDays: 30 },

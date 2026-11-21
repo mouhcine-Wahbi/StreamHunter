@@ -1,7 +1,8 @@
 export const ALARMS = {
   heartbeat: "sh-heartbeat",
   discovery: "sh-discovery",
-  publishing: "sh-publishing",
+  /** Every 5 minutes: resumes the processing queue left by a closed browser or document. */
+  maintenance: "sh-maintenance",
 } as const;
 
 /** Content discovery runs every N hours (0 = only when you click Run). */
@@ -17,9 +18,11 @@ export async function syncDiscoveryAlarm(enabled: boolean, hours: number): Promi
   await chrome.alarms.create(ALARMS.discovery, { delayInMinutes: 1, periodInMinutes: period });
 }
 
-/** Publishing queue: retries and status checks every 5 minutes while Chrome is open. */
-export async function syncPublishingAlarm(): Promise<void> {
-  if (!(await chrome.alarms.get(ALARMS.publishing))) await chrome.alarms.create(ALARMS.publishing, { delayInMinutes: 1, periodInMinutes: 5 });
+/** Maintenance: resumes the processing queue every 5 minutes while Chrome is open. */
+export async function syncMaintenanceAlarm(): Promise<void> {
+  // 3.0 builds before publishing was removed used "sh-publishing" for the same timer.
+  await chrome.alarms.clear("sh-publishing").catch(() => false);
+  if (!(await chrome.alarms.get(ALARMS.maintenance))) await chrome.alarms.create(ALARMS.maintenance, { delayInMinutes: 1, periodInMinutes: 5 });
 }
 
 /**

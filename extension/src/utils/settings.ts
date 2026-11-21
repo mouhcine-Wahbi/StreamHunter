@@ -84,16 +84,13 @@ export function sanitizeSettings(input: unknown): Settings {
   const sc = isRecord(s.scoring) ? s.scoring : {};
   const scw = isRecord(sc.weights) ? sc.weights : {};
   const pub = isRecord(s.publishing) ? s.publishing : {};
-  const pubd = isRecord(pub.destinations) ? pub.destinations : {};
+  const meta = isRecord(s.metadata) ? s.metadata : {};
   const ai = isRecord(s.ai) ? s.ai : {};
   const strList = (v: unknown, fallback: string[], max = 30, len = 60) =>
     Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean).map((x) => x.slice(0, len)))].slice(0, max) : fallback;
   const text = (v: unknown, fallback: string, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : fallback);
-  const dest = (k: "youtube" | "tiktok" | "x") => {
-    const x = isRecord(pubd[k]) ? pubd[k] : {};
-    return { enabled: bool(x.enabled, d.publishing.destinations[k].enabled), dailyLimit: clampInt(x.dailyLimit, 0, 100, d.publishing.destinations[k].dailyLimit) };
-  };
-  const review = clampInt(sc.reviewThreshold, 0, 100, d.scoring.reviewThreshold);
+  // Earlier 3.0 builds named these publishThreshold / reviewThreshold and kept attribution under "publishing".
+  const medium = clampInt(sc.mediumThreshold ?? sc.reviewThreshold, 0, 100, d.scoring.mediumThreshold);
   const endpoint = text(ai.endpoint, d.ai.endpoint, 300);
 
   const tz = typeof loc.timeZone === "string" && isValidTimeZone(loc.timeZone) ? loc.timeZone : d.locale.timeZone;
@@ -182,16 +179,11 @@ export function sanitizeSettings(input: unknown): Settings {
         engagement: clampInt(scw.engagement, 0, 100, d.scoring.weights.engagement), story: clampInt(scw.story, 0, 100, d.scoring.weights.story),
         share: clampInt(scw.share, 0, 100, d.scoring.weights.share), platform: clampInt(scw.platform, 0, 100, d.scoring.weights.platform),
       },
-      publishThreshold: Math.max(review, clampInt(sc.publishThreshold, 0, 100, d.scoring.publishThreshold)),
-      reviewThreshold: review,
+      highThreshold: Math.max(medium, clampInt(sc.highThreshold ?? sc.publishThreshold, 0, 100, d.scoring.highThreshold)),
+      mediumThreshold: medium,
     },
-    publishing: {
-      autoPublish: bool(pub.autoPublish, d.publishing.autoPublish),
-      destinations: { youtube: dest("youtube"), tiktok: dest("tiktok"), x: dest("x") },
-      youtubePrivacy: oneOf(pub.youtubePrivacy, ["private", "unlisted", "public"] as const, d.publishing.youtubePrivacy),
-      tiktokPrivacy: oneOf(pub.tiktokPrivacy, ["SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "PUBLIC_TO_EVERYONE"] as const, d.publishing.tiktokPrivacy),
-      attribution: bool(pub.attribution, d.publishing.attribution),
-      maxRetries: clampInt(pub.maxRetries, 0, 10, d.publishing.maxRetries),
+    metadata: {
+      attribution: bool(meta.attribution ?? pub.attribution, d.metadata.attribution),
     },
     ai: {
       onDevice: bool(ai.onDevice, d.ai.onDevice),

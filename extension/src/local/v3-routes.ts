@@ -1,6 +1,4 @@
 /** LocalApi routes for 3.0 data (discovery candidates, sources, rights). */
-import { approveJob, cancelJob, listJobs, retryJob, type JobState } from "./jobs";
-import { planManual } from "@/publishing/plan";
 import { listCandidates, type Candidate } from "@/discovery/discovery";
 import { listCreatorRights, setCreatorRights, type CreatorRights } from "./rights";
 import { deleteSource, listSources, updateCandidate } from "./sources";
@@ -33,16 +31,6 @@ export function v3Routes(page: <T>(items: T[], q: URLSearchParams) => unknown): 
       return listAssets(clip && /^\d+$/.test(clip) ? Number(clip) : undefined);
     }],
     ["PATCH", /^\/api\/v1\/clips\/(\d+)\/metadata\/(youtube|tiktok|x)$/, async (m, _q, b) => editMetadata(Number(m[1]), m[2] as Destination, (b ?? {}) as Record<string, unknown>, await getSettings())],
-    ["GET", /^\/api\/v1\/jobs$/, async (_m, q) => {
-      const clip = q.get("clip");
-      const state = q.get("state");
-      return listJobs({ clipId: clip && /^\d+$/.test(clip) ? Number(clip) : undefined, state: (state as JobState) || undefined });
-    }],
-    ["POST", /^\/api\/v1\/jobs$/, (_m, _q, b) => {
-      const body = (b ?? {}) as { clipId?: unknown; destinations?: unknown };
-      return planManual(Number(body.clipId), (Array.isArray(body.destinations) ? body.destinations : []) as Destination[]);
-    }],
-    ["POST", /^\/api\/v1\/jobs\/(\d+)\/(approve|cancel|retry)$/, (m) => (m[2] === "approve" ? approveJob : m[2] === "cancel" ? cancelJob : retryJob)(Number(m[1]))],
     ["GET", /^\/api\/v1\/rights$/, async () => listCreatorRights()],
     ["POST", /^\/api\/v1\/rights$/, (_m, _q, b) => {
       const body = (b ?? {}) as { key?: string; platform?: CreatorRights["platform"]; creator_name?: string } & Parameters<typeof setCreatorRights>[2];

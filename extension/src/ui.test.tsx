@@ -19,8 +19,6 @@ import type { Streamer } from "@/types/api";
 import { createProcessingManager } from "@/background/processing-manager";
 import { listAssets, patchAsset, queueAssets } from "@/local/assets";
 import { prepareContent, type ContentClip } from "@/local/content";
-import { createJob, getJob, patchJob } from "@/local/jobs";
-import { getAccount } from "@/publishing/accounts";
 import { DEFAULT_SETTINGS } from "@/types/settings";
 
 /** Wires runtime messages to the real handler, as the service worker would. */
@@ -365,18 +363,21 @@ describe("monitoring, highlights and clips (local data)", () => {
     window.location.hash = "/clips";
     render(<App />);
     expect(await screen.findByText("Alpha · KEKW wave")).toBeInTheDocument();
-    expect(screen.getByText("31.5 s")).toBeInTheDocument();
-    expect(screen.getByText("1280×720 · 2.0 MB")).toBeInTheDocument();
-    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    expect(screen.getByText(/Original · 1280×720 · 31.5 s · 2.0 MB/)).toBeInTheDocument();
+    const card = screen.getByRole("article", { name: "Clip: Alpha · KEKW wave" });
+    expect(within(card).getByText("Alpha")).toBeInTheDocument();
+    expect(within(card).getByRole("status", { name: "Status: Ready" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Mark as favourite" }));
     expect(await screen.findByRole("button", { name: "Remove from favourites" })).toBeInTheDocument();
     expect((await listClips())[0]!.favorite).toBe(true);
-    await userEvent.click(screen.getByRole("button", { name: "Preview Alpha · KEKW wave" }));
-    expect(screen.getByLabelText("Preview of Alpha · KEKW wave")).toHaveAttribute("src", "blob:clip-1");
-    const download = await screen.findByRole("link", { name: /Download MP4/ });
-    expect(download).toHaveAttribute("href", "blob:clip-1");
-    expect(download.getAttribute("download")).toMatch(/^Alpha_2026-11-17-11-59-40_1\.mp4$/);
+    await waitFor(() => expect(screen.getByLabelText("Preview of Alpha · KEKW wave (original)")).toHaveAttribute("src", "blob:clip-1"));
+    const saved: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Download Original MP4" }));
+    await waitFor(() => expect(saved).toEqual(["Alpha_2026-11-17-11-59-40_1.mp4"]));
 
     await userEvent.click(screen.getByRole("button", { name: "Rename clip" }));
     const title = screen.getByLabelText("Clip title");
@@ -567,52 +568,94 @@ describe("3.0 output formats in the dashboard", () => {
     });
   });
 
-  it("Publishing Studio: approve a waiting job, see reasons and history; Performance shows only reported numbers", async () => {
+  it("Clip Library: versions with their own downloads, status, recommendation, copyable text per platform and filters", async () => {
     mockFetch(() => null);
     installWorker();
-    const c = await saveClip({ candidateId: 0, sessionId: null, streamerId: 0, streamerName: "StreamerOne", platform: "twitch", title: "Big clutch", startedAt: Date.now(), durationSec: 30, width: 1920, height: 1080, score: 80, blob: new Blob([new Uint8Array(4)], { type: "video/mp4" }) });
-    const waiting = await createJob(c.id, "youtube", { approved: false, auto: true });
-    await patchJob(waiting.id, { state: "needs_approval", reason: "70 is between 60 and 85: needs your approval." });
-    const blocked = await createJob(c.id, "tiktok", { approved: false, auto: true });
-    await patchJob(blocked.id, { state: "blocked", reason: "Connect your TikTok account first (Settings → Publishing)." });
-    const done = await createJob(c.id, "x", { approved: true, auto: false });
-    await patchJob(done.id, { state: "published", platform_id: "18", url: "https://x.com/me/status/18", published_at: new Date().toISOString(), metrics: { views: 1234, likes: 56, comments: null, shares: 3, fetched_at: new Date().toISOString() } });
-    window.location.hash = "/studio";
-    const { unmount } = render(<App />);
-    expect(await screen.findByText("Needs your approval (1)")).toBeInTheDocument();
-    expect(screen.getByText("70 is between 60 and 85: needs your approval.")).toBeInTheDocument();
-    expect(screen.getAllByText(/Connect your TikTok account first/).length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: /Open post/ })).toHaveAttribute("href", "https://x.com/me/status/18");
-    await userEvent.click(screen.getAllByRole("button", { name: "Approve" })[0]!);
-    await waitFor(async () => expect((await getJob(waiting.id)).state).toBe("queued"));
-    expect((await getJob(waiting.id)).approved).toBe(true);
-    unmount();
-    window.location.hash = "/performance";
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL: () => undefined }));
+    const blob = () => new Blob([new Uint8Array(4)], { type: "video/mp4" });
+    const a = await saveClip({ candidateId: 0, sessionId: null, streamerId: 0, streamerName: "StreamerOne", platform: "twitch", title: "Big clutch", startedAt: Date.parse("2026-11-10T12:00:00Z"), durationSec: 30, width: 1920, height: 1080, score: 80, blob: blob(), reasons: ["Loud laughter"] });
+    const [v, l] = await queueAssets(a.id, ["vertical", "landscape"], { layout: { kind: "center", facecam: null }, source: "default" });
+    await patchAsset(v!.id, { status: "ready", used_layout: "center", width: 1080, height: 1920, duration_seconds: 30, size_bytes: 1024 });
+    await patchAsset(l!.id, { status: "ready", used_layout: "landscape", width: 1920, height: 1080, duration_seconds: 30, reused_original: true });
+    await db.putBlob(v!.id, blob(), "assetBlobs");
+    const s = structuredClone(DEFAULT_SETTINGS);
+    s.ai.onDevice = false;
+    const prepared = await prepareContent(a.id, s);
+    const b = await saveClip({ candidateId: 0, sessionId: null, streamerId: 0, streamerName: "Bravo", platform: "kick", title: "Bravo moment", startedAt: Date.parse("2026-11-20T12:00:00Z"), durationSec: 20, width: 1280, height: 720, score: 40, blob: blob() });
+    await queueAssets(b.id, ["vertical"], { layout: null, source: "default" });
+    const c = await saveClip({ candidateId: 0, sessionId: null, streamerId: 0, streamerName: "Charlie", platform: "twitch", title: "Charlie moment", startedAt: Date.parse("2026-11-21T12:00:00Z"), durationSec: 20, width: 1280, height: 720, score: 50, blob: blob() });
+    const [cv] = await queueAssets(c.id, ["vertical"], { layout: null, source: "default" });
+    await patchAsset(cv!.id, { status: "failed", error: "The video couldn't be decoded." });
+
+    let copied = "";
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => void (copied = t) } });
+    const saved: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+    window.location.hash = "/clips";
     render(<App />);
-    expect(await screen.findByText("Published clips")).toBeInTheDocument();
-    expect(screen.getAllByText("1,234").length).toBeGreaterThan(0);
-    const row = screen.getByRole("link", { name: /Big clutch/ }).closest("tr")!;
-    expect(within(row).getAllByText("—")).toHaveLength(1); // comments not reported: shown as missing, never guessed
+    const card = await screen.findByRole("article", { name: "Clip: Big clutch" });
+    expect(within(card).getByRole("status", { name: "Status: Ready" })).toBeInTheDocument();
+    expect(within(screen.getByRole("article", { name: "Clip: Bravo moment" })).getByRole("status", { name: "Status: Generating" })).toBeInTheDocument();
+    const failed = screen.getByRole("article", { name: "Clip: Charlie moment" });
+    expect(within(failed).getByRole("status", { name: "Status: Failed" })).toBeInTheDocument();
+    expect(within(failed).getByText(/Vertical 9:16 version failed: The video couldn't be decoded\./)).toBeInTheDocument();
+    // Detection time, source link, score explanation and recommendation.
+    expect(within(card).getByText("Detected")).toBeInTheDocument();
+    expect(within(card).getByText(/High potential|Medium potential|Low potential/)).toBeInTheDocument();
+    expect(within(card).getByText(prepared.viral!.summary)).toBeInTheDocument();
+    expect(within(card).getByLabelText("Platform recommendation").textContent).toMatch(/YouTube Shorts|TikTok|X/);
+    expect(within(card).getByText(/same file as the original/)).toBeInTheDocument();
+    // One download per version.
+    await userEvent.click(within(card).getByRole("button", { name: "Download Vertical 9:16 MP4" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Download Landscape MP4" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Download Original MP4" }));
+    await waitFor(() => expect(saved).toEqual([`StreamerOne_2026-11-10-12-00-00_${a.id}-vertical.mp4`, `StreamerOne_2026-11-10-12-00-00_${a.id}-landscape.mp4`, `StreamerOne_2026-11-10-12-00-00_${a.id}.mp4`]));
+    expect(within(failed).queryByRole("button", { name: "Download Vertical 9:16 MP4" })).toBeNull();
+    // Copy buttons, per platform.
+    const yt = prepared.metadata!.byDestination.youtube;
+    await userEvent.click(within(card).getByRole("button", { name: "Copy title (YouTube Shorts)" }));
+    expect(copied).toBe(yt.title);
+    await userEvent.click(within(card).getByRole("button", { name: "Copy hashtags (YouTube Shorts)" }));
+    expect(copied).toBe(yt.hashtags.join(" "));
+    await userEvent.click(within(card).getByRole("tab", { name: "X" }));
+    const x = prepared.metadata!.byDestination.x;
+    expect(within(card).queryByRole("button", { name: /Copy title/ })).toBeNull(); // X has no title field
+    await userEvent.click(within(card).getByRole("button", { name: "Copy description (X)" }));
+    expect(copied).toBe(x.description);
+    await userEvent.click(within(card).getByRole("button", { name: "Copy all (X)" }));
+    expect(copied).toContain(x.description);
+    expect(within(card).getByText(/Credit: StreamerOne on Twitch/)).toBeInTheDocument();
+    // Filters: creator, format, score, date, status.
+    await userEvent.selectOptions(screen.getByLabelText("Creator"), "Bravo");
+    expect(screen.getByText("1 of 3 clips match the filters")).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Clip: Big clutch" })).toBeNull();
+    await userEvent.selectOptions(screen.getByLabelText("Creator"), "");
+    await userEvent.selectOptions(screen.getByLabelText("Format"), "vertical");
+    expect(screen.getAllByRole("article").map((e) => e.getAttribute("aria-label"))).toEqual(["Clip: Big clutch"]);
+    await userEvent.selectOptions(screen.getByLabelText("Format"), "all");
+    await userEvent.type(screen.getByLabelText("Minimum score"), "45");
+    expect(screen.queryByRole("article", { name: "Clip: Bravo moment" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await userEvent.type(screen.getByLabelText("Detected from"), "2026-11-15");
+    expect(screen.queryByRole("article", { name: "Clip: Big clutch" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await userEvent.selectOptions(screen.getByLabelText("Status"), "failed");
+    expect(screen.getAllByRole("article").map((e) => e.getAttribute("aria-label"))).toEqual(["Clip: Charlie moment"]);
   });
 
-  it("Settings → Publishing saves your app (no secret field) and shows the redirect URI", async () => {
+  it("works with no social accounts: no publishing screens, settings or connect buttons anywhere", async () => {
     mockFetch(() => null);
     installWorker();
     window.location.hash = "/settings";
     render(<App />);
-    const id = await screen.findByLabelText("X client ID");
-    await userEvent.type(id, "x-client-123");
-    const x = id.closest("fieldset")!;
-    await userEvent.click(within(x).getByRole("button", { name: "Save app" }));
-    await waitFor(async () => expect((await getAccount("x")).config).toEqual({ clientId: "x-client-123" }));
-    expect(within(x).getByText(/chromiumapp\.org\//)).toBeInTheDocument();
-    expect(within(x).getByRole("button", { name: "Connect account" })).toBeEnabled();
-    expect(within(x.closest("section") ?? document.body).queryAllByLabelText(/secret/i)).toHaveLength(0); // the publishing section never asks for a secret
-    await userEvent.type(screen.getByLabelText("TikTok token server"), "http://insecure.example.com");
-    await userEvent.type(screen.getByLabelText("TikTok client key"), "tt-client-key");
-    const tt = screen.getByLabelText("TikTok client key").closest("fieldset")!;
-    await userEvent.click(within(tt).getByRole("button", { name: "Save app" }));
-    expect(await within(tt).findByText(/must use https/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Titles, descriptions and hashtags" })).toBeInTheDocument();
+    expect(screen.queryByText(/Publishing Studio|Performance/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Connect account/ })).toBeNull();
+    expect(screen.queryByLabelText(/^(X client ID|YouTube client ID|TikTok client key|TikTok token server)$/)).toBeNull();
+    expect(screen.getByLabelText("Credit the creator")).toBeChecked();
   });
 
   it("My Creators saves a facecam layout and creator rights with evidence", async () => {

@@ -1,4 +1,4 @@
-import { BarChart3, Clapperboard, Compass, HeartPulse, LayoutDashboard, Radio, Send, Settings, Smartphone, Sparkles, Telescope, Twitter, Users, type LucideIcon } from "lucide-react";
+import { Clapperboard, Compass, HeartPulse, LayoutDashboard, Radio, Settings, Smartphone, Sparkles, Telescope, Twitter, Users, type LucideIcon } from "lucide-react";
 
 export const ROUTES = [
   "/overview",
@@ -10,8 +10,6 @@ export const ROUTES = [
   "/content",
   "/shorts",
   "/xclips",
-  "/studio",
-  "/performance",
   "/health",
   "/settings",
 ] as const;
@@ -28,8 +26,6 @@ export const NAV: readonly { route: Route; label: string; icon: LucideIcon; desc
   { route: "/clips", label: "Clip Library", icon: Clapperboard, description: "Every clip, downloadable" },
   { route: "/shorts", label: "Short-form Clips", icon: Smartphone, description: "Vertical 9:16 for YouTube Shorts and TikTok" },
   { route: "/xclips", label: "X Clips", icon: Twitter, description: "Native landscape for X" },
-  { route: "/studio", label: "Publishing Studio", icon: Send, description: "Metadata, approvals and publishing" },
-  { route: "/performance", label: "Performance", icon: BarChart3, description: "Numbers the platforms report" },
   { route: "/health", label: "System Health", icon: HeartPulse, description: "Load, storage, connectivity and recovery" },
   { route: "/settings", label: "Settings", icon: Settings, description: "Connections, detection and privacy" },
 ];

@@ -9,8 +9,6 @@ import type { Settings } from "@/types/settings";
 export interface ContentDeps {
   ensureOffscreen: () => Promise<void>;
   toOffscreen: (m: unknown) => Promise<unknown>;
-  /** After a clip's content is ready (phase 7: publishing decisions). */
-  afterContent?: (clipId: number) => Promise<void>;
 }
 
 export function offscreenPromptPort(deps: ContentDeps): OnDevicePort {
@@ -46,7 +44,6 @@ export function createContentManager(deps: ContentDeps) {
     async prepare(clipId: number, settings: Settings, opts: { regenerate?: boolean; resetEdits?: boolean } = {}) {
       const o = settings.ai.onDevice ? await onDevice().catch(() => null) : null;
       const clip = await prepareContent(clipId, settings, { onDevice: o?.p ?? null }, opts);
-      await deps.afterContent?.(clipId);
       return clip;
     },
   };

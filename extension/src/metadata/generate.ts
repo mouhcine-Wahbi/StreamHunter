@@ -162,6 +162,6 @@ export async function generateMetadata(f: ClipFacts, settings: Settings, deps: G
 
   const base = raw ?? templateMetadata(f);
   const byDestination = {} as Record<Destination, DestinationMeta>;
-  for (const d of ["youtube", "tiktok", "x"] as const) byDestination[d] = keep?.[d] ?? fit(d, base[d], f, settings.publishing.attribution);
+  for (const d of ["youtube", "tiktok", "x"] as const) byDestination[d] = keep?.[d] ?? fit(d, base[d], f, settings.metadata.attribution);
   return { byDestination, generator, fallbacks, generated_at: (deps.now ?? new Date()).toISOString(), edited: (Object.keys(keep ?? {}) as Destination[]) };
 }

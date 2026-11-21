@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { Activity, BellRing, Clapperboard, Film, HardDrive, ListOrdered, Plug, Send, Sparkles, Timer, Users, Video } from "lucide-react";
-import type { PublishJob } from "@/local/jobs";
+import { Activity, BellRing, Clapperboard, Film, HardDrive, ListOrdered, Plug, Sparkles, Timer, Users, Video } from "lucide-react";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -78,8 +77,6 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
   const status = STATUS_META[monitoring.state.status];
   const snap = useStorageValue<SchedulerSnapshot>("sh.scheduler");
   const approvals = useStorageValue<ApprovalStore>(APPROVALS_KEY);
-  const jobs = useApiQuery<PublishJob[]>("/api/v1/jobs").data;
-  const weekAgo = Date.now() - 7 * 24 * 3600_000;
 
   return (
     <>
@@ -109,8 +106,6 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
           value={approvals ? approvals.items.filter((a) => a.endedAt === null && (a.status === "pending" || a.status === "snoozed")).length : 0}
           sub="Live streams waiting for your answer"
         />
-        <StatTile label="Publishing approvals" icon={<Send className="size-4" />} value={jobs ? jobs.filter((j) => j.state === "needs_approval").length : null} sub={jobs ? `${jobs.filter((j) => j.state === "blocked" || (j.state === "failed" && !j.retryable)).length} need attention` : ""} />
-        <StatTile label="Published (7 days)" icon={<Send className="size-4" />} value={jobs ? jobs.filter((j) => j.state === "published" && j.published_at && Date.parse(j.published_at) >= weekAgo).length : null} sub="Confirmed by the platforms" />
         <StatTile label="Queued" icon={<ListOrdered className="size-4" />} value={snap ? snap.queue.filter((q) => q.reason === "waiting_for_slot").length : null} sub="Approved, waiting for a slot" />
         <StatTile label="Clips generated" icon={<Clapperboard className="size-4" />} value={s?.clips ?? null} sub={s ? `${s.favorites} favourite${s.favorites === 1 ? "" : "s"}` : ""} />
         <StatTile label="Recording time" icon={<Timer className="size-4" />} value={s ? formatSeconds(s.recorded_seconds) : null} sub="Total video recorded" />

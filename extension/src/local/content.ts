@@ -1,5 +1,5 @@
 /**
- * A clip's publishing content (3.0 phase 6): metadata per destination and the viral-potential score,
+ * A clip's content for manual upload (3.0 phase 6): metadata per destination and the viral-potential score,
  * stored on the clip row. Your edits per destination are kept when metadata is regenerated.
  */
 import { db } from "./db";
@@ -47,7 +47,7 @@ export async function editMetadata(id: number, dest: Destination, patch: Partial
     description: typeof patch.description === "string" ? patch.description : cur.description,
     hashtags: Array.isArray(patch.hashtags) ? patch.hashtags.filter((x): x is string => typeof x === "string") : cur.hashtags,
   };
-  const fitted = fit(dest, next, factsOf(clip, streamer), settings.publishing.attribution);
+  const fitted = fit(dest, next, factsOf(clip, streamer), settings.metadata.attribution);
   const metadata: ClipMetadata = { ...clip.metadata, byDestination: { ...clip.metadata.byDestination, [dest]: fitted }, edited: [...new Set([...clip.metadata.edited, dest])] };
   return db.put<ContentClip>("clips", { ...clip, metadata });
 }

@@ -10,8 +10,6 @@ import { HighlightsPage } from "@/pages/highlights/HighlightsPage";
 import { ClipsPage } from "@/pages/clips/ClipsPage";
 import { SettingsPage } from "@/pages/settings/SettingsPage";
 import { HealthPage } from "@/pages/health/HealthPage";
-import { StudioPage } from "@/pages/studio/StudioPage";
-import { PerformancePage } from "@/pages/performance/PerformancePage";
 import { ContentDiscoveryPage } from "@/pages/content/ContentDiscoveryPage";
 import { FormatsPage } from "@/pages/formats/FormatsPage";
 import { NAV, ROUTES, type Route } from "./routes";
@@ -54,12 +52,6 @@ export function App() {
       break;
     case "/xclips":
       page = <FormatsPage kind="landscape" />;
-      break;
-    case "/studio":
-      page = <StudioPage />;
-      break;
-    case "/performance":
-      page = <PerformancePage />;
       break;
     case "/health":
       page = <HealthPage monitoring={monitoring} />;

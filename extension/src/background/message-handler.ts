@@ -25,8 +25,6 @@ export async function handleMessage(
   processing?: ProcessingManager,
   /** 3.0 metadata and score. */
   content?: ContentManager,
-  /** 3.0 publishing: runs due jobs. */
-  publish?: () => Promise<{ processed: number }>,
 ): Promise<RuntimeResponse> {
   if (!isRuntimeRequest(message)) return { ok: false, error: "Unknown message" };
   try {
@@ -101,9 +99,6 @@ export async function handleMessage(
           if (e instanceof ContentError) return { ok: false, error: e.message };
           throw e;
         }
-      case "publish/run":
-        if (!publish) return { ok: false, error: "Publishing is only available in the installed extension" };
-        return { ok: true, data: await publish() };
       case "ai/status":
         return { ok: true, data: content ? await content.status() : { onDevice: "absent", where: null } };
       case "process/clip-made":

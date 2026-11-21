@@ -40,7 +40,9 @@
   ],
   "commands": {
     "arm-recorder": {
-      "suggested_key": { "default": "Alt+Shift+R" },
+      "suggested_key": {
+        "default": "Alt+Shift+R"
+      },
       "description": "Use this tab as a StreamHunter recorder"
     }
   },
@@ -52,5 +54,10 @@
     "https://www.googleapis.com/youtube/v3/*",
     "https://www.youtube.com/feeds/*"
   ],
-  "optional_host_permissions": ["https://api.anthropic.com/*", "https://www.googleapis.com/*", "https://api.x.com/*", "https://open.tiktokapis.com/*", "https://*.tiktokapis.com/*", "https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
+  "optional_host_permissions": [
+    "https://api.anthropic.com/*",
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ]
 }

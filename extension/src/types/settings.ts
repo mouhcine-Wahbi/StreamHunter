@@ -120,6 +120,8 @@ export interface Settings {
     autoPublish: boolean;
     destinations: Record<"youtube" | "tiktok" | "x", { enabled: boolean; dailyLimit: number }>;
     youtubePrivacy: "private" | "unlisted" | "public";
+    /** TikTok privacy level; must be one TikTok offers for the account (unaudited apps: only SELF_ONLY works). */
+    tiktokPrivacy: "SELF_ONLY" | "MUTUAL_FOLLOW_FRIENDS" | "FOLLOWER_OF_CREATOR" | "PUBLIC_TO_EVERYONE";
     /** Adds "Credit: <creator> on <platform>" with the source link to every description. */
     attribution: boolean;
     maxRetries: number;
@@ -167,7 +169,7 @@ export const DEFAULT_SETTINGS: Settings = {
   publishing: {
     autoPublish: true,
     destinations: { youtube: { enabled: true, dailyLimit: 5 }, tiktok: { enabled: true, dailyLimit: 10 }, x: { enabled: true, dailyLimit: 20 } },
-    youtubePrivacy: "public", attribution: true, maxRetries: 3,
+    youtubePrivacy: "public", tiktokPrivacy: "SELF_ONLY", attribution: true, maxRetries: 3,
   },
   ai: { onDevice: true, external: "none", model: "", endpoint: "" },
   locale: { timeZone: "auto", language: "en" },

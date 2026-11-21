@@ -105,3 +105,21 @@ export async function notifyApprovalRequests(list: Approval[], settings: Setting
       .catch(() => undefined);
   }
 }
+
+export const PUBLISH_PREFIX = "sh-pub-";
+const DEST_NAME = { youtube: "YouTube Shorts", tiktok: "TikTok", x: "X" } as const;
+
+/** "Published to X" (confirmed by the platform) or "Publishing to X failed: …". */
+export async function notifyPublishing(job: { id: number; destination: "youtube" | "tiktok" | "x"; state: string; reason: string | null; url: string | null }, clipTitle: string): Promise<void> {
+  if (!chrome.notifications) return;
+  const ok = job.state === "published";
+  await chrome.notifications
+    .create(`${PUBLISH_PREFIX}${job.id}`, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+      title: ok ? `Published to ${DEST_NAME[job.destination]}` : `Publishing to ${DEST_NAME[job.destination]} failed`,
+      message: ok ? `${clipTitle}${job.url ? "" : " (the platform gave no public link)"}` : `${clipTitle}: ${job.reason ?? "unknown error"}`,
+      priority: ok ? 0 : 1,
+    })
+    .catch(() => undefined);
+}

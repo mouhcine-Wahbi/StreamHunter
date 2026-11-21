@@ -30,6 +30,8 @@ export type RuntimeRequest =
   // Metadata and score (3.0): write again (keeps your edits unless reset), on-device AI status.
   | { type: "metadata/generate"; clipId: number; resetEdits?: boolean }
   | { type: "ai/status" }
+  // Publishing (3.0): run due jobs now (after you approved, retried or connected an account).
+  | { type: "publish/run" }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }
@@ -84,6 +86,7 @@ export interface ResponseMap {
   "process/asset-done": null;
   "process/idle": null;
   "metadata/generate": import("@/local/content").ContentClip;
+  "publish/run": { processed: number };
   "ai/status": { onDevice: import("@/metadata/generate").OnDeviceState; where: "worker" | "offscreen" | null };
   "capture/get": CaptureState;
   "capture/list": CaptureState[];
@@ -120,6 +123,7 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "process/idle",
   "metadata/generate",
   "ai/status",
+  "publish/run",
   "capture/get",
   "capture/list",
   "capture/pause-slot",

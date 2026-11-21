@@ -11,8 +11,9 @@ export const LAYOUT_LABEL: Record<LayoutKind, string> = { facecam_top: "Facecam 
 export const VERTICAL = { width: 1080, height: 1920 } as const;
 
 /**
- * X's documented video limits for API uploads (media_category tweet_video): up to 140 s,
- * up to 1920×1200, H.264 + AAC, up to 512 MB.
+ * Limits StreamHunter keeps X versions within: 140 s, 1920×1200, H.264 + AAC, 512 MB. These are
+ * stricter than X requires for posts (X's media docs, checked 2026-11-21: tweet_video up to 20 min
+ * and 8 GB without Premium; 140 s / 512 MB is the dm_video limit), so they fit every account.
  */
 export const X_LIMITS = { maxSeconds: 140, maxWidth: 1920, maxHeight: 1200, maxBytes: 512 * 1024 ** 2 } as const;
 

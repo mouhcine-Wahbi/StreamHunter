@@ -189,6 +189,7 @@ export function sanitizeSettings(input: unknown): Settings {
       autoPublish: bool(pub.autoPublish, d.publishing.autoPublish),
       destinations: { youtube: dest("youtube"), tiktok: dest("tiktok"), x: dest("x") },
       youtubePrivacy: oneOf(pub.youtubePrivacy, ["private", "unlisted", "public"] as const, d.publishing.youtubePrivacy),
+      tiktokPrivacy: oneOf(pub.tiktokPrivacy, ["SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "PUBLIC_TO_EVERYONE"] as const, d.publishing.tiktokPrivacy),
       attribution: bool(pub.attribution, d.publishing.attribution),
       maxRetries: clampInt(pub.maxRetries, 0, 10, d.publishing.maxRetries),
     },

@@ -69,6 +69,25 @@ Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-befor
 | Tiers: high ≥ 85 (your threshold) = eligible for automatic publishing; medium ≥ 60 = needs approval; low = manual only. High with confidence < 50% becomes medium | unit tests | Confidence = share of the weight that was actually measured × the detector's confidence |
 | Settings: score weights and thresholds; AI (on-device on/off with its state, provider, model, endpoint, key — never shown again after saving) | typecheck + existing Settings tests | Key saving needs Chrome's permission prompt, not exercised in automation |
 
+### Phase 7 — Publishing jobs (YouTube Shorts, TikTok, X)
+
+**No real-platform publishing has been tested.** Everything below was tested against fake servers built from each platform's documentation (checked 2026-11-21), not against YouTube, TikTok or X. See docs/PUBLISHING.md.
+
+| Feature | Status | Evidence / notes |
+|---|---|---|
+| One independent job per clip and destination, with history (state, time, reason) | unit tests | States: needs approval, waiting, blocked, queued, uploading, confirming, published, failed, cancelled |
+| Checks before every attempt, in order: destination on, rights for that destination, account connected, right file ready, text written, not a duplicate, tier/approval, daily limit | unit tests; rights block tested in real Chrome | Real Chrome 158: a job for a clip with no rights was blocked with "Rights unclear…" and nothing was sent |
+| Automatic jobs only with auto-publishing on, rights for the destination, and high or medium potential; medium waits for approval; low never automatic | unit tests | Your approval never bypasses rights |
+| Marked published only on the platform's confirmation (YouTube `processed`, TikTok `PUBLISH_COMPLETE`, X post id) | 🧪 fake servers | |
+| YouTube: implicit-grant sign-in with your OAuth client ID (no secret); resumable upload; privacy from Settings | 🧪 fake servers | Not tested with a real Google project |
+| X: OAuth 2.0 PKCE as a public client (no secret), refresh; v2 chunked media upload + STATUS; post with media | 🧪 fake servers | Not tested with a real X app or API plan |
+| TikTok: Login Kit (web) code exchanged by **your own token server** (TikTok requires the secret to stay on a server); creator info → Direct Post init → chunked PUT → status | 🧪 fake servers | The token server is yours to run (two-request contract in docs/PUBLISHING.md). Unaudited TikTok apps can only post `SELF_ONLY`. Whether TikTok accepts a `chromiumapp.org` redirect URI is **unverified** |
+| Retries with backoff for network / 429 / 5xx up to Settings → retries; 401/403/400 not retried; an interrupted X post is never retried automatically | unit tests | |
+| Desktop notification on a confirmed post and on a final failure | typecheck | Not checked in real Chrome |
+| Performance numbers from the platforms (YouTube statistics, X public_metrics, TikTok video/query), every 6 h for 30 days | 🧪 fake servers | TikTok's video/query fields not checked against a real account |
+| Found and fixed: TikTok post ids are int64 JSON numbers; a plain JSON parse rounded them (wrong link). They are now read from the raw text | unit test | |
+| X limits note corrected: StreamHunter's 140 s / 512 MB are stricter than X requires for posts (20 min / 8 GB per X's docs); kept because they fit every account | | |
+
 ## v2.0 — Multi-platform automatic clipping (released)
 
 Labels: **✅ tested for real** (real Chrome, real live pages) · **🧪 implemented, tested against documented

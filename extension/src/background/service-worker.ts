@@ -14,7 +14,7 @@ import { runDiscovery } from "@/discovery/runner";
 import { renderBadge } from "./badge";
 import { handleMessage, isTrustedSender } from "./message-handler";
 import { createMonitoringManager } from "./monitoring-manager";
-import { APPROVAL_PREFIX, HIGHLIGHT_PREFIX, NOTIFICATION_PREFIX, notifyHighlight } from "./notifications";
+import { APPROVAL_PREFIX, HIGHLIGHT_PREFIX, NOTIFICATION_PREFIX, notifyHighlight, notifyPublishing } from "./notifications";
 import { createApprovalManager } from "./approval-manager";
 import { createChatManager } from "./chat-manager";
 import { db } from "@/local/db";
@@ -32,6 +32,8 @@ import { createTwitchClip } from "@/platforms/twitch-clips";
 import type { Approval, ApprovalAction } from "@/local/approvals";
 import { createProcessingManager } from "./processing-manager";
 import { createContentManager } from "./content-manager";
+import { planAuto } from "@/publishing/plan";
+import { runPublishing } from "@/publishing/runner";
 import { hasPendingWork } from "@/processing/pending";
 
 /** Optional: also create a native Twitch clip for each clip of a Twitch stream. */
@@ -123,7 +125,23 @@ const approvals = createApprovalManager();
 const content = createContentManager({
   ensureOffscreen: defaultCaptureDeps.ensureOffscreen,
   toOffscreen: (m) => chrome.runtime.sendMessage(m),
+  // 3.0 publishing: automatic jobs for high/medium potential, then run them.
+  afterContent: async (clipId) => {
+    await planAuto(clipId, await getSettings());
+    void publish();
+  },
 });
+
+/** Runs due publishing jobs; notifications only for confirmed posts and final failures. */
+const publish = () =>
+  runPublishing({
+    onPublished: (j) => void clipTitle(j.clip_id).then((t) => notifyPublishing(j, t)),
+    onFailed: (j) => void clipTitle(j.clip_id).then((t) => notifyPublishing(j, t)),
+  }).catch((e) => {
+    log("publishing_failed", { error: e instanceof Error ? e.message : "?" });
+    return { processed: 0 };
+  });
+const clipTitle = async (id: number) => (await db.get<{ title: string | null }>("clips", id))?.title ?? "Clip";
 
 // 3.0 processing: formats are made in the offscreen document; it stays open until the queue is done.
 const processing = createProcessingManager({
@@ -189,7 +207,10 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARMS.heartbeat) void manager.tick();
-  if (alarm.name === ALARMS.publishing) resumeProcessing();
+  if (alarm.name === ALARMS.publishing) {
+    resumeProcessing();
+    void publish();
+  }
   if (alarm.name === ALARMS.discovery) void getSettings().then((s) => (s.discovery.enabled ? runDiscovery(s) : null)).catch((e) => log("discovery_failed", { error: e instanceof Error ? e.message : "?" }));
 });
 
@@ -219,7 +240,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedSender(sender)) return false;
   // Messages addressed to the offscreen document are not for the worker.
   if ((message as { target?: unknown } | null)?.target === "offscreen") return false;
-  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval, processing, content).then(sendResponse);
+  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval, processing, content, publish).then(sendResponse);
   return true; // keep the channel open for the async response
 });
 

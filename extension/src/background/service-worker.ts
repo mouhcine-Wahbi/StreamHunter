@@ -9,7 +9,7 @@
 import { getMonitoringState, STORAGE_KEYS } from "@/store/storage";
 import type { MonitoringState } from "@/types/monitoring";
 import { sanitizeSettings } from "@/utils/settings";
-import { ALARMS, syncAlarms, syncDiscoveryAlarm } from "./alarm-manager";
+import { ALARMS, syncAlarms, syncDiscoveryAlarm, syncPublishingAlarm } from "./alarm-manager";
 import { runDiscovery } from "@/discovery/runner";
 import { renderBadge } from "./badge";
 import { handleMessage, isTrustedSender } from "./message-handler";
@@ -30,6 +30,8 @@ import { SYSTEM_KEY } from "@/types/capture";
 import { updateClip, type LocalClip } from "@/local/clips";
 import { createTwitchClip } from "@/platforms/twitch-clips";
 import type { Approval, ApprovalAction } from "@/local/approvals";
+import { createProcessingManager } from "./processing-manager";
+import { hasPendingWork } from "@/processing/pending";
 
 /** Optional: also create a native Twitch clip for each clip of a Twitch stream. */
 async function afterClip(clipId: number): Promise<void> {
@@ -116,6 +118,21 @@ const chat = createChatManager({
 });
 const approvals = createApprovalManager();
 
+// 3.0 processing: formats are made in the offscreen document; it stays open until the queue is done.
+const processing = createProcessingManager({
+  ensureOffscreen: defaultCaptureDeps.ensureOffscreen,
+  kick: () => chrome.runtime.sendMessage({ target: "offscreen", type: "process/kick" }),
+  async closeIfIdle() {
+    if ((await getSlots()).some((s) => s.status !== "off")) return;
+    if (await hasPendingWork()) return void processing.kick().catch(() => undefined);
+    await defaultCaptureDeps.closeOffscreen().catch(() => undefined);
+  },
+});
+/** Work left by a closed browser or document continues on start and every 5 minutes. */
+const resumeProcessing = () => void hasPendingWork().then((p) => (p ? processing.kick() : null)).catch(() => undefined);
+resumeProcessing();
+void syncPublishingAlarm().catch(() => undefined);
+
 const manager = createMonitoringManager({
   approvals,
   afterCheck: async () => {
@@ -164,6 +181,7 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARMS.heartbeat) void manager.tick();
+  if (alarm.name === ALARMS.publishing) resumeProcessing();
   if (alarm.name === ALARMS.discovery) void getSettings().then((s) => (s.discovery.enabled ? runDiscovery(s) : null)).catch((e) => log("discovery_failed", { error: e instanceof Error ? e.message : "?" }));
 });
 
@@ -193,7 +211,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedSender(sender)) return false;
   // Messages addressed to the offscreen document are not for the worker.
   if ((message as { target?: unknown } | null)?.target === "offscreen") return false;
-  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval).then(sendResponse);
+  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval, processing).then(sendResponse);
   return true; // keep the channel open for the async response
 });
 

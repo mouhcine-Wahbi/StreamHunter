@@ -39,6 +39,22 @@ Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-befor
 | Discovered videos are candidates only: never downloaded or processed | by design + unit tests | You add the file yourself ("Add authorized file…"), which needs at least "Authorized for analysis" |
 | Content Discovery page, Settings → Content discovery | UI test | Not yet checked in real Chrome |
 
+### Phase 5 — Processing: vertical 9:16, landscape for X, authorized files
+
+| Feature | Status | Evidence / notes |
+|---|---|---|
+| Vertical 9:16 (1080×1920, H.264 + AAC) made in the browser (mp4box.js demux → WebCodecs decode → canvas layout → H.264 encode) | ✅ tested for real + unit tests | Real Chrome 158 on an Apple M5: a 20 s 1080p30 clip became 1080×1920 in ~6 s; ffprobe: H.264 + AAC, 20.0 s, decodes with no errors |
+| Facecam above gameplay | ✅ tested for real + unit tests | Frame check: the facecam area (set per creator) fills the top (≤ 40% of the height, never stretched), gameplay below |
+| Follow the action | ✅ tested for real + unit tests | Moving-square test: kept in frame at 3 s, 10 s, 17 s; the centre crop of the same clip lost it at 3 s and 17 s (as expected). Smoothed, speed-limited; ignores pans and cuts |
+| Centre crop fallback (also used when no facecam position is set, with a note saying so) | ✅ tested for real + unit tests | |
+| Landscape for X: the original is reused (no copy) when it meets X's limits (≤ 140 s, ≤ 1920×1200, H.264 + AAC, ≤ 512 MB); otherwise re-encoded/shortened, with the reason | ✅ tested for real + unit tests | AAC recording reused; an Opus-audio clip re-encoded to AAC. X's limits are from X's documentation, not yet tested against X itself |
+| Every output is demuxed again and checked (size, duration) before it's marked ready | ✅ tested for real | |
+| Layout per creator (My Creators, with a preview on their latest clip) and per clip (Short-form Clips → Remake) | UI tests | Priority: clip → creator → Settings default |
+| Authorized files: find moments (loudness + visual change, relative to the file itself) and cut clips (3–180 s) | ✅ tested for real + unit tests | Real run: found the loud part at 11 s; an 8 s clip cut and its two formats made. Needs "Authorized for analysis" / "for processing"; MP4/MOV only (no WebM yet) |
+| Processing queue in the offscreen document, stored in IndexedDB: survives the document closing, resumes on start and every 5 min, closes the document when done | ✅ tested for real + unit tests | A race (document closed before a new clip's formats were queued) was found in the real run and fixed |
+| Preview player in Short-form Clips / X Clips | ⚠️ not verified | The automated Chrome used for tests never plays any video (even a plain data: URL), so the in-page player couldn't be checked; the files themselves were checked with ffprobe/ffmpeg |
+| Processing while recording | 🧪 | Both run in the same offscreen document; CPU impact on a live recording not measured yet |
+
 ## v2.0 — Multi-platform automatic clipping (released)
 
 Labels: **✅ tested for real** (real Chrome, real live pages) · **🧪 implemented, tested against documented

@@ -57,7 +57,7 @@ export function ScoreWhy({ c }: { c: LocalClip }) {
   );
 }
 
-function useObjectUrl(load: () => Promise<Blob | undefined>, key: number): string | null {
+export function useObjectUrl(load: () => Promise<Blob | undefined>, key: number): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let objectUrl: string | null = null;

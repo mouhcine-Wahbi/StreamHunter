@@ -71,12 +71,16 @@ export const defaultCaptureDeps: CaptureDeps = {
     if (await hasOffscreen()) return;
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_URL,
-      reasons: ["USER_MEDIA" as chrome.offscreen.Reason],
-      justification: "Record the stream tabs the editor chose into local rolling buffers and cut clips from them (nothing is uploaded).",
+      reasons: ["USER_MEDIA" as chrome.offscreen.Reason, "BLOBS" as chrome.offscreen.Reason],
+      justification: "Record the stream tabs the editor chose into local rolling buffers, cut clips from them and convert clips to vertical/landscape formats locally.",
     });
   },
   async closeOffscreen() {
-    if (await hasOffscreen()) await chrome.offscreen.closeDocument();
+    if (!(await hasOffscreen())) return;
+    // The processing queue closes it itself when it's done (3.0).
+    const r = (await chrome.runtime.sendMessage({ target: "offscreen", type: "process/busy" }).catch(() => null)) as { busy?: boolean } | null;
+    if (r?.busy) return;
+    await chrome.offscreen.closeDocument();
   },
   toOffscreen: (message) => chrome.runtime.sendMessage(message),
   async notify(title, message, id) {

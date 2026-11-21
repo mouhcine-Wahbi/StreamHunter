@@ -2,6 +2,7 @@
 import { listCandidates, type Candidate } from "@/discovery/discovery";
 import { listCreatorRights, setCreatorRights, type CreatorRights } from "./rights";
 import { deleteSource, listSources, updateCandidate } from "./sources";
+import { listAssets } from "./assets";
 
 type Handler = (m: RegExpMatchArray, q: URLSearchParams, body: unknown) => Promise<unknown>;
 
@@ -22,6 +23,10 @@ export function v3Routes(page: <T>(items: T[], q: URLSearchParams) => unknown): 
     ["PATCH", /^\/api\/v1\/candidates\/(\d+)$/, (m, _q, b) => updateCandidate(Number(m[1]), (b ?? {}) as Parameters<typeof updateCandidate>[1])],
     ["GET", /^\/api\/v1\/sources$/, async (_m, q) => page(await listSources(), q)],
     ["DELETE", /^\/api\/v1\/sources\/(\d+)$/, async (m) => void (await deleteSource(Number(m[1])))],
+    ["GET", /^\/api\/v1\/assets$/, async (_m, q) => {
+      const clip = q.get("clip");
+      return listAssets(clip && /^\d+$/.test(clip) ? Number(clip) : undefined);
+    }],
     ["GET", /^\/api\/v1\/rights$/, async () => listCreatorRights()],
     ["POST", /^\/api\/v1\/rights$/, (_m, _q, b) => {
       const body = (b ?? {}) as { key?: string; platform?: CreatorRights["platform"]; creator_name?: string } & Parameters<typeof setCreatorRights>[2];

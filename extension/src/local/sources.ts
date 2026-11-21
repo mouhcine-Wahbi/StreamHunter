@@ -6,9 +6,9 @@
 import type { Candidate } from "@/discovery/discovery";
 import type { Platform } from "@/types/api";
 import { db } from "./db";
-import { atLeast, RightsError, validateRights, type Rights } from "./rights";
+import { atLeast, check, RightsError, validateRights, type Rights } from "./rights";
 
-export type AnalysisStatus = "not_analyzed" | "analyzing" | "analyzed" | "failed";
+export type AnalysisStatus = "not_analyzed" | "queued" | "analyzing" | "analyzed" | "failed";
 
 export interface SuggestedMoment {
   /** Seconds from the start of the file. */
@@ -37,7 +37,19 @@ export interface SourceFile {
   analysis: AnalysisStatus;
   analysis_error: string | null;
   moments: SuggestedMoment[];
+  /** Clips you asked for, made one at a time by the processing queue. */
+  pending_clips?: ClipRequest[];
+  clip_ids?: number[];
+  clip_error?: string | null;
   added_at: string;
+}
+
+export interface ClipRequest {
+  start: number;
+  end: number;
+  title?: string;
+  score?: number;
+  reasons?: string[];
 }
 
 export const MAX_SOURCE_BYTES = 4 * 1024 ** 3;
@@ -86,10 +98,38 @@ export async function listSources(): Promise<SourceFile[]> {
   return (await db.all<SourceFile>("sources")).sort((a, b) => b.added_at.localeCompare(a.added_at));
 }
 
-export async function updateSource(id: number, patch: Partial<Pick<SourceFile, "analysis" | "analysis_error" | "moments" | "duration_seconds" | "width" | "height">>): Promise<SourceFile> {
+export async function updateSource(
+  id: number,
+  patch: Partial<Pick<SourceFile, "analysis" | "analysis_error" | "moments" | "duration_seconds" | "width" | "height" | "pending_clips" | "clip_ids" | "clip_error">>,
+): Promise<SourceFile> {
   const s = await db.get<SourceFile>("sources", id);
   if (!s) throw new RightsError("That source file no longer exists.");
   return db.put("sources", { ...s, ...patch });
+}
+
+/** Ask for an analysis (needs "Authorized for analysis"). */
+export async function requestAnalysis(id: number): Promise<SourceFile> {
+  const s = await db.get<SourceFile>("sources", id);
+  if (!s) throw new RightsError("That source file no longer exists.");
+  const ok = check(s.rights, "analyze");
+  if (!ok.ok) throw new RightsError(ok.reason);
+  if (!/mp4|quicktime/.test(s.mime)) throw new RightsError("Only MP4 and MOV files can be analysed and cut for now.");
+  return updateSource(id, { analysis: "queued", analysis_error: null });
+}
+
+/** Ask for a clip from [start, end) seconds (needs "Authorized for processing"; 3–180 s). */
+export async function requestSourceClip(id: number, req: ClipRequest): Promise<SourceFile> {
+  const s = await db.get<SourceFile>("sources", id);
+  if (!s) throw new RightsError("That source file no longer exists.");
+  const ok = check(s.rights, "process");
+  if (!ok.ok) throw new RightsError(ok.reason);
+  if (!/mp4|quicktime/.test(s.mime)) throw new RightsError("Only MP4 and MOV files can be cut for now.");
+  const start = Math.max(0, Number(req.start));
+  const end = Number(req.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 3 || end - start > 180) throw new RightsError("A clip must be between 3 seconds and 3 minutes long.");
+  if (s.duration_seconds !== null && start >= s.duration_seconds) throw new RightsError("That start is after the end of the file.");
+  const clean: ClipRequest = { start, end, title: typeof req.title === "string" ? req.title.slice(0, 140) : "", score: typeof req.score === "number" ? req.score : 0, reasons: Array.isArray(req.reasons) ? req.reasons.slice(0, 4).map(String) : [] };
+  return updateSource(id, { pending_clips: [...(s.pending_clips ?? []), clean].slice(-20), clip_error: null });
 }
 
 export async function deleteSource(id: number): Promise<void> {

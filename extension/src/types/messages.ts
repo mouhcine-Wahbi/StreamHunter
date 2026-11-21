@@ -20,7 +20,13 @@ export type RuntimeRequest =
   | { type: "discovery/run"; sources?: ("creator_uploads" | "trending" | "keyword")[] }
   // Authorized source files (3.0): find moments, cut a clip.
   | { type: "source/analyze"; id: number }
-  | { type: "source/clip"; id: number; start: number; end: number }
+  | { type: "source/clip"; id: number; start: number; end: number; title?: string; score?: number; reasons?: string[] }
+  // Output formats (3.0): make or remake a clip's vertical / landscape versions.
+  | { type: "assets/make"; clipId: number; kinds?: ("vertical" | "landscape")[]; layout?: import("./api").VerticalLayout | null }
+  // From the offscreen processing queue to the worker.
+  | { type: "process/clip-made"; clipId: number; sourceId: number }
+  | { type: "process/asset-done"; assetId: number; clipId: number; ok: boolean }
+  | { type: "process/idle" }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }
@@ -50,7 +56,9 @@ export type OffscreenRequest =
   | { target: "offscreen"; type: "capture/listen"; slot: number; on: boolean }
   | { target: "offscreen"; type: "capture/throttle"; slot: number; on: boolean }
   | { target: "offscreen"; type: "capture/options"; slot: number; options: CaptureOptions }
-  | { target: "offscreen"; type: "capture/stop"; slot?: number };
+  | { target: "offscreen"; type: "capture/stop"; slot?: number }
+  | { target: "offscreen"; type: "process/kick" }
+  | { target: "offscreen"; type: "process/busy" };
 
 export type RuntimeResponse<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -65,7 +73,11 @@ export interface ResponseMap {
   "approval/decide": Approval;
   "discovery/run": DiscoveryRun;
   "source/analyze": SourceFile;
-  "source/clip": { clipId: number };
+  "source/clip": SourceFile;
+  "assets/make": import("@/local/assets").Asset[];
+  "process/clip-made": null;
+  "process/asset-done": null;
+  "process/idle": null;
   "capture/get": CaptureState;
   "capture/list": CaptureState[];
   "capture/pause-slot": CaptureState;
@@ -95,6 +107,10 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "discovery/run",
   "source/analyze",
   "source/clip",
+  "assets/make",
+  "process/clip-made",
+  "process/asset-done",
+  "process/idle",
   "capture/get",
   "capture/list",
   "capture/pause-slot",

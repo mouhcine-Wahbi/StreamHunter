@@ -20,3 +20,6 @@ beforeEach(() => {
 });
 
 afterEach(() => cleanup());
+
+// jsdom has no canvas: previews draw nothing in tests (and say so quietly).
+HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement["getContext"];

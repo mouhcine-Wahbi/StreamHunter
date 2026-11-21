@@ -6,12 +6,13 @@
  */
 import { startEngine, type CaptureEngine } from "@/capture/engine";
 import type { OffscreenRequest, RuntimeRequest } from "@/types/messages";
+import { isBusy, runQueue } from "@/processing/runner";
 
 const engines = new Map<number, CaptureEngine>();
 (globalThis as { __streamhunterEngines?: typeof engines }).__streamhunterEngines = engines;
 
-function send(message: RuntimeRequest) {
-  void chrome.runtime.sendMessage(message).catch(() => undefined);
+function send(message: RuntimeRequest): Promise<unknown> {
+  return chrome.runtime.sendMessage(message).catch(() => undefined);
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
@@ -23,6 +24,14 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     return true;
   };
   switch (m.type) {
+    // 3.0 processing queue (clips → vertical/landscape assets, analyses of authorized files).
+    case "process/kick":
+      void runQueue(send);
+      sendResponse({ ok: true });
+      return false;
+    case "process/busy":
+      sendResponse({ ok: true, busy: isBusy() });
+      return false;
     case "capture/start": {
       if (typeof m.streamId !== "string" || !m.options || typeof m.slot !== "number") return false;
       const slot = m.slot;

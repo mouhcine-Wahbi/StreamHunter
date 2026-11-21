@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { ChevronDown, ExternalLink, EyeOff, FileVideo, Play, Telescope, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, ExternalLink, EyeOff, FileVideo, Play, Scissors, Telescope, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Segmented } from "@/components/ui/Segmented";
+import { Input } from "@/components/ui/Field";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiStateView } from "@/components/ApiStateView";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
@@ -14,6 +15,7 @@ import { useStorageValue } from "@/hooks/useStorageValue";
 import { useSettings } from "@/hooks/useSettings";
 import { sendRequest } from "@/services/runtime";
 import { addSource, type SourceFile } from "@/local/sources";
+import { atLeast } from "@/local/rights";
 import { DISCOVERY_KEY, type Candidate, type DiscoveryRun, type DiscoveryVia } from "@/discovery/discovery";
 import type { Page } from "@/types/api";
 import { formatRelative } from "@/utils/format";
@@ -102,12 +104,54 @@ function CandidateCard({ c, onChanged }: { c: Candidate; onChanged: () => void }
   );
 }
 
+const ANALYSIS_LABEL: Record<SourceFile["analysis"], string> = { not_analyzed: "Not analyzed", queued: "Waiting to analyze…", analyzing: "Analyzing…", analyzed: "Analyzed", failed: "Analysis failed" };
+
+function CutForm({ s, onDone }: { s: SourceFile; onDone: (error: string | null) => void }) {
+  const [start, setStart] = useState("0");
+  const [end, setEnd] = useState("30");
+  return (
+    <form
+      className="flex flex-wrap items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void sendRequest({ type: "source/clip", id: s.id, start: Number(start), end: Number(end) }).then(
+          () => onDone(null),
+          (err: unknown) => onDone(err instanceof Error ? err.message : "Could not queue the clip"),
+        );
+      }}
+    >
+      <span className="text-fg-muted">Cut from</span>
+      <Input aria-label={`Clip start for ${s.name}`} className="w-20 tabular" inputMode="decimal" value={start} onChange={(e) => setStart(e.target.value)} />
+      <span className="text-fg-muted">to</span>
+      <Input aria-label={`Clip end for ${s.name}`} className="w-20 tabular" inputMode="decimal" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <span className="text-fg-muted">seconds</span>
+      <Button size="sm" variant="secondary" type="submit" icon={<Scissors className="size-3.5" />}>
+        Make clip
+      </Button>
+    </form>
+  );
+}
+
 function SourcesCard({ refresh, onChanged }: { refresh: number; onChanged: () => void }) {
   const client = useApiClient();
-  const sources = useApiQuery<Page<SourceFile>>(`/api/v1/sources?limit=100&_=${refresh}`);
+  const [tick, setTick] = useState(0);
+  const [errors, setErrors] = useState<Record<number, string | null>>({});
+  const sources = useApiQuery<Page<SourceFile>>(`/api/v1/sources?limit=100&_=${refresh}:${tick}`);
+  const busy = sources.data?.items.some((s) => s.analysis === "queued" || s.analysis === "analyzing" || (s.pending_clips ?? []).length > 0) ?? false;
+  // Refresh while the processing queue works on these files.
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(() => setTick((x) => x + 1), 3000);
+    return () => clearInterval(t);
+  }, [busy]);
+  const act = (id: number, p: Promise<unknown>) =>
+    void p.then(
+      () => setErrors((e) => ({ ...e, [id]: null })),
+      (err: unknown) => setErrors((e) => ({ ...e, [id]: err instanceof Error ? err.message : "Failed" })),
+    ).finally(onChanged);
   return (
     <Card>
-      <CardHeader icon={<FileVideo className="size-4" />} title="Authorized files" description="Files you added with rights evidence. Only these can be analyzed and clipped." />
+      <CardHeader icon={<FileVideo className="size-4" />} title="Authorized files" description="Files you added with rights evidence. Only these can be analyzed and clipped. Clips you cut appear in the Clip Queue, with their Short-form and X versions." />
       <CardBody>
         <ApiStateView query={sources} feature="authorized files" compact>
           {(p) =>
@@ -115,45 +159,57 @@ function SourcesCard({ refresh, onChanged }: { refresh: number; onChanged: () =>
               <p className="text-xs text-fg-subtle">None yet. Use "Add authorized file…" on a discovered video.</p>
             ) : (
               <ul className="divide-y divide-ink-700/70 text-xs">
-                {p.items.map((s) => (
-                  <li key={s.id} className="space-y-1 py-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-fg">{s.name}</span>
-                      <RightsBadge rights={s.rights} />
-                      <Badge tone={s.analysis === "failed" ? "danger" : s.analysis === "analyzed" ? "live" : "neutral"}>
-                        {s.analysis === "not_analyzed" ? "Not analyzed" : s.analysis === "analyzing" ? "Analyzing…" : s.analysis === "analyzed" ? `${s.moments.length} moments` : "Analysis failed"}
-                      </Badge>
-                      <span className="ml-auto text-fg-subtle">{(s.size_bytes / 1024 ** 2).toFixed(1)} MB</span>
-                    </div>
-                    <p className="text-fg-subtle">
-                      {s.creator_name} · evidence: {s.rights.evidence} · added {formatRelative(s.added_at)}
-                      {s.analysis_error ? ` · ${s.analysis_error}` : ""}
-                    </p>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="secondary" icon={<Play className="size-3.5" />} disabled={s.analysis === "analyzing"} onClick={() => void sendRequest({ type: "source/analyze", id: s.id }).finally(onChanged)}>
-                        {s.analysis === "analyzed" ? "Analyze again" : "Find moments"}
-                      </Button>
-                      <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} onClick={() => void client.delete(`/api/v1/sources/${s.id}`).then(onChanged)}>
-                        Delete file
-                      </Button>
-                    </div>
-                    {s.moments.length > 0 && (
-                      <ul className="space-y-0.5 pl-2 text-fg-muted">
-                        {s.moments.slice(0, 10).map((m) => (
-                          <li key={m.at} className="flex flex-wrap items-center gap-2">
-                            <span className="tabular">{fmtDuration(Math.round(m.at))}</span>
-                            <span>score {m.score}</span>
-                            <span className="text-fg-subtle">{m.reasons.join(" · ")}</span>
-                            <Button size="sm" variant="ghost" disabled={s.rights.status === "analysis"} title={s.rights.status === "analysis" ? "Needs \"Authorized for processing\"" : undefined}
-                              onClick={() => void sendRequest({ type: "source/clip", id: s.id, start: m.start, end: m.end }).finally(onChanged)}>
-                              Make clip
-                            </Button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </li>
-                ))}
+                {p.items.map((s) => {
+                  const canCut = atLeast(s.rights, "processing");
+                  const working = s.analysis === "queued" || s.analysis === "analyzing";
+                  const pending = (s.pending_clips ?? []).length;
+                  return (
+                    <li key={s.id} className="space-y-1.5 py-2.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-fg">{s.name}</span>
+                        <RightsBadge rights={s.rights} />
+                        <Badge tone={s.analysis === "failed" ? "danger" : s.analysis === "analyzed" ? "live" : "neutral"}>
+                          {s.analysis === "analyzed" ? `${s.moments.length} suggested moment${s.moments.length === 1 ? "" : "s"}` : ANALYSIS_LABEL[s.analysis]}
+                        </Badge>
+                        {pending > 0 && <Badge tone="accent">Making {pending} clip{pending === 1 ? "" : "s"}…</Badge>}
+                        {(s.clip_ids ?? []).length > 0 && <Badge tone="neutral">{s.clip_ids!.length} clip{s.clip_ids!.length === 1 ? "" : "s"} made</Badge>}
+                        <span className="ml-auto text-fg-subtle">
+                          {(s.size_bytes / 1024 ** 2).toFixed(1)} MB{s.duration_seconds ? ` · ${fmtDuration(Math.round(s.duration_seconds))}` : ""}
+                        </span>
+                      </div>
+                      <p className="text-fg-subtle">
+                        {s.creator_name} · evidence: {s.rights.evidence} · added {formatRelative(s.added_at)}
+                      </p>
+                      {(s.analysis_error && s.analysis_error !== "retry") || s.clip_error || errors[s.id] ? (
+                        <p className="text-danger">{errors[s.id] ?? s.clip_error ?? s.analysis_error}</p>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="secondary" icon={<Play className="size-3.5" />} disabled={working} loading={working} onClick={() => act(s.id, sendRequest({ type: "source/analyze", id: s.id }))}>
+                          {s.analysis === "analyzed" ? "Analyze again" : "Find moments"}
+                        </Button>
+                        <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} onClick={() => void client.delete(`/api/v1/sources/${s.id}`).then(onChanged)}>
+                          Delete file
+                        </Button>
+                      </div>
+                      {canCut ? <CutForm s={s} onDone={(err) => (setErrors((e) => ({ ...e, [s.id]: err })), onChanged())} /> : <p className="text-fg-subtle">Cutting clips needs "Authorized for processing".</p>}
+                      {s.moments.length > 0 && (
+                        <ul className="space-y-0.5 pl-2 text-fg-muted" aria-label={`Suggested moments in ${s.name}`}>
+                          {s.moments.slice(0, 10).map((m) => (
+                            <li key={m.at} className="flex flex-wrap items-center gap-2">
+                              <span className="tabular">{fmtDuration(Math.round(m.start))}–{fmtDuration(Math.round(m.end))}</span>
+                              <span title="Relative to this file only; not a viral prediction">score {m.score}</span>
+                              <span className="text-fg-subtle">{m.reasons.join(" · ")}</span>
+                              <Button size="sm" variant="ghost" disabled={!canCut} title={canCut ? undefined : 'Needs "Authorized for processing"'}
+                                onClick={() => act(s.id, sendRequest({ type: "source/clip", id: s.id, start: m.start, end: m.end, score: m.score, reasons: m.reasons }))}>
+                                Make clip
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )
           }

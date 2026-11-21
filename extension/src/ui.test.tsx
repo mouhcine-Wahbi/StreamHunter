@@ -16,6 +16,8 @@ import { listClips, saveClip } from "@/local/clips";
 import { ACTIVITY_KEY, KICK_CHAT_REASON } from "@/background/chat-manager";
 import { CAPTURES_KEY, INITIAL_CAPTURE_STATE } from "@/types/capture";
 import type { Streamer } from "@/types/api";
+import { createProcessingManager } from "@/background/processing-manager";
+import { listAssets, patchAsset, queueAssets } from "@/local/assets";
 
 /** Wires runtime messages to the real handler, as the service worker would. */
 function installWorker() {
@@ -508,5 +510,50 @@ describe("3.0 recording approvals in the dashboard", () => {
     expect(within(screen.getByRole("region", { name: "Approval history" })).getByText("Not answered. The broadcast ended.")).toBeInTheDocument();
     await userEvent.click(within(pending).getByRole("button", { name: "Record" }));
     await waitFor(() => expect(decisions).toEqual([{ type: "approval/decide", id: "1|twitch:b1", action: "approve" }]));
+  });
+});
+
+describe("3.0 output formats in the dashboard", () => {
+  it("Short-form Clips shows each clip's vertical version with the layout and why, and remakes it with a per-clip layout", async () => {
+    mockFetch(() => null);
+    const kicks: unknown[] = [];
+    const manager = createMonitoringManager();
+    const processing = createProcessingManager({ ensureOffscreen: async () => undefined, kick: async () => void kicks.push(1), closeIfIdle: async () => undefined });
+    chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+      handleMessage(msg, manager, undefined, undefined, undefined, processing).then(respond);
+      return true;
+    });
+    const c = await saveClip({ candidateId: 0, sessionId: null, streamerId: 0, streamerName: "StreamerOne", platform: "twitch", title: "Big clutch", startedAt: Date.now(), durationSec: 30, width: 1920, height: 1080, score: 80, blob: new Blob([new Uint8Array(4)], { type: "video/mp4" }) });
+    const [a] = await queueAssets(c.id, ["vertical"], { layout: { kind: "facecam_top", facecam: null }, source: "default" });
+    await patchAsset(a!.id, { status: "ready", used_layout: "center", width: 1080, height: 1920, duration_seconds: 30, size_bytes: 5 * 1024 ** 2, notes: ["No facecam position is set for this creator, so the centre crop was used."] });
+    window.location.hash = "/shorts";
+    render(<App />);
+    expect(await screen.findByText("Big clutch")).toBeInTheDocument();
+    expect(screen.getByText(/1080×1920 · 30 s · 5.0 MB · Centre crop \(default from Settings\)/)).toBeInTheDocument();
+    expect(screen.getByText("No facecam position is set for this creator, so the centre crop was used.")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Layout for Big clutch"), "action");
+    await userEvent.click(screen.getByRole("button", { name: "Remake" }));
+    await waitFor(async () => expect((await listAssets(c.id))[0]).toMatchObject({ status: "queued", layout: { kind: "action" }, layout_source: "clip" }));
+    expect(kicks.length).toBe(1);
+    expect(await screen.findByText("Waiting")).toBeInTheDocument();
+  });
+
+  it("My Creators saves a facecam layout and creator rights with evidence", async () => {
+    mockFetch(() => null);
+    installWorker();
+    await db.put<Streamer>("streamers", { id: undefined as unknown as number, platform: "twitch", platform_user_id: "77", username: "streamerone", display_name: "StreamerOne", monitoring_enabled: true, is_live: false, is_favorite: false, auto_record: false, priority: 0 } as unknown as Streamer);
+    window.location.hash = "/streamers";
+    render(<App />);
+    await userEvent.click(await screen.findByText(/Clip layout & rights/));
+    await userEvent.selectOptions(screen.getByLabelText("Vertical layout for StreamerOne"), "facecam_top");
+    await userEvent.click(screen.getByRole("button", { name: "Top left" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save layout" }));
+    await waitFor(async () => expect((await db.all<Streamer>("streamers"))[0]!.layout).toEqual({ kind: "facecam_top", facecam: { x: 0, y: 0, w: 0.25, h: 0.3 } }));
+    await userEvent.selectOptions(screen.getByLabelText("Rights level"), "publishing");
+    await userEvent.type(screen.getByLabelText("Rights evidence"), "Clipping programme terms, 2026-11-01");
+    await userEvent.click(screen.getByRole("checkbox", { name: "YouTube Shorts" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /I confirm I have these rights/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Save rights" }));
+    await waitFor(async () => expect(await db.get("rights", "twitch:77")).toMatchObject({ status: "publishing", destinations: ["youtube"] }));
   });
 });

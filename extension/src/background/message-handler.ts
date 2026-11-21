@@ -5,6 +5,9 @@ import type { MonitoringManager } from "./monitoring-manager";
 import { getCaptureState, getSlots, type CaptureManager } from "./capture-manager";
 import { SYSTEM_KEY, type SystemLoad } from "@/types/capture";
 import { ApprovalError, type Approval, type ApprovalAction } from "@/local/approvals";
+import { requestAnalysis, requestSourceClip } from "@/local/sources";
+import { RightsError } from "@/local/rights";
+import { ProcessingError, type ProcessingManager } from "./processing-manager";
 
 const NO_CAPTURE = "Capture is only available in the installed extension";
 
@@ -16,6 +19,8 @@ export async function handleMessage(
   onLoad?: () => Promise<void>,
   /** Recording approvals (3.0): apply your decision and reschedule. */
   decide?: (id: string, action: ApprovalAction) => Promise<Approval>,
+  /** 3.0 processing queue (formats, analyses of authorized files). */
+  processing?: ProcessingManager,
 ): Promise<RuntimeResponse> {
   if (!isRuntimeRequest(message)) return { ok: false, error: "Unknown message" };
   try {
@@ -63,7 +68,30 @@ export async function handleMessage(
       }
       case "source/analyze":
       case "source/clip":
-        return { ok: false, error: "Analysing authorized files arrives with the processing pipeline (3.0 phase 5)." };
+      case "assets/make": {
+        if (!processing) return { ok: false, error: "Processing is only available in the installed extension" };
+        try {
+          if (message.type === "assets/make") {
+            const kinds = Array.isArray(message.kinds) ? message.kinds.filter((k) => k === "vertical" || k === "landscape") : undefined;
+            return { ok: true, data: await processing.makeAssets(Number(message.clipId), await getSettings(), kinds, message.layout ?? null) };
+          }
+          const id = Number(message.id);
+          const data =
+            message.type === "source/analyze"
+              ? await requestAnalysis(id)
+              : await requestSourceClip(id, { start: Number(message.start), end: Number(message.end), title: message.title, score: message.score, reasons: message.reasons });
+          await processing.kick();
+          return { ok: true, data };
+        } catch (e) {
+          if (e instanceof RightsError || e instanceof ProcessingError) return { ok: false, error: e.message };
+          throw e;
+        }
+      }
+      case "process/clip-made":
+      case "process/asset-done":
+      case "process/idle":
+        await processing?.onEvent(message, await getSettings());
+        return { ok: true, data: null };
       case "capture/get":
         return { ok: true, data: await getCaptureState(Number.isInteger(message.tabId) ? message.tabId : undefined) };
       case "capture/list":
@@ -123,6 +151,7 @@ export async function handleMessage(
         return { ok: true, data: null };
       case "capture/clip-saved":
         await capture?.onClipSaved(Number(message.slot), Number(message.clipId), Number(message.highlightId), Number(message.durationSec) || 0);
+        await processing?.onClipSaved(Number(message.clipId), await getSettings());
         return { ok: true, data: null };
       case "capture/clip-failed":
         await capture?.onClipFailed(Number(message.slot), String(message.reason));

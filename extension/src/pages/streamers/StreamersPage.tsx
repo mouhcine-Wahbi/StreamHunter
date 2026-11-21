@@ -20,6 +20,8 @@ import { streamUrl } from "@/local/streamers";
 import { PLATFORM_LABEL, PLATFORMS, type Page, type Platform, type Streamer } from "@/types/api";
 import { formatRelative } from "@/utils/format";
 import { sendRequest } from "@/services/runtime";
+import { CreatorRightsEditor, LayoutEditor } from "@/components/creators/CreatorOptions";
+import { LAYOUT_LABEL } from "@/processing/layout";
 
 interface RefreshResult {
   checked: number;
@@ -123,6 +125,15 @@ function StreamerCard({ s, onChanged, snap, recordingIds }: { s: Row; onChanged:
           <option value="-2">−2 Lowest</option>
         </Select>
       </label>
+      <details className="mt-3 rounded-lg border border-ink-700 bg-ink-900/40 px-3 py-2">
+        <summary className="cursor-pointer text-xs text-fg-muted">
+          Clip layout & rights · {s.layout ? LAYOUT_LABEL[s.layout.kind] : "default layout"}
+        </summary>
+        <div className="mt-3 space-y-4">
+          <LayoutEditor s={s} onSaved={onChanged} />
+          <CreatorRightsEditor s={s} />
+        </div>
+      </details>
       {(toggle.error || remove.error || autoRecord.error || prio.error || fav.error) && (
         <p className="mt-2 text-xs text-danger">{toggle.error ?? remove.error ?? autoRecord.error ?? prio.error ?? fav.error}</p>
       )}

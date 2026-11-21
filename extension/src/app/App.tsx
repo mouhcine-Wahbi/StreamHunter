@@ -11,6 +11,7 @@ import { ClipsPage } from "@/pages/clips/ClipsPage";
 import { SettingsPage } from "@/pages/settings/SettingsPage";
 import { HealthPage } from "@/pages/health/HealthPage";
 import { ContentDiscoveryPage } from "@/pages/content/ContentDiscoveryPage";
+import { FormatsPage } from "@/pages/formats/FormatsPage";
 import { NAV, ROUTES, type Route } from "./routes";
 import { PageHeader } from "@/components/layout/PageHeader";
 
@@ -53,7 +54,11 @@ export function App() {
       page = <ContentDiscoveryPage />;
       break;
     case "/shorts":
+      page = <FormatsPage kind="vertical" />;
+      break;
     case "/xclips":
+      page = <FormatsPage kind="landscape" />;
+      break;
     case "/studio":
     case "/performance":
       page = <PlannedPage route={route} />;

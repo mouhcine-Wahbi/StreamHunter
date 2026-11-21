@@ -88,6 +88,16 @@ Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-befor
 | Found and fixed: TikTok post ids are int64 JSON numbers; a plain JSON parse rounded them (wrong link). They are now read from the raw text | unit test | |
 | X limits note corrected: StreamHunter's 140 s / 512 MB are stricter than X requires for posts (20 min / 8 GB per X's docs); kept because they fit every account | | |
 
+### Phase 8 — Publishing Studio, Performance, Overview, Settings, System Health
+
+| Feature | Status | Evidence / notes |
+|---|---|---|
+| Publishing Studio: approval queue, in progress, needs attention (blocked/failed with the reason), waiting, published (with the post link); approve / try again / cancel; per-job history; publish any clip yourself (counts as approval, every other check still applies) | UI tests; screenshot in real Chrome | |
+| Performance: totals per destination and per post, only numbers the platform reported ("—" when missing, never estimated) | UI test | No real numbers yet (nothing published for real) |
+| Overview: "Publishing approvals" and "Published (7 days)" tiles | typecheck + existing Overview tests | |
+| Settings → Publishing: automatic publishing, destinations and daily limits, YouTube visibility, TikTok privacy, retries; accounts with your client ID / key (+ TikTok token server, https only), redirect URI shown, Connect (asks Chrome for the platform's host permission first) / Disconnect; no secret field anywhere | UI test; screenshot in real Chrome | Real Chrome reports the redirect URI `https://<extension-id>.chromiumapp.org/`, as shown. Connect itself not run (no real apps) |
+| System Health: publishing card (accounts, problems, job counts) | typecheck | |
+
 ## v2.0 — Multi-platform automatic clipping (released)
 
 Labels: **✅ tested for real** (real Chrome, real live pages) · **🧪 implemented, tested against documented

@@ -10,16 +10,12 @@ import { HighlightsPage } from "@/pages/highlights/HighlightsPage";
 import { ClipsPage } from "@/pages/clips/ClipsPage";
 import { SettingsPage } from "@/pages/settings/SettingsPage";
 import { HealthPage } from "@/pages/health/HealthPage";
+import { StudioPage } from "@/pages/studio/StudioPage";
+import { PerformancePage } from "@/pages/performance/PerformancePage";
 import { ContentDiscoveryPage } from "@/pages/content/ContentDiscoveryPage";
 import { FormatsPage } from "@/pages/formats/FormatsPage";
 import { NAV, ROUTES, type Route } from "./routes";
-import { PageHeader } from "@/components/layout/PageHeader";
 
-/** Sections of 3.0 that are still being built on this branch. */
-function PlannedPage({ route }: { route: Route }) {
-  const n = NAV.find((x) => x.route === route);
-  return <PageHeader title={n?.label ?? ""} description={`${n?.description ?? ""}. This section is being built on the 3.0 branch.`} />;
-}
 
 export function App() {
   const { route, navigate } = useHashRoute<Route>(ROUTES, "/overview");
@@ -60,8 +56,10 @@ export function App() {
       page = <FormatsPage kind="landscape" />;
       break;
     case "/studio":
+      page = <StudioPage />;
+      break;
     case "/performance":
-      page = <PlannedPage route={route} />;
+      page = <PerformancePage />;
       break;
     case "/health":
       page = <HealthPage monitoring={monitoring} />;

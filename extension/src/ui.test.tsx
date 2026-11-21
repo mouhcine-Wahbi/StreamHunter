@@ -19,6 +19,8 @@ import type { Streamer } from "@/types/api";
 import { createProcessingManager } from "@/background/processing-manager";
 import { listAssets, patchAsset, queueAssets } from "@/local/assets";
 import { prepareContent, type ContentClip } from "@/local/content";
+import { createJob, getJob, patchJob } from "@/local/jobs";
+import { getAccount } from "@/publishing/accounts";
 import { DEFAULT_SETTINGS } from "@/types/settings";
 
 /** Wires runtime messages to the real handler, as the service worker would. */
@@ -563,6 +565,54 @@ describe("3.0 output formats in the dashboard", () => {
       expect(row!.metadata!.edited).toEqual(["x"]);
       expect(row!.metadata!.byDestination.x.description).toMatch(/^What a clutch\n\nCredit: StreamerOne on Twitch/);
     });
+  });
+
+  it("Publishing Studio: approve a waiting job, see reasons and history; Performance shows only reported numbers", async () => {
+    mockFetch(() => null);
+    installWorker();
+    const c = await saveClip({ candidateId: 0, sessionId: null, streamerId: 0, streamerName: "StreamerOne", platform: "twitch", title: "Big clutch", startedAt: Date.now(), durationSec: 30, width: 1920, height: 1080, score: 80, blob: new Blob([new Uint8Array(4)], { type: "video/mp4" }) });
+    const waiting = await createJob(c.id, "youtube", { approved: false, auto: true });
+    await patchJob(waiting.id, { state: "needs_approval", reason: "70 is between 60 and 85: needs your approval." });
+    const blocked = await createJob(c.id, "tiktok", { approved: false, auto: true });
+    await patchJob(blocked.id, { state: "blocked", reason: "Connect your TikTok account first (Settings → Publishing)." });
+    const done = await createJob(c.id, "x", { approved: true, auto: false });
+    await patchJob(done.id, { state: "published", platform_id: "18", url: "https://x.com/me/status/18", published_at: new Date().toISOString(), metrics: { views: 1234, likes: 56, comments: null, shares: 3, fetched_at: new Date().toISOString() } });
+    window.location.hash = "/studio";
+    const { unmount } = render(<App />);
+    expect(await screen.findByText("Needs your approval (1)")).toBeInTheDocument();
+    expect(screen.getByText("70 is between 60 and 85: needs your approval.")).toBeInTheDocument();
+    expect(screen.getAllByText(/Connect your TikTok account first/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: /Open post/ })).toHaveAttribute("href", "https://x.com/me/status/18");
+    await userEvent.click(screen.getAllByRole("button", { name: "Approve" })[0]!);
+    await waitFor(async () => expect((await getJob(waiting.id)).state).toBe("queued"));
+    expect((await getJob(waiting.id)).approved).toBe(true);
+    unmount();
+    window.location.hash = "/performance";
+    render(<App />);
+    expect(await screen.findByText("Published clips")).toBeInTheDocument();
+    expect(screen.getAllByText("1,234").length).toBeGreaterThan(0);
+    const row = screen.getByRole("link", { name: /Big clutch/ }).closest("tr")!;
+    expect(within(row).getAllByText("—")).toHaveLength(1); // comments not reported: shown as missing, never guessed
+  });
+
+  it("Settings → Publishing saves your app (no secret field) and shows the redirect URI", async () => {
+    mockFetch(() => null);
+    installWorker();
+    window.location.hash = "/settings";
+    render(<App />);
+    const id = await screen.findByLabelText("X client ID");
+    await userEvent.type(id, "x-client-123");
+    const x = id.closest("fieldset")!;
+    await userEvent.click(within(x).getByRole("button", { name: "Save app" }));
+    await waitFor(async () => expect((await getAccount("x")).config).toEqual({ clientId: "x-client-123" }));
+    expect(within(x).getByText(/chromiumapp\.org\//)).toBeInTheDocument();
+    expect(within(x).getByRole("button", { name: "Connect account" })).toBeEnabled();
+    expect(within(x.closest("section") ?? document.body).queryAllByLabelText(/secret/i)).toHaveLength(0); // the publishing section never asks for a secret
+    await userEvent.type(screen.getByLabelText("TikTok token server"), "http://insecure.example.com");
+    await userEvent.type(screen.getByLabelText("TikTok client key"), "tt-client-key");
+    const tt = screen.getByLabelText("TikTok client key").closest("fieldset")!;
+    await userEvent.click(within(tt).getByRole("button", { name: "Save app" }));
+    expect(await within(tt).findByText(/must use https/)).toBeInTheDocument();
   });
 
   it("My Creators saves a facecam layout and creator rights with evidence", async () => {

@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { HardDrive, Plug, RotateCcw, Trash2 } from "lucide-react";
+import { HardDrive, Plug, RotateCcw, Send, Trash2 } from "lucide-react";
+import { listAccounts, type AccountView } from "@/publishing/accounts";
+import type { PublishJob } from "@/local/jobs";
+import { DESTINATION_LABEL } from "@/local/rights";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge, Dot } from "@/components/ui/Badge";
@@ -139,6 +142,30 @@ function RecoveryCard() {
   );
 }
 
+function PublishingCard() {
+  const [accounts, setAccounts] = useState<AccountView[] | null>(null);
+  useEffect(() => void listAccounts().then(setAccounts), []);
+  const jobs = useApiQuery<PublishJob[]>("/api/v1/jobs").data ?? [];
+  const count = (f: (j: PublishJob) => boolean) => jobs.filter(f).length;
+  return (
+    <Card>
+      <CardHeader icon={<Send className="size-4" />} title="Publishing" description="Accounts and jobs. Published means the platform confirmed the post." />
+      <CardBody className="space-y-2 text-xs">
+        {accounts?.map((a) => (
+          <div key={a.destination} className="flex items-center justify-between gap-2">
+            <span className="text-fg">{DESTINATION_LABEL[a.destination]}</span>
+            <span className={a.problem ? "text-warn" : "text-fg-muted"}>{a.problem ?? (a.connected ? `Connected as ${a.name}` : a.configured ? "App saved, not connected" : "Not set up")}</span>
+          </div>
+        ))}
+        <p className="pt-1 text-fg-muted">
+          {count((j) => ["queued", "uploading", "confirming"].includes(j.state))} in progress · {count((j) => j.state === "needs_approval")} awaiting approval · {count((j) => j.state === "blocked")} blocked · {count((j) => j.state === "failed")} failed ·{" "}
+          {count((j) => j.state === "published")} published
+        </p>
+      </CardBody>
+    </Card>
+  );
+}
+
 export function HealthPage({ monitoring }: { monitoring: ReturnType<typeof useMonitoring> }) {
   return (
     <>
@@ -152,6 +179,7 @@ export function HealthPage({ monitoring }: { monitoring: ReturnType<typeof useMo
         <div className="space-y-6">
           <SchedulerCard monitoring={monitoring} compact />
           <RecoveryCard />
+          <PublishingCard />
           <StreamsGrid />
         </div>
       </div>

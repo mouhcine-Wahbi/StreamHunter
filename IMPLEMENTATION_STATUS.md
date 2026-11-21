@@ -8,6 +8,35 @@ Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possi
 
 Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-before-3.0` points at the last 2.0 commit.
 
+### 3.0 summary (phases 1–10 implemented)
+
+**Tested for real (Chrome 158, Apple M5):**
+* Recording approvals.
+* Vertical and landscape formats with all three layouts, checked frame by frame.
+* Analysing and cutting authorized files.
+* The processing queue's lifecycle.
+* On-device AI detection (reports "downloadable" on this Mac) with the template fallback.
+* Score and text written automatically for every new clip.
+* The rights block stopping a publishing job before anything is sent.
+* Studio and Settings → Publishing rendering, and the redirect URI.
+
+**Tested only against fake servers built from each platform's documentation:**
+* Claude and OpenAI-compatible metadata generation.
+* YouTube, TikTok and X sign-in, upload, confirmation and metrics.
+
+**Not verified yet (needs your real accounts and apps):**
+1. Publishing anything to YouTube Shorts, TikTok or X: sign-in, upload, confirmation, privacy.
+   Google's and TikTok's restrictions on unverified or unaudited apps (private-only posts) apply.
+2. Whether TikTok accepts a `https://<extension-id>.chromiumapp.org/` redirect URI, and your
+   token server.
+3. Real performance numbers from each platform.
+4. Metadata from a real Anthropic key or a real local model server, and from Chrome's on-device
+   model once downloaded (about 22 GB).
+5. The in-page video preview player. The automated Chrome never plays video; the files were checked
+   with ffprobe and ffmpeg instead.
+6. CPU impact of processing while several streams are recording.
+7. Publishing notifications in real Chrome.
+
 ### Phase 3 — Recording approvals and recording integration
 
 | Feature | Status | Evidence / notes |

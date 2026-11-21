@@ -9,12 +9,35 @@ default). It records them in the browser and watches for moments: sound, picture
 viewer spikes. When several of those react together, it saves an MP4 clip. Come back to a ranked list
 of individual clips, ready to download into your editor.
 
-Everything runs **inside Chrome**. There is no StreamHunter server, no account, no upload and no
+Everything runs **inside Chrome**. There is no StreamHunter server, no account and no
 subscription. Your list, clips and settings stay in this browser. StreamHunter talks to each
-platform's official API with your own free developer credentials.
+platform's official API with your own free developer credentials. Nothing is uploaded unless you
+connect a publishing account (3.0) and every publishing check passes.
 
-> **Status:** v2.0. What is tested for real, against documented responses, or not yet is listed in
-> [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Settings → Platforms shows it per feature too.
+> **Status:** v2.0 released. **3.0 is in progress on the `streamhunter-3.0` branch.** What is tested
+> for real, what was tested only against documented responses, and what isn't tested yet is listed in
+> [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). **Publishing to YouTube, TikTok and X has not
+> been tested with real accounts.**
+
+## What's new in 3.0 (branch `streamhunter-3.0`)
+
+* **Recording only with your approval**, one broadcast at a time.
+* **Content discovery** (creator uploads, trending, your keywords) kept separate from
+  **authorized sources**: rights levels (analysis → processing → publishing) need your
+  confirmation and evidence. Nothing unauthorized is downloaded.
+* **Short-form clips**: vertical 9:16 (facecam above gameplay, follow the action, or centre crop;
+  set per creator, override per clip) and native landscape for X. All made in the browser with WebCodecs.
+* **Titles, captions and hashtags** per destination: Chrome's on-device AI, then your own provider
+  (Claude with your Anthropic key, or an OpenAI-compatible endpoint), then local templates. None of
+  them is required, and the creator is credited.
+* **Viral-potential score** with six explained factors and a confidence level. High (≥ 85 by
+  default) can publish automatically, medium needs your approval, low is manual only. It is an
+  estimate, never a view prediction.
+* **Publishing** to YouTube Shorts, TikTok and X with **your own developer apps**: one job per
+  destination, every check before upload, and "published" only after the platform confirms. Set up
+  in Settings → Publishing; see [docs/PUBLISHING.md](docs/PUBLISHING.md).
+* **Publishing Studio** (approvals, reasons, history) and **Performance** (only numbers the
+  platforms report).
 
 ## How it works
 
@@ -180,8 +203,8 @@ npm test
 npm run typecheck
 ```
 
-151 unit and integration tests (fake Chrome APIs, fake IndexedDB, fake platforms following each
-API's documented responses) plus real-Chrome runs on real live pages. See IMPLEMENTATION_STATUS.md.
+248 unit, UI and integration tests (fake Chrome APIs, fake IndexedDB, fake platforms following each
+API's documented requests and responses) plus real-Chrome runs. See IMPLEMENTATION_STATUS.md.
 
 ## Documentation
 
@@ -190,4 +213,5 @@ API's documented responses) plus real-Chrome runs on real live pages. See IMPLEM
 * [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md): IndexedDB stores and storage keys
 * [SECURITY.md](SECURITY.md): permissions (and why), credentials, privacy
 * [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): what is tested, how, and what isn't
+* [docs/PUBLISHING.md](docs/PUBLISHING.md): setting up your own YouTube / X / TikTok apps, the checks, and the TikTok token server
 * [docs/AUTO_CLIPPING_PLAN.md](docs/AUTO_CLIPPING_PLAN.md), [docs/LOCAL_FIRST_MIGRATION.md](docs/LOCAL_FIRST_MIGRATION.md): earlier design notes

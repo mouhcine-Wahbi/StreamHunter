@@ -8,7 +8,7 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiStateView } from "@/components/ApiStateView";
 import { useApiQuery } from "@/hooks/useApiQuery";
-import type { PublishJob } from "@/local/jobs";
+import { safePostUrl, type PublishJob } from "@/local/jobs";
 import { DESTINATION_LABEL, DESTINATIONS } from "@/local/rights";
 import type { ContentClip } from "@/local/content";
 import type { Page } from "@/types/api";
@@ -67,8 +67,8 @@ export function PerformancePage() {
                     {list.map((j) => (
                       <tr key={j.id} className="border-t border-border text-fg">
                         <td className="px-5 py-2">
-                          {j.url ? (
-                            <a href={j.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
+                          {safePostUrl(j.url) ? (
+                            <a href={safePostUrl(j.url)!} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
                               {title(j.clip_id)} <ExternalLink className="size-3" />
                             </a>
                           ) : (

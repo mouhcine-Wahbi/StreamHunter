@@ -98,6 +98,17 @@ Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-befor
 | Settings → Publishing: automatic publishing, destinations and daily limits, YouTube visibility, TikTok privacy, retries; accounts with your client ID / key (+ TikTok token server, https only), redirect URI shown, Connect (asks Chrome for the platform's host permission first) / Disconnect; no secret field anywhere | UI test; screenshot in real Chrome | Real Chrome reports the redirect URI `https://<extension-id>.chromiumapp.org/`, as shown. Connect itself not run (no real apps) |
 | System Health: publishing card (accounts, problems, job counts) | typecheck | |
 
+### Phase 9 — Tests and hardening
+
+| Item | Status | Evidence / notes |
+|---|---|---|
+| Found and fixed: an upload-progress write could land after the final state and turn "published" back into "uploading" | regression test | The test was checked to fail with the old code and pass with the fix |
+| The video file and your token are sent only to the platform's own upload hosts (https, `*.googleapis.com` / `*.tiktokapis.com`); anything else fails with nothing sent | regression tests | |
+| Post links shown in the UI are https links on youtube.com / tiktok.com / x.com only; usernames are encoded | unit test | |
+| No content scripts are injected, so stored tokens and keys are readable only by the extension's own pages and worker | code review | |
+| Full suite: 248 tests (unit, UI, fake platform servers) | ✅ | `npx vitest run` |
+| Real Chrome regression (Phase 5 run again with everything on): formats made, analysis and cut worked, then score + text were written for each new clip, no publishing job for low potential, offscreen document closed | ✅ tested for real | Chrome 158, Apple M5 |
+
 ## v2.0 — Multi-platform automatic clipping (released)
 
 Labels: **✅ tested for real** (real Chrome, real live pages) · **🧪 implemented, tested against documented

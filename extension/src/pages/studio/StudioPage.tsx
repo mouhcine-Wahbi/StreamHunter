@@ -12,7 +12,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiStateView } from "@/components/ApiStateView";
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
 import { sendRequest } from "@/services/runtime";
-import { JOB_LABEL, type JobState, type PublishJob } from "@/local/jobs";
+import { JOB_LABEL, safePostUrl, type JobState, type PublishJob } from "@/local/jobs";
 import { DESTINATION_LABEL, DESTINATIONS, type Destination } from "@/local/rights";
 import type { ContentClip } from "@/local/content";
 import { TIER_LABEL } from "@/scoring/score";
@@ -74,10 +74,10 @@ function JobRow({ job, clip, onChanged }: { job: PublishJob; clip: ContentClip |
       {job.state === "published" && (
         <p className="text-fg-muted">
           Published {formatRelative(job.published_at)}
-          {job.url ? (
+          {safePostUrl(job.url) ? (
             <>
               {" · "}
-              <a href={job.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent hover:underline">
+              <a href={safePostUrl(job.url)!} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent hover:underline">
                 Open post <ExternalLink className="size-3" />
               </a>
             </>

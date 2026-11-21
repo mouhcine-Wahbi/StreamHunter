@@ -117,6 +117,8 @@ async function attempt(job: PublishJob, accounts: AccountView[], tokenFor: NonNu
       const blob = await (deps.blob ?? assetBlob)(pf.asset);
       if (!blob) throw new PublishError("The made file is missing; remake it.", false);
       let lastProgress = 0;
+      // Progress writes are chained and awaited before the final state, so a late one can't overwrite it.
+      let writes: Promise<unknown> = Promise.resolve();
       const out = await upload(job.destination, {
         blob,
         meta: clip.metadata!.byDestination[job.destination],
@@ -128,11 +130,14 @@ async function attempt(job: PublishJob, accounts: AccountView[], tokenFor: NonNu
         onProgress: (p) => {
           if (p - lastProgress >= 0.25 || p === 1) {
             lastProgress = p;
-            void patchJob(job.id, { progress: p }, undefined, now());
+            writes = writes.then(() => patchJob(job.id, { progress: p }, undefined, now())).catch(() => undefined);
           }
         },
-        beforePost: async () => void (await patchJob(job.id, { posting: true }, undefined, now())),
-      });
+        beforePost: async () => {
+          await writes;
+          await patchJob(job.id, { posting: true }, undefined, now());
+        },
+      }).finally(() => writes);
       if (out.kind === "published") {
         j = await patchJob(job.id, { state: "published", platform_id: out.platformId, url: out.url, published_at: now().toISOString(), posting: false, progress: 1, reason: null }, "Confirmed by the platform", now());
         deps.onPublished?.(j);

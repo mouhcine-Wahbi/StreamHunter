@@ -146,3 +146,15 @@ export async function publishedToday(destination: Destination, now = new Date())
   midnight.setHours(0, 0, 0, 0);
   return (await db.all<PublishJob>("jobs")).filter((j) => j.destination === destination && j.state === "published" && j.published_at && Date.parse(j.published_at) >= midnight.getTime()).length;
 }
+
+const POST_HOSTS = ["www.youtube.com", "youtube.com", "www.tiktok.com", "tiktok.com", "x.com"];
+/** A post link the UI may open: https on the platform's own site only. */
+export function safePostUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && POST_HOSTS.includes(u.hostname) ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}

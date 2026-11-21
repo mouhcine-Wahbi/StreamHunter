@@ -82,6 +82,19 @@ async function call(dest: Destination, f: typeof fetch, step: string, url: strin
   return r;
 }
 
+/** The file and your token only ever go to the platform's own upload hosts. */
+export function uploadHostOk(dest: "youtube" | "tiktok", url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:") return false;
+    return dest === "youtube" ? u.hostname === "www.googleapis.com" || u.hostname.endsWith(".googleapis.com") : u.hostname === "tiktokapis.com" || u.hostname.endsWith(".tiktokapis.com");
+  } catch {
+    return false;
+  }
+}
+
+const handle = (h: string) => encodeURIComponent(h.replace(/^@/, ""));
+
 const withTags = (text: string, tags: string[]) => [text.trim(), tags.join(" ")].filter(Boolean).join(text.includes("\n") ? "\n\n" : " ");
 
 // --- YouTube -------------------------------------------------------------------------------------
@@ -105,6 +118,7 @@ async function youtubeUpload(i: UploadInput): Promise<UploadOutcome> {
   });
   const location = start.headers.get("location");
   if (!location) throw new PublishError("YouTube upload start: no upload address returned.", true);
+  if (!uploadHostOk("youtube", location)) throw new PublishError("YouTube returned an upload address outside googleapis.com; nothing was sent.", false);
   i.onProgress?.(0.1);
   const put = await call("youtube", f, "upload", location, { method: "PUT", headers: { ...auth, "content-type": "video/mp4" }, body: i.blob });
   i.onProgress?.(1);
@@ -118,7 +132,7 @@ async function youtubeConfirm(ref: string, token: string, f: typeof fetch): Prom
   const v = ((await r.json()) as { items?: { id: string; status?: { uploadStatus?: string; failureReason?: string; rejectionReason?: string } }[] }).items?.[0];
   if (!v) return { kind: "failed", reason: "YouTube no longer has this video (deleted or never finished)." };
   const s = v.status?.uploadStatus;
-  if (s === "processed") return { kind: "published", platformId: v.id, url: `https://www.youtube.com/shorts/${v.id}` };
+  if (s === "processed") return { kind: "published", platformId: v.id, url: `https://www.youtube.com/shorts/${encodeURIComponent(v.id)}` };
   if (s === "uploaded") return { kind: "pending", note: "YouTube is processing the video." };
   return { kind: "failed", reason: `YouTube ${s ?? "error"}${v.status?.rejectionReason ? `: ${v.status.rejectionReason}` : v.status?.failureReason ? `: ${v.status.failureReason}` : ""}.` };
 }
@@ -186,6 +200,7 @@ async function tiktokUpload(i: UploadInput): Promise<UploadOutcome> {
   const publishId = init.publish_id as string | undefined;
   const uploadUrl = init.upload_url as string | undefined;
   if (!publishId || !uploadUrl) throw new PublishError("TikTok returned no upload address.", true);
+  if (!uploadHostOk("tiktok", uploadUrl)) throw new PublishError("TikTok returned an upload address outside tiktokapis.com; nothing was sent.", false);
   for (const [k, [a, b]] of plan.ranges.entries()) {
     await call("tiktok", f, `upload part ${k + 1}/${plan.count}`, uploadUrl, { method: "PUT", headers: { "content-type": "video/mp4", "content-range": `bytes ${a}-${b}/${i.blob.size}` }, body: i.blob.slice(a, b + 1) });
     i.onProgress?.((k + 1) / plan.count);
@@ -201,7 +216,7 @@ async function tiktokConfirm(ref: string, token: string, profile: Profile, f: ty
     // Post ids are int64 numbers in TikTok's JSON; read them from the text so no digit is lost.
     const id = /"publicaly_available_post_id"\s*:\s*\[\s*"?(\d+)/.exec(text)?.[1];
     // Without a public id (e.g. private posts) TikTok gives no link; the publish id is kept as proof.
-    return { kind: "published", platformId: id ? String(id) : ref, url: id && profile.handle ? `https://www.tiktok.com/@${profile.handle}/video/${id}` : null };
+    return { kind: "published", platformId: id ? String(id) : ref, url: id && profile.handle ? `https://www.tiktok.com/@${handle(profile.handle)}/video/${id}` : null };
   }
   if (s === "FAILED") return { kind: "failed", reason: `TikTok: ${(d.fail_reason as string) || "the post failed"}.` };
   return { kind: "pending", note: s === "PROCESSING_UPLOAD" ? "TikTok is processing the upload." : `TikTok status: ${s ?? "unknown"}.` };
@@ -230,8 +245,8 @@ async function xPost(mediaId: string, i: Pick<UploadInput, "meta" | "token" | "p
   }
   if (!r.ok) await fail("x", r, "post");
   const id = ((await r.json().catch(() => null)) as { data?: { id?: string } } | null)?.data?.id;
-  if (!id) throw new PublishError("X answered without a post id; check your X profile before retrying.", false, true);
-  return { kind: "published", platformId: id, url: i.profile.handle ? `https://x.com/${i.profile.handle}/status/${id}` : `https://x.com/i/status/${id}` };
+  if (!id || !/^\d+$/.test(id)) throw new PublishError("X answered without a post id; check your X profile before retrying.", false, true);
+  return { kind: "published", platformId: id, url: i.profile.handle ? `https://x.com/${handle(i.profile.handle)}/status/${id}` : `https://x.com/i/status/${id}` };
 }
 
 async function xUpload(i: UploadInput): Promise<UploadOutcome> {

@@ -6,7 +6,7 @@
 import { db } from "@/local/db";
 import { saveClip } from "@/local/clips";
 import { patchAsset, queueAssets } from "@/local/assets";
-import { approveJob, cancelJob, createJob, getJob, JobError, listJobs, patchJob, retryJob, type PublishJob } from "@/local/jobs";
+import { approveJob, cancelJob, createJob, getJob, JobError, listJobs, patchJob, retryJob, safePostUrl, type PublishJob } from "@/local/jobs";
 import { rightsKey, setCreatorRights, type Destination } from "@/local/rights";
 import { fit, templateMetadata, factsOf } from "@/metadata/metadata";
 import type { ClipScore } from "@/scoring/score";
@@ -14,7 +14,7 @@ import { DEFAULT_SETTINGS, type Settings } from "@/types/settings";
 import type { Streamer } from "@/types/api";
 import { accessToken, ACCOUNTS_KEY, connect, getAccount, listAccounts, pkce, setAppConfig, type AccountView } from "./accounts";
 import { preflight, type PreflightInput } from "./checks";
-import { fetchMetrics, tiktokChunks, TT, XAPI, YT } from "./platforms";
+import { fetchMetrics, tiktokChunks, TT, uploadHostOk, XAPI, YT } from "./platforms";
 import { planAuto, planManual } from "./plan";
 import { backoffMs, runPublishing, type RunnerDeps } from "./runner";
 
@@ -481,5 +481,58 @@ describe("accounts: your own apps, no secrets in the extension", () => {
     const a = await pkce(), b = await pkce();
     expect(a.verifier).toHaveLength(64);
     expect(a.verifier).not.toBe(b.verifier);
+  });
+});
+
+describe("hardening (phase 9)", () => {
+  it("the file and token are never sent to an upload address outside the platform", async () => {
+    const evil = server([
+      ["POST", YT.upload, () => new Response("", { status: 200, headers: { location: "https://uploads.attacker.example/put" } })],
+      ["PUT", "https://uploads.attacker.example/", () => ok({ id: "x" })],
+    ]);
+    const { clip } = await makeClip();
+    const [job] = await planManual(clip.id, ["youtube"]);
+    await runPublishing(deps(evil.fetchImpl));
+    expect(await getJob(job!.id)).toMatchObject({ state: "failed", retryable: false, reason: expect.stringMatching(/outside googleapis\.com/) });
+    expect(evil.calls.some((c) => c.url.includes("attacker"))).toBe(false);
+
+    const tt = server([
+      ["POST", TT.creatorInfo, () => ok({ data: { privacy_level_options: ["SELF_ONLY"] }, error: { code: "ok" } })],
+      ["POST", TT.init, () => ok({ data: { publish_id: "p", upload_url: "http://open-upload.tiktokapis.com/video/?x" }, error: { code: "ok" } })],
+    ]);
+    const other = await makeClip();
+    const [tj] = await planManual(other.clip.id, ["tiktok"]);
+    await runPublishing(deps(tt.fetchImpl));
+    expect(await getJob(tj!.id)).toMatchObject({ state: "failed", reason: expect.stringMatching(/outside tiktokapis\.com/) });
+    expect(tt.calls.some((c) => c.method === "PUT")).toBe(false);
+    expect(uploadHostOk("tiktok", "https://upload.us.tiktokapis.com/video/?a=1")).toBe(true);
+    expect(uploadHostOk("tiktok", "https://tiktokapis.com.evil.example/")).toBe(false);
+  });
+
+  it("a slow progress write can't overwrite the final state", async () => {
+    const api = x();
+    const { clip } = await makeClip({ size: 9 * MB });
+    const [job] = await planManual(clip.id, ["x"]);
+    // Progress writes (read "uploading", then write) are slow, so without ordering they'd land after "published".
+    const real = db.put.bind(db);
+    const spy = vi.spyOn(db, "put").mockImplementation(async (store, value) => {
+      const v = value as Partial<PublishJob>;
+      if (store === "jobs" && v.state === "uploading" && (v.progress ?? 0) > 0) await new Promise((r) => setTimeout(r, 20));
+      return real(store, value);
+    });
+    try {
+      await runPublishing(deps(api.fetchImpl));
+    } finally {
+      spy.mockRestore();
+    }
+    await new Promise((r) => setTimeout(r, 60));
+    expect(await getJob(job!.id)).toMatchObject({ state: "published", progress: 1 });
+  });
+
+  it("post links in the UI are https platform links only", () => {
+    expect(safePostUrl("https://x.com/me/status/1")).toBe("https://x.com/me/status/1");
+    expect(safePostUrl("javascript:alert(1)")).toBeNull();
+    expect(safePostUrl("https://x.com.evil.example/a")).toBeNull();
+    expect(safePostUrl("http://www.youtube.com/shorts/a")).toBeNull();
   });
 });

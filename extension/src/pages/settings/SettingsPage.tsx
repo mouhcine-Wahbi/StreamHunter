@@ -1,75 +1,20 @@
 import { useMemo, useState } from "react";
-import { RotateCcw, X } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
-import { Field, Input, Select } from "@/components/ui/Field";
+import { Field, Select } from "@/components/ui/Field";
 import { Switch } from "@/components/ui/Switch";
 import { Segmented } from "@/components/ui/Segmented";
 import { useSettings } from "@/hooks/useSettings";
 import { LIMITS, SUPPORTED_KEYWORD_LANGUAGES, type Sensitivity } from "@/types/settings";
 import { cn } from "@/utils/cn";
-import { NumberField, Section } from "./sections";
+import { KeywordEditor, NumberField, Section } from "./sections";
+import { V3Sections } from "./V3Sections";
 import { maxSingleSignalScore } from "@/detection/fusion";
 
 const SCHED_LABEL = { potential: "Highlight potential", activity: "Recent activity", growth: "Viewer growth", user: "Your priority / favourite", reliability: "Reliability" } as const;
 const WEIGHT_LABEL = { audio: "Audio reaction", chat: "Chat activity", visual: "Visual activity", viewers: "Viewer spike", multi: "Several signals together" } as const;
 import { PlatformConnections } from "./PlatformConnections";
-
-function KeywordEditor({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
-  const [draft, setDraft] = useState("");
-  const full = value.length >= LIMITS.customKeywords.maxItems;
-  const add = () => {
-    const k = draft.trim().slice(0, LIMITS.customKeywords.maxLength);
-    if (!k || full) return;
-    if (!value.some((v) => v.toLocaleLowerCase() === k.toLocaleLowerCase())) onChange([...value, k]);
-    setDraft("");
-  };
-  return (
-    <Field label="Custom reaction phrases" hint={`Added to the language packs, e.g. "clip it", "no shot". Up to ${LIMITS.customKeywords.maxItems}.`}>
-      {({ id, describedBy }) => (
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <Input
-              id={id}
-              aria-describedby={describedBy}
-              value={draft}
-              maxLength={LIMITS.customKeywords.maxLength}
-              disabled={full}
-              placeholder="Type a phrase and press Enter"
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  add();
-                }
-              }}
-            />
-            <Button onClick={add} disabled={!draft.trim() || full}>
-              Add
-            </Button>
-          </div>
-          {value.length > 0 && (
-            <ul className="flex flex-wrap gap-1.5" aria-label="Custom phrases">
-              {value.map((k) => (
-                <li key={k} className="inline-flex items-center gap-1 rounded-md border border-ink-600 bg-ink-800 py-0.5 pr-1 pl-2 text-xs text-fg">
-                  {k}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${k}`}
-                    onClick={() => onChange(value.filter((v) => v !== k))}
-                    className="cursor-pointer rounded p-0.5 text-fg-subtle hover:bg-ink-600 hover:text-fg"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </Field>
-  );
-}
 
 const SENSITIVITY_OPTIONS: readonly { id: Sensitivity; label: string }[] = [
   { id: "low", label: "Low" },
@@ -338,6 +283,8 @@ export function SettingsPage() {
             )}
           </Field>
         </Section>
+
+        <V3Sections s={s} update={update} />
 
         <Section id="notifications" title="Notifications" description="Desktop notifications are delivered by Chrome while it is open. Nothing is delivered while Chrome is closed or the Mac sleeps.">
           <Field inline label="Recording requests" hint="Asks you (Record / Decline) when a streamer with Ask to record goes live. Off: requests only appear in Live Monitoring. Recording always needs your approval.">

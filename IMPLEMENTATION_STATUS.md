@@ -25,6 +25,20 @@ Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-befor
 
 "Always approve" is deliberately not offered in this version.
 
+### Phase 4 — Content discovery, rights and authorized sources
+
+| Feature | Status | Evidence / notes |
+|---|---|---|
+| Latest uploads of your YouTube creators (public feed + `videos.list`, skips live/upcoming) | unit tests against documented responses | 🧪 Needs your YouTube API key to verify for real |
+| Trending: YouTube `chart=mostPopular` by region and category; Twitch most-viewed recent clips of the top categories | unit tests against documented responses | 🧪 Needs your keys |
+| Keywords: matched to a Twitch category; optional YouTube search (101 units per keyword, off by default) | unit tests | 🧪 Needs your keys |
+| Filters: age, views, engagement, language, results per source; deduplication keeps your rights and dismissals | unit tests + settings UI test | |
+| Source popularity, always labelled as the original video's (log views/hour + engagement), never as a clip's potential | unit tests | Uses only numbers the platform reports |
+| Each source fails on its own, with a plain reason (missing key, quota, network) | unit tests | |
+| Rights: unknown / analysis / processing / publishing, each above unknown needs evidence and your confirmation; publishing needs destinations | unit tests | StreamHunter records and enforces what you state; it can't verify it |
+| Discovered videos are candidates only: never downloaded or processed | by design + unit tests | You add the file yourself ("Add authorized file…"), which needs at least "Authorized for analysis" |
+| Content Discovery page, Settings → Content discovery | UI test | Not yet checked in real Chrome |
+
 ## v2.0 — Multi-platform automatic clipping (released)
 
 Labels: **✅ tested for real** (real Chrome, real live pages) · **🧪 implemented, tested against documented

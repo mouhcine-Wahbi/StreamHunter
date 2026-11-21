@@ -116,10 +116,11 @@ describe("full page app", () => {
     render(<App />);
     const nav = screen.getByRole("navigation", { name: "Main" });
     for (const [link, heading] of [
-      ["Discover", "Discover"],
-      ["My Streamers", "My Streamers"],
+      ["Find Creators", "Find Creators"],
+      ["My Creators", "My Creators"],
       ["Live Monitoring", "Live Monitoring"],
-      ["Highlights", "Top Highlights"],
+      ["Content Discovery", "Content Discovery"],
+      ["Clip Queue", "Clip Queue"],
       ["Clip Library", "Clip Library"],
       ["Settings", "Settings"],
       ["Overview", "Overview"],
@@ -145,6 +146,26 @@ describe("full page app", () => {
       expect(s.detection.sensitivity).toBe("high");
       expect(s.monitoring.intervalMinutes).toBe(7);
       expect(s.notifications.onStreamerLive).toBe(true);
+    });
+  });
+  it("3.0: content discovery keywords, filters and vertical layout are saved", async () => {
+    mockFetch(() => null);
+    installWorker();
+    window.location.hash = "/settings";
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    await userEvent.type(screen.getByLabelText("Keywords"), "speedrun{Enter}");
+    const minViews = screen.getByLabelText("Minimum views");
+    await userEvent.clear(minViews);
+    await userEvent.type(minViews, "5000{Enter}");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Comedy" }));
+    await userEvent.selectOptions(screen.getByLabelText("Default vertical layout"), "center");
+    await waitFor(async () => {
+      const s = await getSettings();
+      expect(s.discovery.keywords).toEqual(["speedrun"]);
+      expect(s.discovery.minViews).toBe(5000);
+      expect(s.discovery.youtubeCategories).toEqual(["20", "23"]);
+      expect(s.formats.verticalLayout).toBe("center");
     });
   });
   it("shows real search results from Kick, with live discovery before searching", async () => {

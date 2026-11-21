@@ -1,7 +1,7 @@
 import { PlatformError } from "@/platforms/http";
 import { createAdapters, type Adapters } from "@/platforms/registry";
 import type { ChannelInfo } from "@/platforms/types";
-import type { Platform, Streamer } from "@/types/api";
+import type { Platform, Streamer, VerticalLayout } from "@/types/api";
 import { db } from "./db";
 
 export type Clients = Adapters;
@@ -53,6 +53,7 @@ export async function addStreamer(info: ChannelInfo): Promise<Streamer> {
     // 2.0: StreamHunter records what you add, unless you turn Auto-record off.
     auto_record: true,
     priority: 0,
+    discovery_enabled: info.platform === "youtube",
     updated_at: now(),
   });
 }
@@ -68,16 +69,31 @@ export async function resolveChannel(clients: Clients, platform: Platform, input
   }
 }
 
-export async function updateStreamer(id: number, patch: Partial<Pick<Streamer, "monitoring_enabled" | "is_favorite" | "auto_record" | "priority">>): Promise<Streamer> {
+export async function updateStreamer(id: number, patch: Partial<Pick<Streamer, "monitoring_enabled" | "is_favorite" | "auto_record" | "priority" | "discovery_enabled" | "layout">>): Promise<Streamer> {
   const s = await getStreamer(id);
   const next = { ...s, updated_at: now() };
   if (typeof patch.monitoring_enabled === "boolean") next.monitoring_enabled = patch.monitoring_enabled;
   if (typeof patch.is_favorite === "boolean") next.is_favorite = patch.is_favorite;
   if (typeof patch.auto_record === "boolean") next.auto_record = patch.auto_record;
+  if (typeof patch.discovery_enabled === "boolean") next.discovery_enabled = patch.discovery_enabled;
+  if (patch.layout === null) next.layout = null;
+  else if (patch.layout) next.layout = sanitizeLayout(patch.layout);
   if (typeof patch.priority === "number" && Number.isFinite(patch.priority)) next.priority = Math.max(-2, Math.min(2, Math.round(patch.priority)));
   // Turning Auto-record back on gives a streamer that kept failing a fresh chance.
   if (patch.auto_record === true) Object.assign(next, { record_failures: 0, record_retry_at: null, record_error: null });
   return db.put("streamers", next);
+}
+
+const unit = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
+
+/** A layout from the dashboard: known kind, facecam rectangle inside the frame and not degenerate. */
+export function sanitizeLayout(l: VerticalLayout): VerticalLayout {
+  const kind = (["facecam_top", "action", "center"] as const).includes(l.kind) ? l.kind : "center";
+  const f = l.facecam;
+  if (kind !== "facecam_top" || !f) return { kind, facecam: null };
+  const x = unit(f.x), y = unit(f.y);
+  const w = Math.min(unit(f.w), 1 - x), h = Math.min(unit(f.h), 1 - y);
+  return w >= 0.05 && h >= 0.05 ? { kind, facecam: { x, y, w, h } } : { kind: "center", facecam: null };
 }
 
 export async function removeStreamer(id: number): Promise<void> {

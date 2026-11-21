@@ -121,7 +121,7 @@ export function HighlightsPage() {
   return (
     <>
       <PageHeader
-        title="Top Highlights"
+        title="Clip Queue"
         description="Recorded clips, ranked by their highlight score. Each score combines the signals that fired together: audio, chat, picture and viewers."
       />
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7" role="group" aria-label="Filters">

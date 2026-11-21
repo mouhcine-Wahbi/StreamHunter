@@ -9,12 +9,10 @@ const MAX_IDS = 100; // Helix limit for user_id / login / id filters
  * Twitch Helix with an app access token (the editor's own app).
  * Endpoints: Search Channels, Get Streams, Get Users. Cost: 1 point each; the app has 800/min.
  */
-export function createTwitchClient(http: HttpDeps = {}): PlatformClient & {
-  users(ids: string[]): Promise<Map<string, { login: string; display_name: string; profile_image_url: string | null }>>;
-} {
+/** Authenticated Helix GET (app token, or your Sign in with Twitch token when no secret is set). */
+export function twitchHelix(http: HttpDeps = {}) {
   const auth = appAuth("twitch", http);
-
-  async function get(path: string, params: [string, string][]): Promise<unknown> {
+  return async function get(path: string, params: [string, string][]): Promise<unknown> {
     const qs = new URLSearchParams(params).toString();
     return auth.call((token, clientId) =>
       requestJson("twitch", `${HELIX}${path}${qs ? `?${qs}` : ""}`, {
@@ -22,7 +20,13 @@ export function createTwitchClient(http: HttpDeps = {}): PlatformClient & {
         headers: { Authorization: `Bearer ${token}`, "Client-Id": clientId, Accept: "application/json" },
       }),
     );
-  }
+  };
+}
+
+export function createTwitchClient(http: HttpDeps = {}): PlatformClient & {
+  users(ids: string[]): Promise<Map<string, { login: string; display_name: string; profile_image_url: string | null }>>;
+} {
+  const get = twitchHelix(http);
 
   async function users(ids: string[]) {
     const out = new Map<string, { login: string; display_name: string; profile_image_url: string | null }>();

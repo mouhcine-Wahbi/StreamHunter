@@ -9,7 +9,8 @@
 import { getMonitoringState, STORAGE_KEYS } from "@/store/storage";
 import type { MonitoringState } from "@/types/monitoring";
 import { sanitizeSettings } from "@/utils/settings";
-import { ALARMS, syncAlarms } from "./alarm-manager";
+import { ALARMS, syncAlarms, syncDiscoveryAlarm } from "./alarm-manager";
+import { runDiscovery } from "@/discovery/runner";
 import { renderBadge } from "./badge";
 import { handleMessage, isTrustedSender } from "./message-handler";
 import { createMonitoringManager } from "./monitoring-manager";
@@ -163,6 +164,7 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARMS.heartbeat) void manager.tick();
+  if (alarm.name === ALARMS.discovery) void getSettings().then((s) => (s.discovery.enabled ? runDiscovery(s) : null)).catch((e) => log("discovery_failed", { error: e instanceof Error ? e.message : "?" }));
 });
 
 /** Notification buttons. Recording request: 0 = Record, 1 = Decline. Highlight: 0 = Open stream, 1 = Review. */
@@ -209,11 +211,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const next = sanitizeSettings(settings.newValue);
     void capture.applySettings(next);
     void getMonitoringState().then((s) => syncAlarms(s.enabled, next.monitoring.intervalMinutes));
+    void syncDiscoveryAlarm(next.discovery.enabled, next.discovery.intervalHours);
   }
 });
 
 // The toolbar icon opens the popup; the side panel is opened explicitly from the popup.
 void chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: false }).catch(() => undefined);
+
+// 3.0 schedules (idempotent on every worker start).
+void getSettings().then((s) => syncDiscoveryAlarm(s.discovery.enabled, s.discovery.intervalHours)).catch(() => undefined);
 
 // Repaint the badge whenever the worker wakes up.
 void getMonitoringState().then(renderBadge);

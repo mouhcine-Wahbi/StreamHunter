@@ -2,6 +2,8 @@ import type { MonitoringState } from "./monitoring";
 import type { CaptureOptions, CaptureState, CaptureTarget, ClipRequest, SlotHealth, SystemLoad } from "./capture";
 import type { Signal } from "@/detection/fusion";
 import type { Approval } from "@/local/approvals";
+import type { DiscoveryRun } from "@/discovery/discovery";
+import type { SourceFile } from "@/local/sources";
 
 /** Messages UI surfaces (and the offscreen document) send to the background service worker. */
 export type RuntimeRequest =
@@ -14,6 +16,11 @@ export type RuntimeRequest =
   | { type: "app/open"; route?: string }
   // Recording approvals (3.0).
   | { type: "approval/decide"; id: string; action: "approve" | "decline" | "remind" | "stop" }
+  // Content discovery (3.0).
+  | { type: "discovery/run"; sources?: ("creator_uploads" | "trending" | "keyword")[] }
+  // Authorized source files (3.0): find moments, cut a clip.
+  | { type: "source/analyze"; id: number }
+  | { type: "source/clip"; id: number; start: number; end: number }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }
@@ -56,6 +63,9 @@ export interface ResponseMap {
   "monitoring/check-now": MonitoringState;
   "app/open": null;
   "approval/decide": Approval;
+  "discovery/run": DiscoveryRun;
+  "source/analyze": SourceFile;
+  "source/clip": { clipId: number };
   "capture/get": CaptureState;
   "capture/list": CaptureState[];
   "capture/pause-slot": CaptureState;
@@ -82,6 +92,9 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "monitoring/check-now",
   "app/open",
   "approval/decide",
+  "discovery/run",
+  "source/analyze",
+  "source/clip",
   "capture/get",
   "capture/list",
   "capture/pause-slot",

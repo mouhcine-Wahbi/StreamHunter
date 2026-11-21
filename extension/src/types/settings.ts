@@ -79,6 +79,59 @@ export interface Settings {
     /** "Remind me later" asks again after this many minutes (same broadcast only). */
     remindMinutes: number;
   };
+  /** 3.0 content discovery. */
+  discovery: {
+    enabled: boolean;
+    /** Automatic runs every N hours while Chrome is open; 0 = only when you click Run. */
+    intervalHours: number;
+    youtubeRegion: string;
+    /** YouTube category IDs for trending ("20" = Gaming); "" = all. */
+    youtubeCategories: string[];
+    twitchTrending: boolean;
+    /** Twitch: most-viewed clips of this many top categories. */
+    twitchTopGames: number;
+    /** Topics, gaming categories or creator names. */
+    keywords: string[];
+    /** Keyword search on YouTube costs 100 of 10,000 daily units per keyword. */
+    keywordYouTube: boolean;
+    language: string;
+    maxAgeDays: number;
+    minViews: number;
+    minEngagementPct: number;
+    perSourceMax: number;
+  };
+  /** 3.0 output formats. */
+  formats: {
+    vertical: boolean;
+    landscape: boolean;
+    /** Default vertical layout (each creator and clip can override). */
+    verticalLayout: "facecam_top" | "action" | "center";
+  };
+  /** 3.0 viral-potential score (estimated, never a guarantee). */
+  scoring: {
+    weights: { hook: number; emotion: number; engagement: number; story: number; share: number; platform: number };
+    /** High potential: auto-publish when every check passes. */
+    publishThreshold: number;
+    /** Medium potential (≥ this, below publishThreshold): needs your approval. Below: low, manual review only. */
+    reviewThreshold: number;
+  };
+  /** 3.0 publishing. */
+  publishing: {
+    autoPublish: boolean;
+    destinations: Record<"youtube" | "tiktok" | "x", { enabled: boolean; dailyLimit: number }>;
+    youtubePrivacy: "private" | "unlisted" | "public";
+    /** Adds "Credit: <creator> on <platform>" with the source link to every description. */
+    attribution: boolean;
+    maxRetries: number;
+  };
+  /** 3.0 metadata generation: on-device AI → your provider → templates. */
+  ai: {
+    onDevice: boolean;
+    external: "none" | "anthropic" | "openai_compatible";
+    model: string;
+    /** openai_compatible only: base URL (e.g. http://localhost:11434/v1 for a local model). */
+    endpoint: string;
+  };
   locale: {
     /** IANA time zone, or "auto" for the browser's zone. */
     timeZone: string;
@@ -105,6 +158,18 @@ export const DEFAULT_SETTINGS: Settings = {
   recording: { maxStreams: 3, quality: "720p", audio: "first", protectResources: true },
   storage: { maxTotalMb: 5120, maxAgeDays: 0 },
   notifications: { onHighlight: true, onStreamerLive: false, approvalRequests: true, remindMinutes: 10 },
+  discovery: {
+    enabled: true, intervalHours: 6, youtubeRegion: "US", youtubeCategories: ["20"], twitchTrending: true, twitchTopGames: 3,
+    keywords: [], keywordYouTube: false, language: "", maxAgeDays: 7, minViews: 0, minEngagementPct: 0, perSourceMax: 20,
+  },
+  formats: { vertical: true, landscape: true, verticalLayout: "facecam_top" },
+  scoring: { weights: { hook: 25, emotion: 20, engagement: 20, story: 15, share: 10, platform: 10 }, publishThreshold: 85, reviewThreshold: 60 },
+  publishing: {
+    autoPublish: true,
+    destinations: { youtube: { enabled: true, dailyLimit: 5 }, tiktok: { enabled: true, dailyLimit: 10 }, x: { enabled: true, dailyLimit: 20 } },
+    youtubePrivacy: "public", attribution: true, maxRetries: 3,
+  },
+  ai: { onDevice: true, external: "none", model: "", endpoint: "" },
   locale: { timeZone: "auto", language: "en" },
   privacy: { retentionDays: 30 },
 };

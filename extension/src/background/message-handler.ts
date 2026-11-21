@@ -1,4 +1,5 @@
-import { getMonitoringState } from "@/store/storage";
+import { getMonitoringState, getSettings } from "@/store/storage";
+import { runDiscovery } from "@/discovery/runner";
 import { isRuntimeRequest, type RuntimeResponse } from "@/types/messages";
 import type { MonitoringManager } from "./monitoring-manager";
 import { getCaptureState, getSlots, type CaptureManager } from "./capture-manager";
@@ -56,6 +57,13 @@ export async function handleMessage(
           return { ok: false, error: e instanceof ApprovalError ? e.message : e instanceof Error ? e.message : "Unexpected error" };
         }
       }
+      case "discovery/run": {
+        const sources = Array.isArray(message.sources) ? message.sources.filter((x) => ["creator_uploads", "trending", "keyword"].includes(x)) : undefined;
+        return { ok: true, data: await runDiscovery(await getSettings(), { sources }) };
+      }
+      case "source/analyze":
+      case "source/clip":
+        return { ok: false, error: "Analysing authorized files arrives with the processing pipeline (3.0 phase 5)." };
       case "capture/get":
         return { ok: true, data: await getCaptureState(Number.isInteger(message.tabId) ? message.tabId : undefined) };
       case "capture/list":

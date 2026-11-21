@@ -8,14 +8,40 @@
  */
 
 export const DB_NAME = "streamhunter";
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
-export type StoreName = "streamers" | "sessions" | "highlights" | "clips" | "clipBlobs" | "clipThumbs";
+export type StoreName =
+  | "streamers" | "sessions" | "highlights" | "clips" | "clipBlobs" | "clipThumbs"
+  // v3 (3.0): discovery, authorized sources, output assets, publishing, rights
+  | "candidates" | "sources" | "sourceBlobs" | "assets" | "assetBlobs" | "jobs" | "rights";
+export type BlobStore = "clipBlobs" | "clipThumbs" | "sourceBlobs" | "assetBlobs";
 
 function upgrade(db: IDBDatabase, oldVersion: number): void {
   if (oldVersion < 1) createV1(db);
   // v2: a JPEG thumbnail per clip (key = clip id → Blob image/jpeg).
   if (!db.objectStoreNames.contains("clipThumbs")) db.createObjectStore("clipThumbs");
+  if (oldVersion < 3) createV3(db);
+}
+
+/** 3.0: existing stores and data are untouched; only new stores are added. */
+function createV3(db: IDBDatabase): void {
+  // Discovered videos (never downloaded): one row per platform video/clip.
+  const candidates = db.createObjectStore("candidates", { keyPath: "id", autoIncrement: true });
+  candidates.createIndex("source", ["platform", "source_id"], { unique: true });
+  // Video files you added and marked authorized (metadata; the file itself in sourceBlobs).
+  const sources = db.createObjectStore("sources", { keyPath: "id", autoIncrement: true });
+  sources.createIndex("candidate", "candidate_id");
+  db.createObjectStore("sourceBlobs");
+  // Output videos (vertical 9:16, landscape) linked to one clip.
+  const assets = db.createObjectStore("assets", { keyPath: "id", autoIncrement: true });
+  assets.createIndex("clip", "clip_id");
+  db.createObjectStore("assetBlobs");
+  // One publishing job per asset and destination.
+  const jobs = db.createObjectStore("jobs", { keyPath: "id", autoIncrement: true });
+  jobs.createIndex("asset", "asset_id");
+  jobs.createIndex("clip", "clip_id");
+  // Rights per creator (key "platform:platform_user_id").
+  db.createObjectStore("rights", { keyPath: "key" });
 }
 
 function createV1(db: IDBDatabase): void {
@@ -88,8 +114,13 @@ export const db = {
     const id = (await done((await tx(store, "readwrite")).put(v))) as number;
     return { ...v, id } as T & { id: number };
   },
-  async putBlob(key: number, blob: Blob, store: "clipBlobs" | "clipThumbs" = "clipBlobs"): Promise<void> {
+  async putBlob(key: number, blob: Blob, store: BlobStore = "clipBlobs"): Promise<void> {
     await done((await tx(store, "readwrite")).put(blob, key));
+  },
+  /** Insert or replace a row whose key is a string field (rights). */
+  async putKeyed<T extends object>(store: StoreName, value: T): Promise<T> {
+    await done((await tx(store, "readwrite")).put(value));
+    return value;
   },
   async delete(store: StoreName, key: IDBValidKey): Promise<void> {
     await done((await tx(store, "readwrite")).delete(key));

@@ -50,7 +50,25 @@ export interface Streamer extends StreamerSearchResult {
   record_failures?: number;
   record_retry_at?: string | null;
   record_error?: string | null;
+  /** 3.0: include this creator's new uploads in Content Discovery (YouTube). */
+  discovery_enabled?: boolean;
+  /** 3.0: vertical layout for this creator's clips (each clip can override). */
+  layout?: VerticalLayout | null;
   updated_at: string;
+}
+
+/** Normalised rectangle (0–1) in the source frame. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface VerticalLayout {
+  kind: "facecam_top" | "action" | "center";
+  /** facecam_top: where the facecam is in the stream picture. */
+  facecam?: Rect | null;
 }
 
 export type MonitoringSessionStatus = "active" | "paused" | "ended" | "error";

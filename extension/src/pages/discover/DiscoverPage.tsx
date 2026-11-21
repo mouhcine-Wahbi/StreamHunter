@@ -95,7 +95,7 @@ export function DiscoverPage() {
 
   return (
     <>
-      <PageHeader title="Discover" description="Find Twitch, Kick and YouTube channels, see who is live, and add them to your monitoring list." />
+      <PageHeader title="Find Creators" description="Find Twitch, Kick and YouTube channels, see who is live, and add them to your monitoring list." />
       <form onSubmit={onSubmit} className="flex flex-wrap items-start gap-3" role="search">
         <Segmented
           label="Platform"

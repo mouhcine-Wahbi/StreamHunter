@@ -6,6 +6,8 @@ import { getSession, listSessions, syncSessions } from "./sessions";
 import { deleteHighlight, getHighlight, listHighlights, setHighlightStatus, type LocalHighlight } from "./highlights";
 import { clipStats, deleteClip, listClips, updateClip, type LocalClip } from "./clips";
 import { ACTIVITY_KEY, type ChatActivity } from "@/background/chat-manager";
+import { v3Routes } from "./v3-routes";
+import { RightsError } from "./rights";
 import {
   addStreamer,
   LocalError,
@@ -137,6 +139,7 @@ export class LocalApi extends ApiClient {
         return updateClip(Number(m[1]), { title: body.title, favorite: body.favorite });
       }],
       ["DELETE", /^\/api\/v1\/clips\/(\d+)$/, async (m) => void (await deleteClip(Number(m[1])))],
+      ...(v3Routes(page) as [Method, RegExp, Handler][]),
     ];
   }
 
@@ -218,6 +221,7 @@ export class LocalApi extends ApiClient {
 function toApiError(e: unknown): ApiError {
   if (e instanceof ApiError) return e;
   if (e instanceof LocalError) return new ApiError("http", e.message, e.status, { error: { code: e.code, message: e.message } });
+  if (e instanceof RightsError) return new ApiError("http", e.message, 422, { error: { code: "rights", message: e.message } });
   if (e instanceof PlatformError) {
     // Never 401: that would read as "signed out of StreamHunter"; it's the platform that refused.
     const status = e.kind === "not_configured" ? 503 : e.kind === "rate_limited" ? 429 : 502;

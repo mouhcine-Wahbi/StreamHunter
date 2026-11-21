@@ -79,6 +79,23 @@ export function sanitizeSettings(input: unknown): Settings {
     ? det.keywordLanguages.filter((c): c is string => typeof c === "string" && LANG_CODES.has(c))
     : d.detection.keywordLanguages;
 
+  const disc = isRecord(s.discovery) ? s.discovery : {};
+  const fmt = isRecord(s.formats) ? s.formats : {};
+  const sc = isRecord(s.scoring) ? s.scoring : {};
+  const scw = isRecord(sc.weights) ? sc.weights : {};
+  const pub = isRecord(s.publishing) ? s.publishing : {};
+  const pubd = isRecord(pub.destinations) ? pub.destinations : {};
+  const ai = isRecord(s.ai) ? s.ai : {};
+  const strList = (v: unknown, fallback: string[], max = 30, len = 60) =>
+    Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean).map((x) => x.slice(0, len)))].slice(0, max) : fallback;
+  const text = (v: unknown, fallback: string, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : fallback);
+  const dest = (k: "youtube" | "tiktok" | "x") => {
+    const x = isRecord(pubd[k]) ? pubd[k] : {};
+    return { enabled: bool(x.enabled, d.publishing.destinations[k].enabled), dailyLimit: clampInt(x.dailyLimit, 0, 100, d.publishing.destinations[k].dailyLimit) };
+  };
+  const review = clampInt(sc.reviewThreshold, 0, 100, d.scoring.reviewThreshold);
+  const endpoint = text(ai.endpoint, d.ai.endpoint, 300);
+
   const tz = typeof loc.timeZone === "string" && isValidTimeZone(loc.timeZone) ? loc.timeZone : d.locale.timeZone;
 
   return {
@@ -138,6 +155,48 @@ export function sanitizeSettings(input: unknown): Settings {
       onStreamerLive: bool(notif.onStreamerLive, d.notifications.onStreamerLive),
       approvalRequests: bool(notif.approvalRequests, d.notifications.approvalRequests),
       remindMinutes: clampInt(notif.remindMinutes, 1, 120, d.notifications.remindMinutes),
+    },
+    discovery: {
+      enabled: bool(disc.enabled, d.discovery.enabled),
+      intervalHours: clampInt(disc.intervalHours, 0, 168, d.discovery.intervalHours),
+      youtubeRegion: /^[A-Z]{2}$/.test(String(disc.youtubeRegion ?? "")) ? String(disc.youtubeRegion) : d.discovery.youtubeRegion,
+      youtubeCategories: strList(disc.youtubeCategories, d.discovery.youtubeCategories, 10, 4).filter((x) => /^\d{1,3}$/.test(x)),
+      twitchTrending: bool(disc.twitchTrending, d.discovery.twitchTrending),
+      twitchTopGames: clampInt(disc.twitchTopGames, 0, 10, d.discovery.twitchTopGames),
+      keywords: strList(disc.keywords, d.discovery.keywords, 20, 60),
+      keywordYouTube: bool(disc.keywordYouTube, d.discovery.keywordYouTube),
+      language: /^[a-z]{2}$/.test(String(disc.language ?? "")) ? String(disc.language) : "",
+      maxAgeDays: clampInt(disc.maxAgeDays, 0, 365, d.discovery.maxAgeDays),
+      minViews: clampInt(disc.minViews, 0, 100_000_000, d.discovery.minViews),
+      minEngagementPct: clampInt(disc.minEngagementPct, 0, 100, d.discovery.minEngagementPct),
+      perSourceMax: clampInt(disc.perSourceMax, 1, 50, d.discovery.perSourceMax),
+    },
+    formats: {
+      vertical: bool(fmt.vertical, d.formats.vertical),
+      landscape: bool(fmt.landscape, d.formats.landscape),
+      verticalLayout: oneOf(fmt.verticalLayout, ["facecam_top", "action", "center"] as const, d.formats.verticalLayout),
+    },
+    scoring: {
+      weights: {
+        hook: clampInt(scw.hook, 0, 100, d.scoring.weights.hook), emotion: clampInt(scw.emotion, 0, 100, d.scoring.weights.emotion),
+        engagement: clampInt(scw.engagement, 0, 100, d.scoring.weights.engagement), story: clampInt(scw.story, 0, 100, d.scoring.weights.story),
+        share: clampInt(scw.share, 0, 100, d.scoring.weights.share), platform: clampInt(scw.platform, 0, 100, d.scoring.weights.platform),
+      },
+      publishThreshold: Math.max(review, clampInt(sc.publishThreshold, 0, 100, d.scoring.publishThreshold)),
+      reviewThreshold: review,
+    },
+    publishing: {
+      autoPublish: bool(pub.autoPublish, d.publishing.autoPublish),
+      destinations: { youtube: dest("youtube"), tiktok: dest("tiktok"), x: dest("x") },
+      youtubePrivacy: oneOf(pub.youtubePrivacy, ["private", "unlisted", "public"] as const, d.publishing.youtubePrivacy),
+      attribution: bool(pub.attribution, d.publishing.attribution),
+      maxRetries: clampInt(pub.maxRetries, 0, 10, d.publishing.maxRetries),
+    },
+    ai: {
+      onDevice: bool(ai.onDevice, d.ai.onDevice),
+      external: oneOf(ai.external, ["none", "anthropic", "openai_compatible"] as const, d.ai.external),
+      model: text(ai.model, d.ai.model, 100),
+      endpoint: /^https?:\/\/[^\s]+$/.test(endpoint) ? endpoint : "",
     },
     locale: {
       timeZone: tz,

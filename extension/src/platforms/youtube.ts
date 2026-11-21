@@ -52,9 +52,9 @@ function secondsToPacificMidnight(now: Date): number {
   return Math.max(60, (24 * 60 - (h * 60 + m)) * 60);
 }
 
-type Item = Record<string, unknown>;
-const obj = (v: unknown): Item => (typeof v === "object" && v !== null ? (v as Item) : {});
-const items = (body: unknown): Item[] => (Array.isArray(obj(body).items) ? (obj(body).items as unknown[]).map(obj) : []);
+export type Item = Record<string, unknown>;
+export const obj = (v: unknown): Item => (typeof v === "object" && v !== null ? (v as Item) : {});
+export const items = (body: unknown): Item[] => (Array.isArray(obj(body).items) ? (obj(body).items as unknown[]).map(obj) : []);
 
 /** Pull a channel ID, handle or video ID out of whatever the editor pasted. */
 export function parseYouTubeInput(input: string): { kind: "id" | "handle" | "video"; value: string } | null {
@@ -92,9 +92,9 @@ export function feedVideoIds(xml: string, max = FEED_IDS): string[] {
   return out;
 }
 
-export function createYouTubeAdapter(http: HttpDeps = {}, now: () => Date = () => new Date()): PlatformAdapter {
+/** Quota-counted, key-authenticated Data API GET, with YouTube's documented errors mapped to plain words. */
+export function youTubeApi(http: HttpDeps = {}, now: () => Date = () => new Date()) {
   const fetchImpl = http.fetchImpl ?? ((...a: Parameters<typeof fetch>) => globalThis.fetch(...a));
-  const categories = new Map<string, string>();
 
   async function key(): Promise<string> {
     const c = (await getCredentials()).youtube;
@@ -126,6 +126,12 @@ export function createYouTubeAdapter(http: HttpDeps = {}, now: () => Date = () =
       throw new PlatformError("youtube", "unauthorized", reason === "accessNotConfigured" ? "Enable the YouTube Data API v3 for this key's Google Cloud project." : "YouTube rejected the API key. Check it in Settings → Platforms.", res.status);
     throw new PlatformError("youtube", "http", `YouTube answered HTTP ${res.status}.`, res.status);
   }
+  return { get, fetchImpl };
+}
+
+export function createYouTubeAdapter(http: HttpDeps = {}, now: () => Date = () => new Date()): PlatformAdapter {
+  const { get, fetchImpl } = youTubeApi(http, now);
+  const categories = new Map<string, string>();
 
   function fromChannel(c: Item): ChannelInfo | null {
     const id = str(c.id);

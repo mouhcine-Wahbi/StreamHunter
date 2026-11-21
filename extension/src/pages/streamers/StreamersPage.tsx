@@ -229,7 +229,7 @@ export function StreamersPage({ onDiscover }: { onDiscover: () => void }) {
   return (
     <>
       <PageHeader
-        title="My Streamers"
+        title="My Creators"
         description="Channels on your watchlist. Monitor checks live status and chat. Ask to record: when the streamer goes live, StreamHunter asks you before recording that broadcast."
         actions={
           <Button variant="secondary" size="sm" loading={refresh.pending} icon={<RefreshCw className="size-3.5" />} onClick={() => void refresh.run()}>

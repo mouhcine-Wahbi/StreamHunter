@@ -2,6 +2,7 @@ import { PLATFORM_LABEL, type Platform } from "@/types/api";
 import type { Streamer } from "@/types/api";
 import type { Settings } from "@/types/settings";
 import type { LocalHighlight } from "@/local/highlights";
+import type { Approval } from "@/local/approvals";
 
 export interface StreamNotification {
   type: "streamer_live" | "streamer_offline" | "highlight_detected";
@@ -75,6 +76,31 @@ export async function notifyStreamEvents(events: StreamNotification[], settings:
         title: `${e.streamer_display_name} is live on ${platform}`,
         message: [e.title, e.category].filter(Boolean).join(" · ") || "Monitoring started for this stream.",
         priority: 0,
+      })
+      .catch(() => undefined);
+  }
+}
+
+export const APPROVAL_PREFIX = "sh-approve-";
+
+/**
+ * "X is live. Record this stream?" with Record / Decline buttons (Chrome allows two; "Remind me
+ * later" is in Live Monitoring). Stays on screen until answered. Closing it is not a decision:
+ * the request stays open in Live Monitoring.
+ */
+export async function notifyApprovalRequests(list: Approval[], settings: Settings): Promise<void> {
+  if (!chrome.notifications || !settings.notifications.approvalRequests) return;
+  for (const a of list.slice(0, 5)) {
+    await chrome.notifications
+      .create(`${APPROVAL_PREFIX}${a.id}`, {
+        type: "basic",
+        iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+        title: `${a.streamerName} is LIVE on ${PLATFORM_LABEL[a.platform]}${a.notifications > 1 ? " (reminder)" : ""}`,
+        message: `Do you want StreamHunter to start recording this stream?${a.title ? `\n${a.title}` : ""}`,
+        contextMessage: a.category ?? undefined,
+        buttons: [{ title: "Record" }, { title: "Decline" }],
+        requireInteraction: true,
+        priority: 2,
       })
       .catch(() => undefined);
   }

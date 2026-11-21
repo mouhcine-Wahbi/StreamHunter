@@ -339,7 +339,17 @@ export function SettingsPage() {
           </Field>
         </Section>
 
-        <Section id="notifications" title="Notifications" description="Desktop notifications are delivered by Chrome while it is open.">
+        <Section id="notifications" title="Notifications" description="Desktop notifications are delivered by Chrome while it is open. Nothing is delivered while Chrome is closed or the Mac sleeps.">
+          <Field inline label="Recording requests" hint="Asks you (Record / Decline) when a streamer with Ask to record goes live. Off: requests only appear in Live Monitoring. Recording always needs your approval.">
+            {({ id, describedBy }) => (
+              <Switch id={id} aria-describedby={describedBy} label="Recording requests" checked={s.notifications.approvalRequests} onChange={(approvalRequests) => void update({ notifications: { approvalRequests } })} />
+            )}
+          </Field>
+          <Field inline label="Remind me later after" hint="Same broadcast only; a request ends when the broadcast ends.">
+            {({ id, describedBy }) => (
+              <NumberField id={id} describedBy={describedBy} value={s.notifications.remindMinutes} min={1} max={120} suffix="min" onCommit={(remindMinutes) => void update({ notifications: { remindMinutes } })} />
+            )}
+          </Field>
           <Field inline label="New highlight detected">
             {({ id }) => <Switch id={id} label="New highlight detected" checked={s.notifications.onHighlight} onChange={(onHighlight) => void update({ notifications: { onHighlight } })} />}
           </Field>

@@ -13,6 +13,8 @@ export interface ChannelInfo {
   current_category: string | null;
   viewer_count: number | null;
   stream_started_at: string | null;
+  /** The platform's ID of the current broadcast (Twitch stream ID, YouTube video ID), when it gives one. */
+  stream_id?: string | null;
 }
 
 export interface PlatformClient {

@@ -1,3 +1,4 @@
+import { approveAllLive } from "@/test/approvals";
 import { db } from "@/local/db";
 import { saveClip } from "@/local/clips";
 import { patchMonitoringState, updateSettings } from "@/store/storage";
@@ -7,6 +8,8 @@ import { DEFAULT_SCHEDULER, nextRetry, plan, priorityOf, type SchedStreamer, typ
 
 const NOW = Date.parse("2026-11-18T12:00:00Z");
 const MIN = 60_000;
+/** Pure-scheduler tests below predate approvals: every live streamer counts as approved. */
+const ALL = { approved: new Set(Array.from({ length: 100 }, (_, i) => i)) };
 const cfg = (over: Partial<SchedulerConfig> = {}): SchedulerConfig => ({ maxSlots: 3, ...DEFAULT_SCHEDULER, ...over });
 
 function s(id: number, over: Partial<SchedStreamer> = {}): SchedStreamer {
@@ -48,48 +51,48 @@ describe("scheduler decisions", () => {
   it("fills free slots with the highest-priority eligible streamers and queues the rest with reasons", () => {
     const list = [s(1), s(2, { priority: 2 }), s(3, { priority: 1 }), s(4), s(5, { auto_record: false }), s(6, { is_live: false }),
       s(7, { record_failures: 1, record_retry_at: new Date(NOW + 2 * MIN).toISOString(), record_error: "black screen" })];
-    const p = plan(list, new Map(), [slot(10), slot(11), slot(12)], cfg(), NOW);
+    const p = plan(list, new Map(), [slot(10), slot(11), slot(12)], cfg(), NOW, ALL);
     expect(p.decisions.map((d) => [d.slot, d.streamerId, d.action])).toEqual([[10, 2, "assign"], [11, 3, "assign"], [12, 1, "assign"]]);
-    expect(p.queue.map((q) => [q.streamerId, q.reason])).toEqual([[4, "waiting_for_slot"], [5, "auto_record_off"], [7, "retry_wait"]]);
-    expect(p.queue[0]!.detail).toBe("All 3 slots busy.");
-    expect(p.queue[2]!.detail).toMatch(/^Recording failed \(black screen\); retrying /);
+    expect(p.queue.map((q) => [q.streamerId, q.reason])).toEqual([[4, "waiting_for_slot"], [7, "retry_wait"], [5, "auto_record_off"]]);
+    expect(p.queue[0]!.detail).toBe("Approved, #1 in the queue: all 3 slots busy.");
+    expect(p.queue[1]!.detail).toMatch(/^Recording failed \(black screen\); retrying /);
     // Only maxSlots slots are used even if more tabs are armed.
-    expect(plan(list, new Map(), [slot(10), slot(11)], cfg({ maxSlots: 1 }), NOW).decisions).toHaveLength(1);
+    expect(plan(list, new Map(), [slot(10), slot(11)], cfg({ maxSlots: 1 }), NOW, ALL).decisions).toHaveLength(1);
   });
 
   it("keeps healthy recordings: a slightly better streamer does not cause a switch", () => {
     const list = [s(1), s(2, { priority: 1 })]; // S2 scores 3 points more
-    const p = plan(list, new Map(), [slot(10, 1)], cfg({ maxSlots: 1 }), NOW);
+    const p = plan(list, new Map(), [slot(10, 1)], cfg({ maxSlots: 1 }), NOW, ALL);
     expect(p.decisions).toEqual([expect.objectContaining({ slot: 10, streamerId: 1, action: "keep" })]);
     expect(p.queue[0]).toMatchObject({ streamerId: 2, reason: "waiting_for_slot" });
   });
 
   it("switches only when clearly better AND after the minimum time, the cooldown and pending clips", () => {
     const list = [s(1, { priority: -2 }), s(2, { priority: 2, is_favorite: true })]; // 13–14 points apart (user part 10 vs 100)
-    const ok = plan(list, new Map(), [slot(10, 1)], cfg({ maxSlots: 1 }), NOW);
+    const ok = plan(list, new Map(), [slot(10, 1)], cfg({ maxSlots: 1 }), NOW, ALL);
     expect(ok.decisions[0]).toMatchObject({ streamerId: 2, action: "switch", detail: expect.stringMatching(/S2 \(priority \d+\) replaces S1 \(\d+\): \d+ points higher/) });
     expect(ok.queue).toEqual([expect.objectContaining({ streamerId: 1, reason: "waiting_for_slot" })]);
-    const young = plan(list, new Map(), [slot(10, 1, { assignedAt: new Date(NOW - 3 * MIN).toISOString() })], cfg({ maxSlots: 1 }), NOW);
+    const young = plan(list, new Map(), [slot(10, 1, { assignedAt: new Date(NOW - 3 * MIN).toISOString() })], cfg({ maxSlots: 1 }), NOW, ALL);
     expect(young.decisions[0]).toMatchObject({ streamerId: 1, action: "keep" });
-    expect(plan([s(1), s(2, { is_favorite: true })], new Map(), [slot(10, 1)], cfg({ maxSlots: 1 }), NOW).decisions[0]!.streamerId).toBe(1); // favourite alone: +7.5, no switch
+    expect(plan([s(1), s(2, { is_favorite: true })], new Map(), [slot(10, 1)], cfg({ maxSlots: 1 }), NOW, ALL).decisions[0]!.streamerId).toBe(1); // favourite alone: +7.5, no switch
     expect(young.queue[0]!.detail).toMatch(/will replace the weakest recording when its minimum time and cooldown allow/);
-    const cooling = plan(list, new Map(), [slot(10, 1)], cfg({ maxSlots: 1 }), NOW, new Set(), new Map([[10, new Date(NOW - 2 * MIN).toISOString()]]));
+    const cooling = plan(list, new Map(), [slot(10, 1)], cfg({ maxSlots: 1 }), NOW, { ...ALL, lastSwitch: new Map([[10, new Date(NOW - 2 * MIN).toISOString()]]) });
     expect(cooling.decisions[0]!.streamerId).toBe(1);
-    const saving = plan(list, new Map(), [slot(10, 1, { pendingClips: 1 })], cfg({ maxSlots: 1 }), NOW);
+    const saving = plan(list, new Map(), [slot(10, 1, { pendingClips: 1 })], cfg({ maxSlots: 1 }), NOW, ALL);
     expect(saving.decisions[0]!.streamerId).toBe(1);
-    const paused = plan(list, new Map(), [slot(10, 1, { paused: true })], cfg({ maxSlots: 1 }), NOW);
+    const paused = plan(list, new Map(), [slot(10, 1, { paused: true })], cfg({ maxSlots: 1 }), NOW, ALL);
     expect(paused.decisions[0]!.streamerId).toBe(1);
     // At most one switch per run.
-    const two = plan([s(1, { priority: -2 }), s(3, { priority: -2 }), s(2, { priority: 2, is_favorite: true }), s(4, { priority: 2, is_favorite: true })], new Map(), [slot(10, 1), slot(11, 3)], cfg({ maxSlots: 2 }), NOW);
+    const two = plan([s(1, { priority: -2 }), s(3, { priority: -2 }), s(2, { priority: 2, is_favorite: true }), s(4, { priority: 2, is_favorite: true })], new Map(), [slot(10, 1), slot(11, 3)], cfg({ maxSlots: 2 }), NOW, ALL);
     expect(two.decisions.filter((d) => d.action === "switch")).toHaveLength(1);
   });
 
   it("releases slots of streamers that went offline and reassigns them; never records a streamer twice", () => {
     const list = [s(1, { is_live: false }), s(2), s(3)];
-    const p = plan(list, new Map(), [slot(10, 1), slot(11, 2)], cfg({ maxSlots: 2 }), NOW, new Set([3]));
+    const p = plan(list, new Map(), [slot(10, 1), slot(11, 2)], cfg({ maxSlots: 2 }), NOW, { ...ALL, excludeIds: new Set([3]) });
     expect(p.decisions.map((d) => [d.slot, d.streamerId, d.action])).toEqual([[10, null, "release"], [11, 2, "keep"]]);
     expect(p.queue).toEqual([expect.objectContaining({ streamerId: 3, reason: "recorded_elsewhere" })]);
-    const p2 = plan([s(1, { is_live: false }), s(2), s(4)], new Map(), [slot(10, 1), slot(11, 2)], cfg({ maxSlots: 2 }), NOW);
+    const p2 = plan([s(1, { is_live: false }), s(2), s(4)], new Map(), [slot(10, 1), slot(11, 2)], cfg({ maxSlots: 2 }), NOW, ALL);
     expect(p2.decisions.map((d) => [d.slot, d.streamerId, d.action])).toEqual([[10, 4, "switch"], [11, 2, "keep"]]);
   });
 
@@ -98,7 +101,7 @@ describe("scheduler decisions", () => {
     expect(nextRetry(2, NOW, 3)).toBe(new Date(NOW + 5 * MIN).toISOString());
     expect(nextRetry(3, NOW, 3)).toBeNull();
     expect(nextRetry(3, NOW, 5)).toBe(new Date(NOW + 15 * MIN).toISOString());
-    const p = plan([s(1, { record_failures: 3, record_error: "black screen" })], new Map(), [slot(10)], cfg(), NOW);
+    const p = plan([s(1, { record_failures: 3, record_error: "black screen" })], new Map(), [slot(10)], cfg(), NOW, ALL);
     expect(p.decisions[0]!.streamerId).toBeNull();
     expect(p.queue[0]).toMatchObject({ reason: "gave_up", detail: expect.stringMatching(/failed 3 times \(black screen\); not retried until the next broadcast/) });
   });
@@ -111,6 +114,7 @@ describe("scheduler in the worker (slots, failures, reassignment)", () => {
     const notes: string[] = [];
     let clock = NOW;
     const d: CaptureDeps = {
+    approvals: approveAllLive,
       now: () => clock,
       streamIdFor: vi.fn(async (tab: number) => `stream-${tab}`),
       ensureOffscreen: vi.fn(async () => undefined),
@@ -145,7 +149,7 @@ describe("scheduler in the worker (slots, failures, reassignment)", () => {
     const snap = (await chrome.storage.local.get(SCHEDULER_KEY))[SCHEDULER_KEY] as SchedulerSnapshot;
     expect(snap).toMatchObject({ maxSlots: 2, armedSlots: 2, tracked: 3, live: 3 });
     expect(snap.priorities[0]).toMatchObject({ name: "S2", parts: { potential: 92 } });
-    expect(snap.queue).toEqual([expect.objectContaining({ name: "S3", reason: "waiting_for_slot", detail: "All 2 slots busy." })]);
+    expect(snap.queue).toEqual([expect.objectContaining({ name: "S3", reason: "waiting_for_slot", detail: "Approved, #1 in the queue: all 2 slots busy." })]);
 
     // S1's player shows no picture for 45 s → failed: slot 10 or 11 moves to S3, S1 retries in 2 min.
     const slotOfS1 = (await getSlots()).find((x) => x.streamerId === 1)!.tabId!;

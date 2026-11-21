@@ -55,7 +55,7 @@ export function ClipsPage() {
         {(page) =>
           page.items.length === 0 ? (
             <EmptyState icon={<Clapperboard className="size-5" />} title={show === "favorites" ? "No favourites yet" : "No clips yet"}>
-              Turn on Auto-record for a streamer, arm a recorder tab from the StreamHunter popup and start monitoring. Detected moments become
+              Turn on Ask to record for a streamer, arm a recorder tab and start monitoring, then approve the recording when the streamer goes live. Detected moments become
               clips here.
             </EmptyState>
           ) : (

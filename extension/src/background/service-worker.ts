@@ -13,7 +13,8 @@ import { ALARMS, syncAlarms } from "./alarm-manager";
 import { renderBadge } from "./badge";
 import { handleMessage, isTrustedSender } from "./message-handler";
 import { createMonitoringManager } from "./monitoring-manager";
-import { HIGHLIGHT_PREFIX, NOTIFICATION_PREFIX, notifyHighlight } from "./notifications";
+import { APPROVAL_PREFIX, HIGHLIGHT_PREFIX, NOTIFICATION_PREFIX, notifyHighlight } from "./notifications";
+import { createApprovalManager } from "./approval-manager";
 import { createChatManager } from "./chat-manager";
 import { db } from "@/local/db";
 import { streamUrl } from "@/local/streamers";
@@ -27,6 +28,7 @@ import { enforceStorageLimits } from "@/local/clips";
 import { SYSTEM_KEY } from "@/types/capture";
 import { updateClip, type LocalClip } from "@/local/clips";
 import { createTwitchClip } from "@/platforms/twitch-clips";
+import type { Approval, ApprovalAction } from "@/local/approvals";
 
 /** Optional: also create a native Twitch clip for each clip of a Twitch stream. */
 async function afterClip(clipId: number): Promise<void> {
@@ -111,13 +113,34 @@ const chat = createChatManager({
   fetchImpl: (...a) => fetch(...a),
   onHighlight,
 });
+const approvals = createApprovalManager();
+
 const manager = createMonitoringManager({
+  approvals,
   afterCheck: async () => {
     await chat.sync();
     await capture.sync();
   },
   onHighlight,
 });
+
+/** Apply a recording decision, then let the scheduler act on it right away. */
+async function decideApproval(id: string, action: ApprovalAction): Promise<Approval> {
+  const a = await approvals.apply(id, action, await getSettings());
+  await capture.sync().catch(() => undefined);
+  if (action === "approve" && (await getSlots()).filter((s) => s.mode === "recorder").length === 0) {
+    await chrome.notifications
+      ?.create(`sh-noslot-${Date.now()}`, {
+        type: "basic",
+        iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+        title: `${a.streamerName}: approved`,
+        message: "No recorder tab is armed yet. Open Live Monitoring → Open recorder tabs, then press Alt+Shift+R in each.",
+        priority: 1,
+      })
+      .catch(() => undefined);
+  }
+  return a;
+}
 
 function log(event: string, data?: Record<string, unknown>) {
   console.info(JSON.stringify({ src: "streamhunter.sw", event, ...data }));
@@ -142,9 +165,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARMS.heartbeat) void manager.tick();
 });
 
-/** Notification buttons: 0 = Open stream, 1 = Review. */
+/** Notification buttons. Recording request: 0 = Record, 1 = Decline. Highlight: 0 = Open stream, 1 = Review. */
 chrome.notifications?.onButtonClicked?.addListener((id, button) => {
   void chrome.notifications.clear(id);
+  if (id.startsWith(APPROVAL_PREFIX)) {
+    void decideApproval(id.slice(APPROVAL_PREFIX.length), button === 0 ? "approve" : "decline");
+    return;
+  }
   if (!id.startsWith(HIGHLIGHT_PREFIX)) return;
   void (async () => {
     const h = await db.get<LocalHighlight>("highlights", Number(id.slice(HIGHLIGHT_PREFIX.length)));
@@ -154,7 +181,7 @@ chrome.notifications?.onButtonClicked?.addListener((id, button) => {
 });
 
 chrome.notifications?.onClicked.addListener((id) => {
-  const route = id.startsWith(HIGHLIGHT_PREFIX) ? "/highlights" : id.startsWith(NOTIFICATION_PREFIX) ? "/monitoring" : null;
+  const route = id.startsWith(HIGHLIGHT_PREFIX) ? "/highlights" : id.startsWith(NOTIFICATION_PREFIX) || id.startsWith(APPROVAL_PREFIX) ? "/monitoring" : null;
   if (!route) return;
   void chrome.tabs.create({ url: chrome.runtime.getURL(`app.html#${route}`) });
   void chrome.notifications.clear(id);
@@ -164,7 +191,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedSender(sender)) return false;
   // Messages addressed to the offscreen document are not for the worker.
   if ((message as { target?: unknown } | null)?.target === "offscreen") return false;
-  handleMessage(message, manager, capture, () => governor.maybeRun()).then(sendResponse);
+  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval).then(sendResponse);
   return true; // keep the channel open for the async response
 });
 

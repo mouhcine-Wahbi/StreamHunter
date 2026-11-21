@@ -136,6 +136,8 @@ export function sanitizeSettings(input: unknown): Settings {
     notifications: {
       onHighlight: bool(notif.onHighlight, d.notifications.onHighlight),
       onStreamerLive: bool(notif.onStreamerLive, d.notifications.onStreamerLive),
+      approvalRequests: bool(notif.approvalRequests, d.notifications.approvalRequests),
+      remindMinutes: clampInt(notif.remindMinutes, 1, 120, d.notifications.remindMinutes),
     },
     locale: {
       timeZone: tz,

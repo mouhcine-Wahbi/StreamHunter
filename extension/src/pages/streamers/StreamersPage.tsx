@@ -33,12 +33,18 @@ type Row = Streamer & { clip_count?: number };
 /** Where this streamer stands with the scheduler right now. */
 function recordingStatus(s: Row, snap: SchedulerSnapshot | undefined, recordingIds: Set<number>): { label: string; tone: BadgeTone } {
   if (recordingIds.has(s.id)) return { label: "Recording", tone: "live" };
-  if (!s.is_live) return { label: s.auto_record ? "Auto-record on" : "Auto-record off", tone: "neutral" };
+  if (!s.is_live) return { label: s.auto_record ? "Asks to record when live" : "Not recorded", tone: "neutral" };
   const q = snap?.queue.find((x) => x.streamerId === s.id);
   if (!q) return { label: s.auto_record ? "Live" : "Live, not recorded", tone: "neutral" };
   return {
-    label: q.reason === "waiting_for_slot" ? "Queued" : q.reason === "retry_wait" ? "Retrying" : q.reason === "gave_up" ? "Recording failed" : "Not recorded",
-    tone: q.reason === "gave_up" ? "danger" : "warn",
+    label:
+      q.reason === "waiting_for_slot" ? "Approved, queued"
+      : q.reason === "awaiting_approval" ? "Needs your approval"
+      : q.reason === "declined" ? "Declined"
+      : q.reason === "retry_wait" ? "Retrying"
+      : q.reason === "gave_up" ? "Recording failed"
+      : "Not recorded",
+    tone: q.reason === "gave_up" ? "danger" : q.reason === "awaiting_approval" ? "accent" : q.reason === "declined" ? "neutral" : "warn",
   };
 }
 
@@ -131,8 +137,8 @@ function StreamerCard({ s, onChanged, snap, recordingIds }: { s: Row; onChanged:
           Monitor
         </label>
         <label className="flex items-center gap-2 text-xs text-fg-muted" title="Record this streamer automatically on the recorder tab while live">
-          <Switch checked={Boolean(s.auto_record)} disabled={autoRecord.pending} onChange={(v) => void autoRecord.run(v)} label={`Auto-record ${s.display_name}`} />
-          Auto-record
+          <Switch checked={Boolean(s.auto_record)} disabled={autoRecord.pending} onChange={(v) => void autoRecord.run(v)} label={`Ask to record ${s.display_name}`} />
+          Ask to record
         </label>
         {confirming ? (
           <div className="flex gap-1.5">
@@ -224,7 +230,7 @@ export function StreamersPage({ onDiscover }: { onDiscover: () => void }) {
     <>
       <PageHeader
         title="My Streamers"
-        description="Channels on your watchlist. Monitor checks live status and chat; Auto-record also records the stream on your recorder tab while it is live."
+        description="Channels on your watchlist. Monitor checks live status and chat. Ask to record: when the streamer goes live, StreamHunter asks you before recording that broadcast."
         actions={
           <Button variant="secondary" size="sm" loading={refresh.pending} icon={<RefreshCw className="size-3.5" />} onClick={() => void refresh.run()}>
             Refresh status

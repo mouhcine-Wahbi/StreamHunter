@@ -11,6 +11,7 @@ import { MonitoringToggle } from "@/components/monitoring/MonitoringToggle";
 import { PipelineStatus } from "@/components/monitoring/PipelineStatus";
 import { StreamsGrid } from "@/components/monitoring/StreamsGrid";
 import { SchedulerCard } from "@/components/monitoring/SchedulerCard";
+import { ApprovalsCard } from "@/components/monitoring/ApprovalsCard";
 import { SystemCard } from "@/components/monitoring/SystemCard";
 import { SessionActivity } from "@/components/monitoring/SessionActivity";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
@@ -90,6 +91,7 @@ export function MonitoringPage({ monitoring }: { monitoring: ReturnType<typeof u
           <LiveNow refreshKey={refreshKey} />
         </div>
         <div className="space-y-6">
+        <ApprovalsCard />
         <SchedulerCard monitoring={monitoring} />
         <StreamsGrid />
         <Card>

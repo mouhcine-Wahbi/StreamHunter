@@ -1,10 +1,31 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-18 (v2.0)_
+_Last updated: 2026-11-21 (3.0 in progress, branch `streamhunter-3.0`)_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
-## v2.0 — Multi-platform automatic clipping (current)
+## v3.0 — in progress (branch `streamhunter-3.0`, not released)
+
+Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-before-3.0` points at the last 2.0 commit.
+
+### Phase 3 — Recording approvals and recording integration
+
+| Feature | Status | Evidence / notes |
+|---|---|---|
+| Nothing is recorded without your approval of that broadcast | ✅ tested for real + unit tests | Real Chrome, real live Twitch page (caseoh_): recorder tab armed before any approval stayed idle ("Waiting for your approval"); after clicking **Record** in the dashboard it recorded at 24–30 fps within 6 s |
+| One request per broadcast, tied to its identity, no repeated notifications | ✅ tested for real + unit tests | Broadcast ID = Twitch stream ID / YouTube video ID / start time / first sighting. Real run: one notification per broadcast |
+| Approval expires when the broadcast ends; never carries over | ✅ tested for real + unit tests | Real run: a new broadcast of the same streamer stopped the recording and opened a new request |
+| Record / Decline in the desktop notification | ⚠️ notification shown for real; buttons not clicked for real | Chrome allows two buttons. Clicking a notification button can't be automated in the test harness; the same decision path as the dashboard button is unit-tested |
+| Remind me later (asks again once, same broadcast; minutes configurable) | unit tests | In Live Monitoring only (third action doesn't fit Chrome's two notification buttons) |
+| Decline, Record after all, Stop recording this stream | ✅ decline for real + unit tests | |
+| Approved streams queued when all slots are busy, with their position | unit tests (worker + real stored approvals) | "Approved, #2 in the queue: all 3 slots busy." |
+| Pending approvals, approved, declined, history in Live Monitoring; Pending approvals tile on Overview | ✅ screenshot (real Chrome) + UI test | |
+| Notification settings (requests on/off, reminder minutes) | unit tests | Notifications need Chrome running; nothing is delivered while Chrome is closed or the Mac sleeps |
+| Real live-status changes from the platform APIs | 🧪 | Needs your credentials; the real-Chrome run used seeded live state for a real live channel |
+
+"Always approve" is deliberately not offered in this version.
+
+## v2.0 — Multi-platform automatic clipping (released)
 
 Labels: **✅ tested for real** (real Chrome, real live pages) · **🧪 implemented, tested against documented
 responses** (simulated platform, not the real service) · **⚠️ partial** · **❌ not implemented** · **🚫 blocked

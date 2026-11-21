@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Activity, Clapperboard, Film, HardDrive, ListOrdered, Plug, Sparkles, Timer, Users, Video } from "lucide-react";
+import { Activity, BellRing, Clapperboard, Film, HardDrive, ListOrdered, Plug, Sparkles, Timer, Users, Video } from "lucide-react";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -10,6 +10,8 @@ import { STATUS_META } from "@/components/monitoring/MonitoringStatusPill";
 import { PipelineStatus, type ClipStats } from "@/components/monitoring/PipelineStatus";
 import { SystemCard } from "@/components/monitoring/SystemCard";
 import { SchedulerCard } from "@/components/monitoring/SchedulerCard";
+import { ApprovalsCard } from "@/components/monitoring/ApprovalsCard";
+import { APPROVALS_KEY, type ApprovalStore } from "@/local/approvals";
 import { useStorageValue } from "@/hooks/useStorageValue";
 import type { SchedulerSnapshot } from "@/background/capture-manager";
 import { formatRelative } from "@/utils/format";
@@ -74,6 +76,7 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
   const limit = settings.settings.storage.maxTotalMb * 1_048_576;
   const status = STATUS_META[monitoring.state.status];
   const snap = useStorageValue<SchedulerSnapshot>("sh.scheduler");
+  const approvals = useStorageValue<ApprovalStore>(APPROVALS_KEY);
 
   return (
     <>
@@ -97,7 +100,13 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
           value={`${recordingNames.length} / ${settings.settings.recording.maxStreams}`}
           sub={recordingNames.length ? recordingNames.join(", ") : "Not recording"}
         />
-        <StatTile label="Queued" icon={<ListOrdered className="size-4" />} value={snap ? snap.queue.filter((q) => q.reason === "waiting_for_slot").length : null} sub="Live, waiting for a slot" />
+        <StatTile
+          label="Pending approvals"
+          icon={<BellRing className="size-4" />}
+          value={approvals ? approvals.items.filter((a) => a.endedAt === null && (a.status === "pending" || a.status === "snoozed")).length : 0}
+          sub="Live streams waiting for your answer"
+        />
+        <StatTile label="Queued" icon={<ListOrdered className="size-4" />} value={snap ? snap.queue.filter((q) => q.reason === "waiting_for_slot").length : null} sub="Approved, waiting for a slot" />
         <StatTile label="Clips generated" icon={<Clapperboard className="size-4" />} value={s?.clips ?? null} sub={s ? `${s.favorites} favourite${s.favorites === 1 ? "" : "s"}` : ""} />
         <StatTile label="Recording time" icon={<Timer className="size-4" />} value={s ? formatSeconds(s.recorded_seconds) : null} sub="Total video recorded" />
         <StatTile label="Clip footage" icon={<Film className="size-4" />} value={s ? formatSeconds(s.clip_seconds) : null} sub="Total length of saved clips" />
@@ -127,8 +136,8 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
                 {(page) =>
                   page.items.length === 0 ? (
                     <EmptyState icon={<Sparkles className="size-5" />} title="No clips yet">
-                      1. Turn on Auto-record for a streamer in My Streamers. 2. Open twitch.tv or kick.com in a tab, click the StreamHunter icon and
-                      choose Use this tab as a recorder (one tab per stream you want recorded at the same time). 3. Start monitoring and leave Chrome running.
+                      1. Add streamers in My Streamers ("Ask to record" is on by default). 2. Live Monitoring → Open recorder tabs, then press Alt+Shift+R
+                      in each. 3. Start monitoring. When a streamer goes live, approve the recording request; clips appear here.
                     </EmptyState>
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -144,6 +153,7 @@ export function OverviewPage({ monitoring }: { monitoring: ReturnType<typeof use
         </div>
 
         <div className="space-y-6">
+          <ApprovalsCard compact />
           <SchedulerCard monitoring={monitoring} compact />
           <PipelineStatus monitoring={monitoring} />
           <SystemCard />

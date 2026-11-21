@@ -17,6 +17,9 @@
  * a recording is replaced only if a waiting streamer scores `switchMargin` points more AND the
  * current one has recorded `minRecordMinutes` AND the slot hasn't switched in `cooldownMinutes`
  * AND no clip of it is still being saved. At most one such switch per run.
+ *
+ * 3.0: only streamers whose current broadcast you approved can get a slot (`approved`). Approved
+ * streams wait in the queue, in priority order, until a slot is free.
  */
 import type { Streamer } from "@/types/api";
 
@@ -96,7 +99,7 @@ export interface Priority {
   explain: string[];
 }
 
-export type QueueReason = "waiting_for_slot" | "retry_wait" | "gave_up" | "auto_record_off" | "recorded_elsewhere";
+export type QueueReason = "waiting_for_slot" | "awaiting_approval" | "declined" | "retry_wait" | "gave_up" | "auto_record_off" | "recorded_elsewhere";
 
 export interface QueueEntry {
   streamerId: number;
@@ -172,25 +175,32 @@ export function priorityOf(s: SchedStreamer, h: StreamerHistory | undefined, w: 
 
 const isLive = (s: SchedStreamer) => s.monitoring_enabled && s.is_live === true;
 
-/**
- * @param excludeIds streamers recorded by manual captures (never recorded twice)
- * @param lastSwitch slot → ISO time of its last switch (cooldown)
- */
+export interface PlanInput {
+  /** Streamers whose current broadcast you approved. Nothing else is ever recorded. */
+  approved: ReadonlySet<number>;
+  /** Streamers whose current request you declined (shown as such in the queue). */
+  declined?: ReadonlySet<number>;
+  /** Streamers recorded by manual captures (never recorded twice). */
+  excludeIds?: ReadonlySet<number>;
+  /** Slot → ISO time of its last switch (cooldown). */
+  lastSwitch?: ReadonlyMap<number, string>;
+}
+
 export function plan(
   streamers: SchedStreamer[],
   history: Map<number, StreamerHistory>,
   slots: SlotView[],
   cfg: SchedulerConfig,
   now: number,
-  excludeIds: Set<number> = new Set(),
-  lastSwitch: Map<number, string> = new Map(),
+  input: PlanInput,
 ): SchedulePlan {
+  const { approved, declined = new Set<number>(), excludeIds = new Set<number>(), lastSwitch = new Map<number, string>() } = input;
   const priorities = streamers.filter(isLive).map((s) => priorityOf(s, history.get(s.id), cfg.weights, now));
   const score = new Map(priorities.map((p) => [p.streamerId, p.total]));
   const byId = new Map(streamers.map((s) => [s.id, s]));
   const retryWait = (s: SchedStreamer) => Boolean(s.record_retry_at && Date.parse(s.record_retry_at) > now);
   const gaveUp = (s: SchedStreamer) => (s.record_failures ?? 0) >= cfg.maxRetries;
-  const eligible = (s: SchedStreamer) => isLive(s) && Boolean(s.auto_record) && !excludeIds.has(s.id) && !retryWait(s) && !gaveUp(s);
+  const eligible = (s: SchedStreamer) => isLive(s) && Boolean(s.auto_record) && approved.has(s.id) && !excludeIds.has(s.id) && !retryWait(s) && !gaveUp(s);
   const ranked = streamers
     .filter(eligible)
     .sort((a, b) => (score.get(b.id) ?? 0) - (score.get(a.id) ?? 0) || Number(b.is_favorite) - Number(a.is_favorite) || (b.viewer_count ?? 0) - (a.viewer_count ?? 0));
@@ -201,7 +211,7 @@ export function plan(
   // 1. keep healthy recordings (and paused slots' streamers while they are live)
   for (const sl of active) {
     const cur = sl.streamerId !== null ? byId.get(sl.streamerId) : undefined;
-    if (cur && isLive(cur) && !taken.has(cur.id) && (eligible(cur) || sl.paused)) {
+    if (cur && isLive(cur) && !taken.has(cur.id) && (eligible(cur) || (sl.paused && approved.has(cur.id)))) {
       taken.add(cur.id);
       decisions.push({ slot: sl.slot, streamerId: cur.id, action: "keep", detail: `Recording ${cur.display_name} (priority ${score.get(cur.id) ?? "?"}).` });
     } else {
@@ -209,7 +219,17 @@ export function plan(
         slot: sl.slot,
         streamerId: null,
         action: sl.streamerId !== null ? "release" : "idle",
-        detail: cur ? (isLive(cur) ? `${cur.display_name} is no longer eligible (${!cur.auto_record ? "Auto-record off" : retryWait(cur) ? "recording failed, retry later" : "recorded elsewhere"}).` : `${cur.display_name} went offline.`) : "Free slot.",
+        detail: cur
+          ? isLive(cur)
+            ? !cur.auto_record
+              ? `${cur.display_name}: recording requests were turned off.`
+              : declined.has(cur.id)
+                ? `${cur.display_name}: recording stopped (declined for this broadcast).`
+                : !approved.has(cur.id)
+                  ? `${cur.display_name} started a new broadcast; it needs your approval.`
+                  : `${cur.display_name} is no longer eligible (${retryWait(cur) ? "recording failed, retry later" : "recorded elsewhere"}).`
+            : `${cur.display_name} went offline.`
+          : "Free slot.",
       });
     }
   }
@@ -255,22 +275,26 @@ export function plan(
     let reason: QueueReason;
     let detail: string;
     if (excludeIds.has(s.id)) [reason, detail] = ["recorded_elsewhere", "Recorded in a manual capture."];
-    else if (!s.auto_record) [reason, detail] = ["auto_record_off", "Auto-record is off for this streamer."];
+    else if (!s.auto_record) [reason, detail] = ["auto_record_off", "Recording requests are off for this streamer."];
+    else if (declined.has(s.id)) [reason, detail] = ["declined", "You declined recording this broadcast."];
+    else if (!approved.has(s.id)) [reason, detail] = ["awaiting_approval", "Waiting for your approval to record this broadcast."];
     else if (gaveUp(s)) [reason, detail] = ["gave_up", `Recording failed ${s.record_failures} times (${s.record_error ?? "unknown error"}); not retried until the next broadcast.`];
     else if (retryWait(s)) [reason, detail] = ["retry_wait", `Recording failed (${s.record_error ?? "unknown error"}); retrying ${new Date(s.record_retry_at!).toLocaleTimeString()}.`];
     else {
       reason = "waiting_for_slot";
+      const position = ranked.filter((x) => !taken.has(x.id)).findIndex((x) => x.id === s.id) + 1;
       const lowest = Math.min(...decisions.filter((d) => d.streamerId !== null).map((d) => score.get(d.streamerId!) ?? 0));
       detail =
         active.length === 0
           ? "No recorder tab is armed."
           : decisions.every((d) => d.streamerId !== null)
-            ? `All ${active.length} slot${active.length === 1 ? "" : "s"} busy${Number.isFinite(lowest) && total !== null && total - lowest >= cfg.switchMargin ? "; will replace the weakest recording when its minimum time and cooldown allow" : ""}.`
-            : "Waiting for a slot.";
+            ? `Approved, #${position} in the queue: all ${active.length} slot${active.length === 1 ? "" : "s"} busy${Number.isFinite(lowest) && total !== null && total - lowest >= cfg.switchMargin ? "; will replace the weakest recording when its minimum time and cooldown allow" : ""}.`
+            : `Approved, #${position} in the queue.`;
     }
     queue.push({ streamerId: s.id, name: s.display_name, total, reason, detail });
   }
-  queue.sort((a, b) => Number(a.reason !== "waiting_for_slot") - Number(b.reason !== "waiting_for_slot") || (b.total ?? 0) - (a.total ?? 0));
+  const order: QueueReason[] = ["waiting_for_slot", "awaiting_approval", "retry_wait", "gave_up", "declined", "recorded_elsewhere", "auto_record_off"];
+  queue.sort((a, b) => order.indexOf(a.reason) - order.indexOf(b.reason) || (b.total ?? 0) - (a.total ?? 0));
   return { priorities: priorities.sort((a, b) => b.total - a.total), decisions, queue };
 }
 

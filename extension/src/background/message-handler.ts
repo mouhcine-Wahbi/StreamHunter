@@ -3,6 +3,7 @@ import { isRuntimeRequest, type RuntimeResponse } from "@/types/messages";
 import type { MonitoringManager } from "./monitoring-manager";
 import { getCaptureState, getSlots, type CaptureManager } from "./capture-manager";
 import { SYSTEM_KEY, type SystemLoad } from "@/types/capture";
+import { ApprovalError, type Approval, type ApprovalAction } from "@/local/approvals";
 
 const NO_CAPTURE = "Capture is only available in the installed extension";
 
@@ -12,6 +13,8 @@ export async function handleMessage(
   capture?: CaptureManager,
   /** Overload protection hook (runs at most every 10 s, on engine reports). */
   onLoad?: () => Promise<void>,
+  /** Recording approvals (3.0): apply your decision and reschedule. */
+  decide?: (id: string, action: ApprovalAction) => Promise<Approval>,
 ): Promise<RuntimeResponse> {
   if (!isRuntimeRequest(message)) return { ok: false, error: "Unknown message" };
   try {
@@ -43,6 +46,15 @@ export async function handleMessage(
         const route = message.route && /^\/[a-z-]*$/.test(message.route) ? message.route : "/overview";
         await chrome.tabs.create({ url: chrome.runtime.getURL(`app.html#${route}`) });
         return { ok: true, data: null };
+      }
+      case "approval/decide": {
+        if (!decide) return { ok: false, error: "Recording requests are only available in the installed extension" };
+        if (typeof message.id !== "string" || !["approve", "decline", "remind", "stop"].includes(message.action)) return { ok: false, error: "Invalid request" };
+        try {
+          return { ok: true, data: await decide(message.id, message.action) };
+        } catch (e) {
+          return { ok: false, error: e instanceof ApprovalError ? e.message : e instanceof Error ? e.message : "Unexpected error" };
+        }
       }
       case "capture/get":
         return { ok: true, data: await getCaptureState(Number.isInteger(message.tabId) ? message.tabId : undefined) };

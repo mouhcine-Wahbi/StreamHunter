@@ -110,13 +110,17 @@ own credentials give you your own rate limits and quota. They're stored only in 
 ## Using it
 
 1. **Add streamers:** in My Streamers, paste names or links, or use Discover. New streamers have
-   Auto-record on. Set their priority (−2…+2) or favourite them if you like.
+   Ask to record on. Set their priority (−2…+2) or favourite them if you like.
 2. **Arm the recorder tabs (once per Chrome session).** Live Monitoring → Scheduler → **Open 3
    recorder tabs**, then press **Alt+Shift+R** in each tab (or click the StreamHunter icon → Use this
    tab as a recorder). Chrome only records a tab after one action of yours on it. StreamHunter then
    moves each tab to the streamer it should record.
 3. **Start monitoring** and leave the Mac running and awake.
-4. Come back to **Top Highlights** (ranked; click **Why this score?** on a clip) and the **Clip
+4. **Approve each stream (3.0).** When a streamer with *Ask to record* goes live, StreamHunter asks
+   first, in a notification (Record / Decline) and in Live Monitoring → Recording requests (also
+   Remind me later). Nothing is recorded without your approval. An approval covers that one
+   broadcast and ends with it; a new broadcast asks again.
+5. Come back to **Top Highlights** (ranked; click **Why this score?** on a clip) and the **Clip
    Library** to preview, favourite, rename and **Download MP4**.
 
 Controls: Start / Pause / Resume / Stop monitoring. Each recording slot also has its own Pause,

@@ -1,3 +1,4 @@
+import { approveAllLive } from "@/test/approvals";
 import { db } from "@/local/db";
 import { enforceStorageLimits, listClips, saveClip, updateClip } from "@/local/clips";
 import { filterClips } from "@/local/local-api";
@@ -22,6 +23,7 @@ function deps() {
   const sent: OffscreenRequest[] = [];
   const navigations: string[] = [];
   const d: CaptureDeps = {
+    approvals: approveAllLive,
     now: () => NOW,
     streamIdFor: vi.fn(async () => "stream-1"),
     ensureOffscreen: vi.fn(async () => undefined),
@@ -70,7 +72,7 @@ describe("recorder tab (automatic recording)", () => {
     await db.put("streamers", streamer(2, { is_live: false }));
     s = await m.sync();
     expect(sent.at(-1)).toEqual({ target: "offscreen", type: "capture/target", slot: 9, capture: null });
-    expect(s).toMatchObject({ recording: false, streamerId: null, waitingReason: "Waiting for an Auto-record streamer to go live." });
+    expect(s).toMatchObject({ recording: false, streamerId: null, waitingReason: "Waiting for an approved live stream. StreamHunter asks you when a selected streamer goes live." });
 
     // S2 restarts: live with a session, then a new session → the player is reloaded.
     await db.put("streamers", streamer(2));

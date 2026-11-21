@@ -157,6 +157,7 @@ export async function refreshStatuses(clients: Clients = platformClients(), at: 
         is_live: Boolean(c),
         viewer_count: c?.viewer_count ?? null,
         stream_started_at: c?.stream_started_at ?? null,
+        broadcast_id: c ? broadcastIdOf(c, prev, at) : null,
         current_title: c?.current_title ?? s.current_title,
         current_category: c?.current_category ?? s.current_category,
         display_name: c?.display_name && platform !== "kick" ? c.display_name : s.display_name,
@@ -173,6 +174,17 @@ export async function refreshStatuses(clients: Clients = platformClients(), at: 
     }
   }
   return result;
+}
+
+/**
+ * Identity of a live broadcast: the platform's stream ID, else its start time, else (no data at all)
+ * the check that first saw it live, kept while the streamer stays live.
+ */
+export function broadcastIdOf(c: ChannelInfo, prev: Streamer, at: Date): string {
+  if (c.stream_id) return `${c.platform}:${c.stream_id}`;
+  if (c.stream_started_at) return `${c.platform}:${c.platform_user_id}@${c.stream_started_at}`;
+  if (prev.is_live && prev.broadcast_id) return prev.broadcast_id;
+  return `${c.platform}:${c.platform_user_id}~${at.toISOString()}`;
 }
 
 export function streamUrl(s: Pick<Streamer, "platform" | "username"> & { platform_user_id?: string }): string {

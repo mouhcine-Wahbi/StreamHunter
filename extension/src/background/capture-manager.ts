@@ -1,4 +1,5 @@
 import { db } from "@/local/db";
+import { approvedIds, readApprovals } from "@/local/approvals";
 import { createHighlight, failInterruptedClips, type LocalHighlight } from "@/local/highlights";
 import { enforceStorageLimits } from "@/local/clips";
 import { activeSessionFor } from "@/local/sessions";
@@ -34,6 +35,21 @@ export interface CaptureDeps {
   navigate: (tabId: number, url: string) => Promise<void>;
   /** Called after a clip is saved (Twitch native clip, …). */
   afterClip?: (clipId: number, highlightId: number) => Promise<void>;
+  /**
+   * Which live streamers you approved (and declined) for their current broadcast. Defaults to the
+   * stored recording approvals; nothing outside `approved` is ever recorded automatically.
+   */
+  approvals?: (streamers: Streamer[]) => Promise<{ approved: ReadonlySet<number>; declined: ReadonlySet<number> }>;
+}
+
+/** The stored approvals, checked against each streamer's current broadcast. */
+export async function storedApprovals(streamers: Streamer[]): Promise<{ approved: ReadonlySet<number>; declined: ReadonlySet<number> }> {
+  const items = await readApprovals();
+  const live = new Map(streamers.map((s) => [s.id, s.broadcast_id ?? null]));
+  return {
+    approved: approvedIds(items, streamers),
+    declined: new Set(items.filter((a) => a.status === "declined" && a.endedAt === null && live.get(a.streamerId) === a.broadcastId).map((a) => a.streamerId)),
+  };
 }
 
 async function hasOffscreen(): Promise<boolean> {
@@ -447,6 +463,7 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
     }
 
     const streamers = await resetFailuresOnNewBroadcast(await db.all<SchedStreamer>("streamers"));
+    const decided = await (deps.approvals ?? storedApprovals)(streamers);
     const manualIds = new Set(slots.filter((s) => s.mode === "manual" && s.streamerId !== null).map((s) => s.streamerId!));
     const nowMs = deps.now();
     const schedule = plan(
@@ -455,8 +472,12 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
       recorders.map((r) => ({ slot: r.tabId!, streamerId: r.streamerId, assignedAt: r.assignedAt, pendingClips: r.health?.pendingClips ?? 0, paused: r.paused && r.pauseReason !== "monitoring" })),
       { maxSlots: settings.recording.maxStreams, ...settings.scheduler },
       nowMs,
-      manualIds,
-      new Map(recorders.filter((r) => r.switchedAt).map((r) => [r.tabId!, r.switchedAt!])),
+      {
+        approved: decided.approved,
+        declined: decided.declined,
+        excludeIds: manualIds,
+        lastSwitch: new Map(recorders.filter((r) => r.switchedAt).map((r) => [r.tabId!, r.switchedAt!])),
+      },
     );
     await saveSchedule(schedule, streamers, slots, settings.recording.maxStreams, nowMs);
     const anyAuto = streamers.some((x) => x.auto_record && x.monitoring_enabled);
@@ -487,9 +508,11 @@ export function createCaptureManager(deps: CaptureDeps = defaultCaptureDeps) {
         await patchSlot(tabId, {
           recording: false, paused: pausedNow, pauseReason: pausedNow ? r.pauseReason : null, streamerId: null, channel: null, assignedAt: null,
           message: decision?.action === "release" ? decision.detail : r.message,
-          waitingReason: anyAuto
-            ? recorders.length > 1 ? "Waiting for another Auto-record streamer to go live." : "Waiting for an Auto-record streamer to go live."
-            : "No streamer has Auto-record on. Turn it on in My Streamers.",
+          waitingReason: !anyAuto
+            ? "No streamer has recording requests on. Turn them on in My Streamers."
+            : schedule.queue.some((q) => q.reason === "awaiting_approval")
+              ? "Waiting for your approval: a selected streamer is live (Live Monitoring → Recording requests)."
+              : "Waiting for an approved live stream. StreamHunter asks you when a selected streamer goes live.",
         });
         return;
       }

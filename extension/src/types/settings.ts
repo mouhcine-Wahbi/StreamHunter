@@ -74,6 +74,10 @@ export interface Settings {
   notifications: {
     onHighlight: boolean;
     onStreamerLive: boolean;
+    /** Desktop notification when a selected streamer goes live and needs your recording approval. */
+    approvalRequests: boolean;
+    /** "Remind me later" asks again after this many minutes (same broadcast only). */
+    remindMinutes: number;
   };
   locale: {
     /** IANA time zone, or "auto" for the browser's zone. */
@@ -100,7 +104,7 @@ export const DEFAULT_SETTINGS: Settings = {
   scheduler: { weights: { potential: 45, activity: 20, growth: 15, user: 15, reliability: 5 }, minRecordMinutes: 10, cooldownMinutes: 5, switchMargin: 12, maxRetries: 3 },
   recording: { maxStreams: 3, quality: "720p", audio: "first", protectResources: true },
   storage: { maxTotalMb: 5120, maxAgeDays: 0 },
-  notifications: { onHighlight: true, onStreamerLive: false },
+  notifications: { onHighlight: true, onStreamerLive: false, approvalRequests: true, remindMinutes: 10 },
   locale: { timeZone: "auto", language: "en" },
   privacy: { retentionDays: 30 },
 };

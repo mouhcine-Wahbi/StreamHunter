@@ -1,6 +1,7 @@
 import type { MonitoringState } from "./monitoring";
 import type { CaptureOptions, CaptureState, CaptureTarget, ClipRequest, SlotHealth, SystemLoad } from "./capture";
 import type { Signal } from "@/detection/fusion";
+import type { Approval } from "@/local/approvals";
 
 /** Messages UI surfaces (and the offscreen document) send to the background service worker. */
 export type RuntimeRequest =
@@ -11,6 +12,8 @@ export type RuntimeRequest =
   | { type: "monitoring/resume" }
   | { type: "monitoring/check-now" }
   | { type: "app/open"; route?: string }
+  // Recording approvals (3.0).
+  | { type: "approval/decide"; id: string; action: "approve" | "decline" | "remind" | "stop" }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }
@@ -52,6 +55,7 @@ export interface ResponseMap {
   "monitoring/resume": MonitoringState;
   "monitoring/check-now": MonitoringState;
   "app/open": null;
+  "approval/decide": Approval;
   "capture/get": CaptureState;
   "capture/list": CaptureState[];
   "capture/pause-slot": CaptureState;
@@ -77,6 +81,7 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "monitoring/resume",
   "monitoring/check-now",
   "app/open",
+  "approval/decide",
   "capture/get",
   "capture/list",
   "capture/pause-slot",

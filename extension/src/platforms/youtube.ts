@@ -201,6 +201,7 @@ export function createYouTubeAdapter(http: HttpDeps = {}, now: () => Date = () =
         current_category: categories.get(str(sn.categoryId) ?? "") || null,
         viewer_count: str(live.concurrentViewers) !== null ? num(Number(str(live.concurrentViewers))) : null,
         stream_started_at: time(live.actualStartTime),
+        stream_id: str(v.id),
       }];
     });
   }

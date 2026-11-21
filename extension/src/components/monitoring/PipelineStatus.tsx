@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { APPROVALS_KEY, approvedIds, type ApprovalStore } from "@/local/approvals";
 import { Clapperboard, MessageSquare, Radar, ScanSearch, Video, Workflow } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge, Dot, type BadgeTone } from "@/components/ui/Badge";
@@ -84,7 +85,10 @@ export function PipelineStatus({ monitoring }: { monitoring: ReturnType<typeof u
   const stats = useApiQuery<ClipStats>(`/api/v1/clips/stats?_=${slots.map((x) => x.clips).join(",")}:${capture.clips}`);
   const list = streamers.data?.items ?? [];
   const monitored = list.filter((s) => s.monitoring_enabled);
-  const liveAutoRecord = monitored.filter((s) => s.auto_record && s.is_live === true);
+  // 3.0: only streams you approved count as "should be recorded"; the others wait for your answer.
+  const approvalItems = useStorageValue<ApprovalStore>(APPROVALS_KEY)?.items ?? [];
+  const approved = approvedIds(approvalItems, monitored);
+  const liveAutoRecord = monitored.filter((s) => s.auto_record && s.is_live === true && approved.has(s.id));
   const chatValues = Object.values(activity);
   const connected = chatValues.filter((a) => a.chat_state === "connected").length;
   const kickMonitored = monitored.some((s) => s.platform === "kick");

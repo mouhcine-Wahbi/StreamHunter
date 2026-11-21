@@ -447,6 +447,45 @@ describe("2.0 dashboard: scheduler, streamers, score explanations, health", () =
     expect(screen.getByText("Measured once a recording runs.")).toBeInTheDocument(); // no fabricated CPU numbers
     expect(await screen.findByText("Kick asked StreamHunter to slow down.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Apply storage limits now" })).toBeInTheDocument();
-    expect(screen.getByText(/No clip was lost to a restart/)).toBeInTheDocument();
+    expect(await screen.findByText(/No clip was lost to a restart/)).toBeInTheDocument(); // loaded from IndexedDB
+  });
+});
+
+describe("3.0 recording approvals in the dashboard", () => {
+  it("lists pending requests with Record / Decline / Remind me later, and Record sends your decision", async () => {
+    mockFetch(() => null);
+    const decisions: unknown[] = [];
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      const m = message as { type?: string; id?: string; action?: string };
+      if (m.type !== "approval/decide") return false;
+      decisions.push(m);
+      sendResponse({ ok: true, data: null });
+      return true;
+    });
+    const base = { platform: "twitch", username: "alpha", title: "Ranked grind", category: "Valorant", viewers: 1200, createdAt: new Date().toISOString(), decidedAt: null, remindAt: null, notifications: 1, endedAt: null, note: null };
+    await chrome.storage.local.set({
+      "sh.approvals": {
+        items: [
+          { ...base, id: "1|twitch:b1", streamerId: 1, streamerName: "Alpha", broadcastId: "twitch:b1", status: "pending" },
+          { ...base, id: "2|twitch:b2", streamerId: 2, streamerName: "Bravo", broadcastId: "twitch:b2", status: "approved" },
+          { ...base, id: "3|twitch:b0", streamerId: 3, streamerName: "Charlie", broadcastId: "twitch:b0", status: "expired", endedAt: new Date().toISOString(), note: "Not answered. The broadcast ended." },
+        ],
+      },
+      "sh.scheduler": { at: new Date().toISOString(), maxSlots: 3, armedSlots: 3, tracked: 3, live: 2, lastRecordingAt: null, failures: [], recording: [], decisions: [], priorities: [],
+        queue: [{ streamerId: 2, name: "Bravo", total: 60, reason: "waiting_for_slot", detail: "Approved, #1 in the queue: all 3 slots busy." }] },
+    });
+    window.location.hash = "/monitoring";
+    render(<App />);
+    const pending = await screen.findByRole("region", { name: "Pending approvals" });
+    expect(within(pending).getByText("Alpha")).toBeInTheDocument();
+    expect(within(pending).getByText("Valorant · Ranked grind")).toBeInTheDocument();
+    expect(within(pending).getByRole("button", { name: "Decline" })).toBeInTheDocument();
+    expect(within(pending).getByRole("button", { name: "Remind me in 10 min" })).toBeInTheDocument();
+    const approved = screen.getByRole("region", { name: "Approved streams" });
+    expect(within(approved).getAllByText("Approved, #1 in the queue: all 3 slots busy.").length).toBeGreaterThan(0);
+    expect(within(approved).getByRole("button", { name: "Stop recording this stream" })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Approval history" })).getByText("Not answered. The broadcast ended.")).toBeInTheDocument();
+    await userEvent.click(within(pending).getByRole("button", { name: "Record" }));
+    await waitFor(() => expect(decisions).toEqual([{ type: "approval/decide", id: "1|twitch:b1", action: "approve" }]));
   });
 });

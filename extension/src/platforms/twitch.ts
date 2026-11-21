@@ -50,6 +50,7 @@ export function createTwitchClient(http: HttpDeps = {}): PlatformClient & {
       current_category: str(s.game_name),
       viewer_count: num(s.viewer_count),
       stream_started_at: time(s.started_at),
+      stream_id: str(s.id),
     };
   }
 

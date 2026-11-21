@@ -32,6 +32,11 @@ export interface Streamer extends StreamerSearchResult {
   id: number;
   viewer_count: number | null;
   stream_started_at: string | null;
+  /**
+   * Identifies the current broadcast (3.0 recording approvals are tied to it): the platform's stream
+   * ID when it gives one, else the start time, else the first check that saw it live. null offline.
+   */
+  broadcast_id?: string | null;
   status_checked_at: string | null;
   monitoring_enabled: boolean;
   is_favorite: boolean;

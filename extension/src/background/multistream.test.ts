@@ -1,3 +1,4 @@
+import { approveAllLive } from "@/test/approvals";
 import { db } from "@/local/db";
 import { createHighlight } from "@/local/highlights";
 import { patchMonitoringState, updateSettings } from "@/store/storage";
@@ -23,6 +24,7 @@ function deps() {
   const navigations: [number, string][] = [];
   let clock = NOW;
   const d: CaptureDeps = {
+    approvals: approveAllLive,
     now: () => (clock += 1000),
     streamIdFor: vi.fn(async (tab: number) => `stream-${tab}`),
     ensureOffscreen: vi.fn(async () => undefined),

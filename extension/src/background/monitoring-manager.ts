@@ -4,6 +4,7 @@ import type { MonitoringState } from "@/types/monitoring";
 import { backoffDelayMs } from "@/utils/backoff";
 import { syncAlarms } from "./alarm-manager";
 import { notifyStreamEvents, type StreamNotification } from "./notifications";
+import type { ApprovalManager } from "./approval-manager";
 
 import { db } from "@/local/db";
 import { activeSessionFor, pauseActiveSessions, resumePausedSessions, syncSessions } from "@/local/sessions";
@@ -19,6 +20,8 @@ export interface MonitoringDeps {
   afterCheck?: () => Promise<void>;
   /** For every stored highlight (notifications, capture). */
   onHighlight?: (h: LocalHighlight, s: Streamer) => Promise<void>;
+  /** 3.0: open/close recording approval requests after each check (before recording is scheduled). */
+  approvals?: Pick<ApprovalManager, "afterCheck">;
 }
 
 const defaultDeps: MonitoringDeps = {
@@ -76,9 +79,13 @@ export function createMonitoringManager(overrides: Partial<MonitoringDeps> = {})
       const sync = await syncSessions(new Set(r.checked_ids), now);
       const problems = Object.entries(r.unavailable).map(([p, msg]) => `${PLATFORM_LABEL[p as Platform] ?? p}: ${msg}`);
       const allFailed = r.checked === 0 && problems.length > 0;
-      if (sync.opened.length > 0) {
+      const asked = await deps.approvals?.afterCheck(settings).catch(() => null);
+      // A recording request already says "X is live": no second notification for the same streamer.
+      const askedIds = new Set(asked?.notify.map((a) => a.streamerId) ?? []);
+      const opened = sync.opened.filter((x) => !askedIds.has(x.streamer_id));
+      if (opened.length > 0) {
         const streamers = await db.all<Streamer>("streamers");
-        await notifyStreamEvents(sync.opened.map((x) => liveNotification(x, streamers.find((s) => s.id === x.streamer_id))), settings);
+        await notifyStreamEvents(opened.map((x) => liveNotification(x, streamers.find((s) => s.id === x.streamer_id))), settings);
       }
       for (const sp of r.spikes) {
         const session = await activeSessionFor(sp.streamer.id);

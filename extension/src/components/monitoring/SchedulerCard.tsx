@@ -14,10 +14,12 @@ import type { Platform } from "@/types/api";
 import { formatDuration, formatRelative } from "@/utils/format";
 
 const REASON_LABEL: Record<string, string> = {
-  waiting_for_slot: "Queued",
+  waiting_for_slot: "Approved, queued",
+  awaiting_approval: "Needs approval",
+  declined: "Declined",
   retry_wait: "Retrying later",
   gave_up: "Failed",
-  auto_record_off: "Auto-record off",
+  auto_record_off: "Not asked (Ask to record off)",
   recorded_elsewhere: "Manual capture",
 };
 
@@ -58,7 +60,7 @@ export function SchedulerCard({ monitoring, compact = false }: { monitoring: Ret
       <CardHeader
         icon={<ListOrdered className="size-4" />}
         title="Scheduler"
-        description={`Records the ${max} highest-priority live streamers at once and queues the rest. Priority favours predicted highlight potential, not just viewers.`}
+        description={`Records up to ${max} approved live streams at once, highest priority first, and queues the rest. Priority favours predicted highlight potential, not just viewers.`}
         actions={
           <Badge tone={healthy ? "live" : monitoring.state.enabled ? "warn" : "neutral"} icon={<Dot tone={healthy ? "live" : monitoring.state.enabled ? "warn" : "neutral"} />}>
             {!monitoring.state.enabled ? "Stopped" : monitoring.state.paused ? "Paused" : healthy ? "Running" : "Degraded"}
@@ -120,7 +122,7 @@ export function SchedulerCard({ monitoring, compact = false }: { monitoring: Ret
         <section aria-label="Live but not recorded">
           <h3 className="mb-1 font-semibold text-fg-muted">Live but not recorded</h3>
           {!snap || snap.queue.length === 0 ? (
-            <p className="text-fg-subtle">Every live Auto-record streamer is being recorded.</p>
+            <p className="text-fg-subtle">Every approved live stream is being recorded.</p>
           ) : (
             <ul className="space-y-1.5">
               {snap.queue.slice(0, compact ? 4 : 50).map((q) => (

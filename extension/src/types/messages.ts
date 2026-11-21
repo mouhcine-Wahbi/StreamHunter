@@ -27,6 +27,9 @@ export type RuntimeRequest =
   | { type: "process/clip-made"; clipId: number; sourceId: number }
   | { type: "process/asset-done"; assetId: number; clipId: number; ok: boolean }
   | { type: "process/idle" }
+  // Metadata and score (3.0): write again (keeps your edits unless reset), on-device AI status.
+  | { type: "metadata/generate"; clipId: number; resetEdits?: boolean }
+  | { type: "ai/status" }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }
@@ -58,7 +61,9 @@ export type OffscreenRequest =
   | { target: "offscreen"; type: "capture/options"; slot: number; options: CaptureOptions }
   | { target: "offscreen"; type: "capture/stop"; slot?: number }
   | { target: "offscreen"; type: "process/kick" }
-  | { target: "offscreen"; type: "process/busy" };
+  | { target: "offscreen"; type: "process/busy" }
+  | { target: "offscreen"; type: "ai/availability" }
+  | { target: "offscreen"; type: "ai/prompt"; system: string; user: string; schema: object };
 
 export type RuntimeResponse<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -78,6 +83,8 @@ export interface ResponseMap {
   "process/clip-made": null;
   "process/asset-done": null;
   "process/idle": null;
+  "metadata/generate": import("@/local/content").ContentClip;
+  "ai/status": { onDevice: import("@/metadata/generate").OnDeviceState; where: "worker" | "offscreen" | null };
   "capture/get": CaptureState;
   "capture/list": CaptureState[];
   "capture/pause-slot": CaptureState;
@@ -111,6 +118,8 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "process/clip-made",
   "process/asset-done",
   "process/idle",
+  "metadata/generate",
+  "ai/status",
   "capture/get",
   "capture/list",
   "capture/pause-slot",

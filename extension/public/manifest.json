@@ -51,5 +51,6 @@
     "https://id.kick.com/*",
     "https://www.googleapis.com/youtube/v3/*",
     "https://www.youtube.com/feeds/*"
-  ]
+  ],
+  "optional_host_permissions": ["https://api.anthropic.com/*", "https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
 }

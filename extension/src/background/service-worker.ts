@@ -31,6 +31,7 @@ import { updateClip, type LocalClip } from "@/local/clips";
 import { createTwitchClip } from "@/platforms/twitch-clips";
 import type { Approval, ApprovalAction } from "@/local/approvals";
 import { createProcessingManager } from "./processing-manager";
+import { createContentManager } from "./content-manager";
 import { hasPendingWork } from "@/processing/pending";
 
 /** Optional: also create a native Twitch clip for each clip of a Twitch stream. */
@@ -118,8 +119,15 @@ const chat = createChatManager({
 });
 const approvals = createApprovalManager();
 
+// 3.0 metadata and viral-potential score, written when a clip's formats are ready.
+const content = createContentManager({
+  ensureOffscreen: defaultCaptureDeps.ensureOffscreen,
+  toOffscreen: (m) => chrome.runtime.sendMessage(m),
+});
+
 // 3.0 processing: formats are made in the offscreen document; it stays open until the queue is done.
 const processing = createProcessingManager({
+  onAssetReady: async (_assetId, clipId) => void (await content.prepare(clipId, await getSettings()).catch((e) => log("content_failed", { clipId, error: e instanceof Error ? e.message : "?" }))),
   ensureOffscreen: defaultCaptureDeps.ensureOffscreen,
   kick: () => chrome.runtime.sendMessage({ target: "offscreen", type: "process/kick" }),
   async closeIfIdle() {
@@ -211,7 +219,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedSender(sender)) return false;
   // Messages addressed to the offscreen document are not for the worker.
   if ((message as { target?: unknown } | null)?.target === "offscreen") return false;
-  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval, processing).then(sendResponse);
+  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval, processing, content).then(sendResponse);
   return true; // keep the channel open for the async response
 });
 

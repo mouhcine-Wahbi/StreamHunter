@@ -7,6 +7,7 @@
 import { startEngine, type CaptureEngine } from "@/capture/engine";
 import type { OffscreenRequest, RuntimeRequest } from "@/types/messages";
 import { isBusy, runQueue } from "@/processing/runner";
+import { localPromptApi } from "@/metadata/generate";
 
 const engines = new Map<number, CaptureEngine>();
 (globalThis as { __streamhunterEngines?: typeof engines }).__streamhunterEngines = engines;
@@ -32,6 +33,24 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     case "process/busy":
       sendResponse({ ok: true, busy: isBusy() });
       return false;
+    // 3.0 on-device AI (Chrome's Prompt API lives in documents).
+    case "ai/availability": {
+      const port = localPromptApi();
+      void (port ? port.availability() : Promise.resolve("absent")).then((state) => sendResponse({ ok: true, state }));
+      return true;
+    }
+    case "ai/prompt": {
+      const port = localPromptApi();
+      if (!port) {
+        sendResponse({ ok: false, error: "absent" });
+        return false;
+      }
+      void port.prompt(m.system, m.user, m.schema).then(
+        (text) => sendResponse({ ok: true, text }),
+        (e: unknown) => sendResponse({ ok: false, error: e instanceof Error ? e.message : "failed" }),
+      );
+      return true;
+    }
     case "capture/start": {
       if (typeof m.streamId !== "string" || !m.options || typeof m.slot !== "number") return false;
       const slot = m.slot;

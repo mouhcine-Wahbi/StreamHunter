@@ -8,6 +8,8 @@ import { ApprovalError, type Approval, type ApprovalAction } from "@/local/appro
 import { requestAnalysis, requestSourceClip } from "@/local/sources";
 import { RightsError } from "@/local/rights";
 import { ProcessingError, type ProcessingManager } from "./processing-manager";
+import type { ContentManager } from "./content-manager";
+import { ContentError } from "@/local/content";
 
 const NO_CAPTURE = "Capture is only available in the installed extension";
 
@@ -21,6 +23,8 @@ export async function handleMessage(
   decide?: (id: string, action: ApprovalAction) => Promise<Approval>,
   /** 3.0 processing queue (formats, analyses of authorized files). */
   processing?: ProcessingManager,
+  /** 3.0 metadata and score. */
+  content?: ContentManager,
 ): Promise<RuntimeResponse> {
   if (!isRuntimeRequest(message)) return { ok: false, error: "Unknown message" };
   try {
@@ -87,6 +91,16 @@ export async function handleMessage(
           throw e;
         }
       }
+      case "metadata/generate":
+        if (!content) return { ok: false, error: "Metadata is only available in the installed extension" };
+        try {
+          return { ok: true, data: await content.prepare(Number(message.clipId), await getSettings(), { regenerate: true, resetEdits: Boolean(message.resetEdits) }) };
+        } catch (e) {
+          if (e instanceof ContentError) return { ok: false, error: e.message };
+          throw e;
+        }
+      case "ai/status":
+        return { ok: true, data: content ? await content.status() : { onDevice: "absent", where: null } };
       case "process/clip-made":
       case "process/asset-done":
       case "process/idle":

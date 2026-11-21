@@ -18,6 +18,8 @@ import { CAPTURES_KEY, INITIAL_CAPTURE_STATE } from "@/types/capture";
 import type { Streamer } from "@/types/api";
 import { createProcessingManager } from "@/background/processing-manager";
 import { listAssets, patchAsset, queueAssets } from "@/local/assets";
+import { prepareContent, type ContentClip } from "@/local/content";
+import { DEFAULT_SETTINGS } from "@/types/settings";
 
 /** Wires runtime messages to the real handler, as the service worker would. */
 function installWorker() {
@@ -536,6 +538,31 @@ describe("3.0 output formats in the dashboard", () => {
     await waitFor(async () => expect((await listAssets(c.id))[0]).toMatchObject({ status: "queued", layout: { kind: "action" }, layout_source: "clip" }));
     expect(kicks.length).toBe(1);
     expect(await screen.findByText("Waiting")).toBeInTheDocument();
+  });
+
+  it("X Clips shows the score with its reasons and saves your own post text (credit kept)", async () => {
+    mockFetch(() => null);
+    installWorker();
+    const c = await saveClip({ candidateId: 0, sessionId: null, streamerId: 0, streamerName: "StreamerOne", platform: "twitch", title: "Big clutch", startedAt: Date.now(), durationSec: 30, width: 1920, height: 1080, score: 80, blob: new Blob([new Uint8Array(4)], { type: "video/mp4" }), reasons: ["Loud laughter"] });
+    const s = structuredClone(DEFAULT_SETTINGS);
+    s.ai.onDevice = false;
+    await prepareContent(c.id, s);
+    window.location.hash = "/xclips";
+    render(<App />);
+    expect(await screen.findByText("Big clutch")).toBeInTheDocument();
+    expect(screen.getByText(/Low potential|Medium potential|High potential/)).toBeInTheDocument();
+    expect(screen.getByText(/not a prediction of views/)).toBeInTheDocument();
+    expect(screen.getByText(/No live audience data/)).toBeInTheDocument();
+    expect(screen.getByText(/· Local templates/)).toBeInTheDocument();
+    const post = screen.getByLabelText(/^Post \(/);
+    await userEvent.clear(post);
+    await userEvent.type(post, "What a clutch");
+    await userEvent.click(screen.getByRole("button", { name: "Save X text" }));
+    await waitFor(async () => {
+      const row = await db.get<ContentClip>("clips", c.id);
+      expect(row!.metadata!.edited).toEqual(["x"]);
+      expect(row!.metadata!.byDestination.x.description).toMatch(/^What a clutch\n\nCredit: StreamerOne on Twitch/);
+    });
   });
 
   it("My Creators saves a facecam layout and creator rights with evidence", async () => {

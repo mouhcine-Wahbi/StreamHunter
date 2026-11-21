@@ -55,6 +55,20 @@ Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-befor
 | Preview player in Short-form Clips / X Clips | ⚠️ not verified | The automated Chrome used for tests never plays any video (even a plain data: URL), so the in-page player couldn't be checked; the files themselves were checked with ffprobe/ffmpeg |
 | Processing while recording | 🧪 | Both run in the same offscreen document; CPU impact on a live recording not measured yet |
 
+### Phase 6 — Metadata and viral-potential score
+
+| Feature | Status | Evidence / notes |
+|---|---|---|
+| Title / description / caption / post and hashtags per destination (YouTube Shorts, TikTok, X), built only from facts StreamHunter has (creator, platform, game, detection reasons, length, original link) | ✅ unit + UI tests; tested in real Chrome (templates) | Generators may phrase the facts; invented links are removed |
+| Platform limits enforced on every output, including your edits: YouTube title 100 / description 5000; TikTok caption 2200; X 280 with links counted as 23; hashtag caps 5 / 5 / 2 | unit tests | Limits are from the platforms' documentation, not yet checked against the platforms themselves |
+| Creator credit ("Credit: <creator> on <platform> <link>"), on by default, setting to turn off | unit + UI tests | |
+| Fallback order: Chrome on-device AI → your own provider → local templates; every skipped option's reason is shown | unit tests; on-device availability tested in real Chrome | Real Chrome 158: `LanguageModel` is present in the service worker and reports **downloadable** (the model isn't on this Mac), so the real run correctly fell back to templates with the reason shown. **On-device generation itself has not run for real**; StreamHunter never starts the ~22 GB download on its own |
+| Your provider: Claude with your own Anthropic key (official SDK, `claude-opus-5-5` by default, structured JSON output, server-side refusal fallback enabled) or any OpenAI-compatible endpoint (e.g. a local model server) | 🧪 tested against a fake API | The Claude request was checked through the real SDK against a fake endpoint (URL, auth, model, JSON schema). **Not tested with a real Anthropic key or a real local server.** Keys stay in this browser; Chrome asks for permission to contact the provider when you save a key |
+| Your edits are kept when the text is written again; "replace my edits" resets them | unit + UI tests | |
+| Viral-potential score 0–100: six factors with your weights (hook, emotion, audience reaction, build-up, shareability, platform fit), each listing what it measured | unit + UI tests; shown in real Chrome | An estimate from measurements, never a view prediction |
+| Tiers: high ≥ 85 (your threshold) = eligible for automatic publishing; medium ≥ 60 = needs approval; low = manual only. High with confidence < 50% becomes medium | unit tests | Confidence = share of the weight that was actually measured × the detector's confidence |
+| Settings: score weights and thresholds; AI (on-device on/off with its state, provider, model, endpoint, key — never shown again after saving) | typecheck + existing Settings tests | Key saving needs Chrome's permission prompt, not exercised in automation |
+
 ## v2.0 — Multi-platform automatic clipping (released)
 
 Labels: **✅ tested for real** (real Chrome, real live pages) · **🧪 implemented, tested against documented

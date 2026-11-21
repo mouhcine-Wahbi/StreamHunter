@@ -20,6 +20,8 @@ import { LAYOUT_LABEL, type LayoutKind } from "@/processing/layout";
 import { useObjectUrl } from "@/pages/clips/ClipCard";
 import type { Page } from "@/types/api";
 import { formatRelative } from "@/utils/format";
+import type { ContentClip } from "@/local/content";
+import { ContentPanel } from "./ContentPanel";
 
 const STATUS: Record<AssetStatus, { label: string; tone: BadgeTone }> = {
   queued: { label: "Waiting", tone: "neutral" },
@@ -90,6 +92,7 @@ function FormatRow({ clip, asset, kind, onChanged }: { clip: LocalClip; asset: A
           </p>
         ))}
         {(asset?.error || error) && <p className="text-danger">{error ?? asset!.error}</p>}
+        <ContentPanel clip={clip as ContentClip} dests={vertical ? ["youtube", "tiktok"] : ["x"]} onChanged={onChanged} />
         <div className="flex flex-wrap items-center gap-2 pt-1">
           {vertical && (
             <Select aria-label={`Layout for ${clip.title ?? "clip"}`} value={layout} onChange={(e) => setLayout(e.target.value as LayoutKind | "")} className="w-56">

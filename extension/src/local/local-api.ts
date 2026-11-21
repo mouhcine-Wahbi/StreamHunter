@@ -8,6 +8,7 @@ import { clipStats, deleteClip, listClips, updateClip, type LocalClip } from "./
 import { ACTIVITY_KEY, type ChatActivity } from "@/background/chat-manager";
 import { v3Routes } from "./v3-routes";
 import { RightsError } from "./rights";
+import { ContentError } from "./content";
 import {
   addStreamer,
   LocalError,
@@ -221,6 +222,7 @@ export class LocalApi extends ApiClient {
 function toApiError(e: unknown): ApiError {
   if (e instanceof ApiError) return e;
   if (e instanceof LocalError) return new ApiError("http", e.message, e.status, { error: { code: e.code, message: e.message } });
+  if (e instanceof ContentError) return new ApiError("http", e.message, 422, { error: { code: "content", message: e.message } });
   if (e instanceof RightsError) return new ApiError("http", e.message, 422, { error: { code: "rights", message: e.message } });
   if (e instanceof PlatformError) {
     // Never 401: that would read as "signed out of StreamHunter"; it's the platform that refused.

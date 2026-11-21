@@ -2,9 +2,14 @@
  * StreamHunter 3.0 settings: content discovery, output formats, scoring, publishing and AI.
  * Each section only edits its own part of the settings; everything is sanitized on save.
  */
+import { useEffect, useState } from "react";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { Switch } from "@/components/ui/Switch";
+import { Button } from "@/components/ui/Button";
 import { YT_CATEGORIES } from "@/discovery/runner";
+import { DEFAULT_CLAUDE_MODEL, getAiKeys, setAiKey, type AiKeys, type OnDeviceState } from "@/metadata/generate";
+import { FACTOR_LABEL, type FactorKey } from "@/scoring/score";
+import { sendRequest } from "@/services/runtime";
 import type { DeepPartial, Settings } from "@/types/settings";
 import { KeywordEditor, NumberField, Section } from "./sections";
 
@@ -135,11 +140,134 @@ export function FormatsSection({ s, update }: V3SectionProps) {
   );
 }
 
+export function ScoringSection({ s, update }: V3SectionProps) {
+  const sc = s.scoring;
+  const sum = Object.values(sc.weights).reduce((a, b) => a + b, 0);
+  return (
+    <Section
+      id="scoring"
+      title="Viral-potential score"
+      description="An estimate from what StreamHunter measured about each clip (reactions, timing, fit for each platform), never a prediction of views. Weights are relative; the score is the weighted average. High: eligible for automatic publishing when every check passes. Medium: needs your approval. Low: manual review only. Low confidence never publishes automatically."
+    >
+      {(Object.keys(sc.weights) as FactorKey[]).map((k) => (
+        <Field key={k} inline label={FACTOR_LABEL[k]} hint={sum ? `${Math.round((sc.weights[k] / sum) * 100)}% of the score` : undefined}>
+          {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={sc.weights[k]} min={0} max={100} onCommit={(v) => void update({ scoring: { weights: { [k]: v } } })} />}
+        </Field>
+      ))}
+      <Field inline label="High potential from" hint="Initially 85.">
+        {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={sc.publishThreshold} min={1} max={100} onCommit={(publishThreshold) => void update({ scoring: { publishThreshold } })} />}
+      </Field>
+      <Field inline label="Medium potential from" hint="Below this: low potential.">
+        {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={sc.reviewThreshold} min={0} max={99} onCommit={(reviewThreshold) => void update({ scoring: { reviewThreshold } })} />}
+      </Field>
+    </Section>
+  );
+}
+
+const ON_DEVICE_TEXT: Record<OnDeviceState, string> = {
+  available: "Available on this computer.",
+  downloadable: "Supported, but the model isn't downloaded yet (about 22 GB of free disk space needed).",
+  downloading: "Downloading the model…",
+  unavailable: "Not supported on this computer.",
+  absent: "This Chrome has no built-in AI.",
+};
+
+/** Optional host permissions are asked for only when you choose a provider. */
+async function allowOrigin(url: string): Promise<boolean> {
+  try {
+    const u = new URL(url);
+    return await chrome.permissions.request({ origins: [`${u.protocol}//${u.hostname}/*`] });
+  } catch {
+    return false;
+  }
+}
+
+export function AiSection({ s, update }: V3SectionProps) {
+  const ai = s.ai;
+  const [state, setState] = useState<OnDeviceState | null>(null);
+  const [keys, setKeys] = useState<{ [K in keyof AiKeys]: boolean }>({ anthropic: false, openai_compatible: false });
+  const [draft, setDraft] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const refreshKeys = () => void getAiKeys().then((k) => setKeys({ anthropic: Boolean(k.anthropic), openai_compatible: Boolean(k.openai_compatible) }));
+  useEffect(() => {
+    void sendRequest({ type: "ai/status" }).then((r) => setState(r.onDevice), () => setState("absent"));
+    refreshKeys();
+  }, []);
+  const provider = ai.external;
+  const saveKey = async () => {
+    setMsg(null);
+    try {
+      if (provider === "none") return;
+      const origin = provider === "anthropic" ? "https://api.anthropic.com/" : ai.endpoint;
+      if (!(await allowOrigin(origin))) throw new Error(`Chrome didn't allow StreamHunter to contact ${new URL(origin).hostname}.`);
+      await setAiKey(provider, draft);
+      setDraft("");
+      setMsg("Key saved on this computer.");
+      refreshKeys();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not save the key");
+    }
+  };
+  return (
+    <Section
+      id="ai"
+      title="Titles, descriptions and hashtags"
+      description="Written from facts StreamHunter has about each clip (creator, platform, game, why it was detected, length). Order: Chrome's on-device AI when available, then your own provider if you set one, then local templates. None is required. Only those facts are sent to a provider, never video."
+    >
+      <Field inline label="Use on-device AI" hint={state ? ON_DEVICE_TEXT[state] : "Checking…"}>
+        {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Use on-device AI" checked={ai.onDevice} onChange={(onDevice) => void update({ ai: { onDevice } })} />}
+      </Field>
+      <Field inline label="Your provider" hint={provider === "anthropic" ? "Billed to your Anthropic account. Requests use your key directly from this browser." : provider === "openai_compatible" ? "Any OpenAI-compatible Chat Completions endpoint, e.g. a local model server." : "Off: on-device AI or templates only."}>
+        {({ id, describedBy }) => (
+          <Select id={id} aria-describedby={describedBy} className="w-60" value={provider} onChange={(e) => void update({ ai: { external: e.target.value as Settings["ai"]["external"] } })}>
+            <option value="none">None</option>
+            <option value="anthropic">Claude (Anthropic API key)</option>
+            <option value="openai_compatible">OpenAI-compatible endpoint</option>
+          </Select>
+        )}
+      </Field>
+      {provider !== "none" && (
+        <>
+          {provider === "openai_compatible" && (
+            <Field inline label="Endpoint URL" hint="Base URL ending in /v1.">
+              {({ id, describedBy }) => <Input id={id} aria-describedby={describedBy} className="w-72" defaultValue={ai.endpoint} placeholder="http://localhost:11434/v1" onBlur={(e) => void update({ ai: { endpoint: e.target.value.trim() } })} />}
+            </Field>
+          )}
+          <Field inline label="Model" hint={provider === "anthropic" ? `Empty = ${DEFAULT_CLAUDE_MODEL}.` : "Required."}>
+            {({ id, describedBy }) => <Input id={id} aria-describedby={describedBy} className="w-60" defaultValue={ai.model} placeholder={provider === "anthropic" ? DEFAULT_CLAUDE_MODEL : "model name"} onBlur={(e) => void update({ ai: { model: e.target.value.trim() } })} />}
+          </Field>
+          <Field label="API key" hint={keys[provider] ? "A key is saved (never shown again). Enter a new one to replace it." : provider === "openai_compatible" ? "Optional for local servers." : "Stored only in this browser."}>
+            {({ id, describedBy }) => (
+              <div className="flex gap-2">
+                <Input id={id} aria-describedby={describedBy} type="password" autoComplete="off" value={draft} onChange={(e) => setDraft(e.target.value)} className="w-72" placeholder={keys[provider] ? "••••••••" : "Paste your key"} />
+                <Button size="sm" variant="secondary" disabled={!draft.trim()} onClick={() => void saveKey()}>
+                  Save key
+                </Button>
+                {keys[provider] && (
+                  <Button size="sm" variant="ghost" onClick={() => void setAiKey(provider, null).then(refreshKeys)}>
+                    Remove
+                  </Button>
+                )}
+              </div>
+            )}
+          </Field>
+          {msg && <p className="text-xs text-fg-muted">{msg}</p>}
+        </>
+      )}
+      <Field inline label="Credit the creator" hint={'Adds "Credit: <creator> on <platform> <link>" to every description and post.'}>
+        {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Credit the creator" checked={s.publishing.attribution} onChange={(attribution) => void update({ publishing: { attribution } })} />}
+      </Field>
+    </Section>
+  );
+}
+
 export function V3Sections(props: V3SectionProps) {
   return (
     <>
       <DiscoverySection {...props} />
       <FormatsSection {...props} />
+      <ScoringSection {...props} />
+      <AiSection {...props} />
     </>
   );
 }

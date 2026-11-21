@@ -8,34 +8,38 @@ Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possi
 
 Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-before-3.0` points at the last 2.0 commit.
 
-### 3.0 summary (phases 1–10 implemented)
+### 3.0 summary (phases 1–11 implemented)
+
+**Product decision (phase 11): no automatic publishing.** StreamHunter prepares clips, versions,
+text and a score; you download the MP4s and upload them yourself. The YouTube / TikTok / X
+publishing integrations built in phases 7–8 (sign-in, upload jobs, retries, notifications, Studio,
+Performance, publishing settings, the TikTok token server) were removed. Discovery and monitoring
+of YouTube, Twitch and Kick are unchanged. No social media account is needed.
 
 **Tested for real (Chrome 158, Apple M5):**
 * Recording approvals.
 * Vertical and landscape formats with all three layouts, checked frame by frame.
 * Analysing and cutting authorized files.
-* The processing queue's lifecycle.
+* The processing queue's lifecycle (run again after the removal).
 * On-device AI detection (reports "downloadable" on this Mac) with the template fallback.
 * Score and text written automatically for every new clip.
-* The rights block stopping a publishing job before anything is sent.
-* Studio and Settings → Publishing rendering, and the redirect URI.
+* Clip Library with real processed clips: status, per-version downloads, recommendation, Copy all
+  (the clipboard held the YouTube title, description and hashtags).
+* Database upgrade from a profile made by the publishing build: the jobs store is dropped, clips kept.
 
 **Tested only against fake servers built from each platform's documentation:**
 * Claude and OpenAI-compatible metadata generation.
-* YouTube, TikTok and X sign-in, upload, confirmation and metrics.
 
-**Not verified yet (needs your real accounts and apps):**
-1. Publishing anything to YouTube Shorts, TikTok or X: sign-in, upload, confirmation, privacy.
-   Google's and TikTok's restrictions on unverified or unaudited apps (private-only posts) apply.
-2. Whether TikTok accepts a `https://<extension-id>.chromiumapp.org/` redirect URI, and your
-   token server.
-3. Real performance numbers from each platform.
-4. Metadata from a real Anthropic key or a real local model server, and from Chrome's on-device
+**Not verified yet:**
+1. Metadata from a real Anthropic key or a real local model server, and from Chrome's on-device
    model once downloaded (about 22 GB).
-5. The in-page video preview player. The automated Chrome never plays video; the files were checked
+2. The in-page video preview player. The automated Chrome never plays video; the files were checked
    with ffprobe and ffmpeg instead.
-6. CPU impact of processing while several streams are recording.
-7. Publishing notifications in real Chrome.
+3. CPU impact of processing while several streams are recording.
+4. The old "sh-publishing" timer being replaced on a real extension update. Unit-tested; in the
+   automated Chrome a copied old profile kept running its cached old service worker, so the update
+   path couldn't be observed there.
+5. Clicking a download in a real (non-automated) Chrome window and opening the saved file.
 
 ### Phase 3 — Recording approvals and recording integration
 
@@ -95,48 +99,34 @@ Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-befor
 | Your provider: Claude with your own Anthropic key (official SDK, `claude-opus-5-5` by default, structured JSON output, server-side refusal fallback enabled) or any OpenAI-compatible endpoint (e.g. a local model server) | 🧪 tested against a fake API | The Claude request was checked through the real SDK against a fake endpoint (URL, auth, model, JSON schema). **Not tested with a real Anthropic key or a real local server.** Keys stay in this browser; Chrome asks for permission to contact the provider when you save a key |
 | Your edits are kept when the text is written again; "replace my edits" resets them | unit + UI tests | |
 | Viral-potential score 0–100: six factors with your weights (hook, emotion, audience reaction, build-up, shareability, platform fit), each listing what it measured | unit + UI tests; shown in real Chrome | An estimate from measurements, never a view prediction |
-| Tiers: high ≥ 85 (your threshold) = eligible for automatic publishing; medium ≥ 60 = needs approval; low = manual only. High with confidence < 50% becomes medium | unit tests | Confidence = share of the weight that was actually measured × the detector's confidence |
+| Tiers: high ≥ 85 (your threshold) = strong candidate; medium ≥ 60 = worth reviewing; low = probably not worth posting. High with confidence < 50% becomes medium | unit tests | Confidence = share of the weight that was actually measured × the detector's confidence |
 | Settings: score weights and thresholds; AI (on-device on/off with its state, provider, model, endpoint, key — never shown again after saving) | typecheck + existing Settings tests | Key saving needs Chrome's permission prompt, not exercised in automation |
 
-### Phase 7 — Publishing jobs (YouTube Shorts, TikTok, X)
+### Phases 7–8 — Publishing (removed in phase 11)
 
-**No real-platform publishing has been tested.** Everything below was tested against fake servers built from each platform's documentation (checked 2026-11-21), not against YouTube, TikTok or X. See docs/PUBLISHING.md.
-
-| Feature | Status | Evidence / notes |
-|---|---|---|
-| One independent job per clip and destination, with history (state, time, reason) | unit tests | States: needs approval, waiting, blocked, queued, uploading, confirming, published, failed, cancelled |
-| Checks before every attempt, in order: destination on, rights for that destination, account connected, right file ready, text written, not a duplicate, tier/approval, daily limit | unit tests; rights block tested in real Chrome | Real Chrome 158: a job for a clip with no rights was blocked with "Rights unclear…" and nothing was sent |
-| Automatic jobs only with auto-publishing on, rights for the destination, and high or medium potential; medium waits for approval; low never automatic | unit tests | Your approval never bypasses rights |
-| Marked published only on the platform's confirmation (YouTube `processed`, TikTok `PUBLISH_COMPLETE`, X post id) | 🧪 fake servers | |
-| YouTube: implicit-grant sign-in with your OAuth client ID (no secret); resumable upload; privacy from Settings | 🧪 fake servers | Not tested with a real Google project |
-| X: OAuth 2.0 PKCE as a public client (no secret), refresh; v2 chunked media upload + STATUS; post with media | 🧪 fake servers | Not tested with a real X app or API plan |
-| TikTok: Login Kit (web) code exchanged by **your own token server** (TikTok requires the secret to stay on a server); creator info → Direct Post init → chunked PUT → status | 🧪 fake servers | The token server is yours to run (two-request contract in docs/PUBLISHING.md). Unaudited TikTok apps can only post `SELF_ONLY`. Whether TikTok accepts a `chromiumapp.org` redirect URI is **unverified** |
-| Retries with backoff for network / 429 / 5xx up to Settings → retries; 401/403/400 not retried; an interrupted X post is never retried automatically | unit tests | |
-| Desktop notification on a confirmed post and on a final failure | typecheck | Not checked in real Chrome |
-| Performance numbers from the platforms (YouTube statistics, X public_metrics, TikTok video/query), every 6 h for 30 days | 🧪 fake servers | TikTok's video/query fields not checked against a real account |
-| Found and fixed: TikTok post ids are int64 JSON numbers; a plain JSON parse rounded them (wrong link). They are now read from the raw text | unit test | |
-| X limits note corrected: StreamHunter's 140 s / 512 MB are stricter than X requires for posts (20 min / 8 GB per X's docs); kept because they fit every account | | |
-
-### Phase 8 — Publishing Studio, Performance, Overview, Settings, System Health
-
-| Feature | Status | Evidence / notes |
-|---|---|---|
-| Publishing Studio: approval queue, in progress, needs attention (blocked/failed with the reason), waiting, published (with the post link); approve / try again / cancel; per-job history; publish any clip yourself (counts as approval, every other check still applies) | UI tests; screenshot in real Chrome | |
-| Performance: totals per destination and per post, only numbers the platform reported ("—" when missing, never estimated) | UI test | No real numbers yet (nothing published for real) |
-| Overview: "Publishing approvals" and "Published (7 days)" tiles | typecheck + existing Overview tests | |
-| Settings → Publishing: automatic publishing, destinations and daily limits, YouTube visibility, TikTok privacy, retries; accounts with your client ID / key (+ TikTok token server, https only), redirect URI shown, Connect (asks Chrome for the platform's host permission first) / Disconnect; no secret field anywhere | UI test; screenshot in real Chrome | Real Chrome reports the redirect URI `https://<extension-id>.chromiumapp.org/`, as shown. Connect itself not run (no real apps) |
-| System Health: publishing card (accounts, problems, job counts) | typecheck | |
+Publishing jobs for YouTube Shorts, TikTok and X, the Publishing Studio, Performance and the
+publishing settings were built and tested against fake servers only, then **removed** at your
+request: StreamHunter doesn't post. Their history is in commits `42841b8` and `c316dca`.
 
 ### Phase 9 — Tests and hardening
 
 | Item | Status | Evidence / notes |
 |---|---|---|
-| Found and fixed: an upload-progress write could land after the final state and turn "published" back into "uploading" | regression test | The test was checked to fail with the old code and pass with the fix |
-| The video file and your token are sent only to the platform's own upload hosts (https, `*.googleapis.com` / `*.tiktokapis.com`); anything else fails with nothing sent | regression tests | |
-| Post links shown in the UI are https links on youtube.com / tiktok.com / x.com only; usernames are encoded | unit test | |
-| No content scripts are injected, so stored tokens and keys are readable only by the extension's own pages and worker | code review | |
-| Full suite: 248 tests (unit, UI, fake platform servers) | ✅ | `npx vitest run` |
-| Real Chrome regression (Phase 5 run again with everything on): formats made, analysis and cut worked, then score + text were written for each new clip, no publishing job for low potential, offscreen document closed | ✅ tested for real | Chrome 158, Apple M5 |
+| No content scripts are injected, so stored credentials and keys are readable only by the extension's own pages and worker | code review | |
+| Full suite: 223 tests after phase 11 (unit, UI, fake platform servers) | ✅ | `npx vitest run` |
+| Real Chrome regression (Phase 5 run again with everything on): formats made, analysis and cut worked, then score + text were written for each new clip, offscreen document closed | ✅ tested for real | Chrome 158, Apple M5 |
+
+### Phase 11 — Publishing removed; Clip Library for manual upload
+
+| Item | Status | Evidence / notes |
+|---|---|---|
+| Removed: publishing modules (accounts, platforms, checks, runner, plan), jobs, Studio and Performance screens, Settings → Publishing, Overview publishing tiles, System Health publishing card, publishing notifications, `publish/run` message, the TikTok token server, and the googleapis / X / TikTok optional host permissions | ✅ typecheck, tests, build | `identity` stays (Twitch sign-in); YouTube discovery keeps its fixed `youtube/v3` host permission |
+| Kept: discovery and monitoring (YouTube, Twitch, Kick), clip generation, vertical and landscape versions, score, per-platform titles / descriptions / hashtags, creator credit, rights, downloads | ✅ full suite; processing run again in real Chrome | |
+| Update from the publishing build: database v4 drops the jobs store; saved publishing accounts deleted; old timer replaced by a maintenance timer; settings keep your credit choice and score thresholds under the new names | unit tests; DB upgrade tested in real Chrome | See "Not verified" item 4 |
+| Clip Library: preview of each version; creator, platform, source link (or "from your file"); detection time and offset; score with reasons; platform recommendation from the platform-fit factor; each format with its status; a separate download per version | ✅ UI test; tested in real Chrome | |
+| Copy title (YouTube only; TikTok and X have no title field), description, hashtags, and all, per platform | ✅ UI test; Copy all tested in real Chrome | Copying needs the window focused (browser rule); the button says "Copy failed" otherwise |
+| Filters: creator, format, minimum score, detection date range, status (generating / ready / failed) | ✅ UI test | |
+| Works with no social media account: no publishing screens, settings or connect buttons | ✅ UI test | |
 
 ## v2.0 — Multi-platform automatic clipping (released)
 

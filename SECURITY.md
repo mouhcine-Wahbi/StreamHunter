@@ -24,21 +24,13 @@
    tab stays audible, nothing is encoded while nobody is live or monitoring is paused or stopped,
    and capture ends with **Stop capture** or when the tab closes. Only clips are saved, locally, within the
    storage limit. Nothing is uploaded.
-6. **Official APIs only.** Twitch Helix, Twitch EventSub, Kick's public API, and (3.0) the YouTube
-   Data API, TikTok Content Posting API and X API v2 for publishing. No scraping, no unofficial chat
+6. **Official APIs only.** Twitch Helix, Twitch EventSub, Kick's public API and the YouTube
+   Data API (discovery only). No scraping, no unofficial chat
    sockets, no stream downloaders, no DRM or restriction bypasses.
-7. **Publishing (3.0) only with rights and confirmation.** Nothing is published unless your rights
-   for the clip's source include that destination, the account is yours and connected, and the
-   checks in docs/PUBLISHING.md pass. Medium-potential clips need your approval; low never publishes
-   automatically. A post counts as published only when the platform confirms it. A post that may
-   already exist is never retried automatically.
-8. **No secrets for publishing in the extension.** YouTube (implicit grant) and X (PKCE, public
-   client) need no client secret. TikTok requires its secret on a server, so the authorization code
-   is exchanged by **your own token server**. Access and refresh tokens are kept in
-   `chrome.storage.local` and sent only to that platform's API. The video file and the token are
-   sent only to the platform's own upload hosts (`*.googleapis.com`, `*.tiktokapis.com`,
-   `api.x.com`). Pages never receive tokens, only account names and status.
-9. **AI providers (3.0) are optional and yours.** Only facts about a clip (creator, platform, game,
+7. **No automatic publishing.** StreamHunter doesn't connect to social media accounts or post
+   anything. It prepares clips, text and a score; you download the files and upload them yourself.
+   Rights you record (including "permission to post" and its destinations) are information for you.
+8. **AI providers (3.0) are optional and yours.** Only facts about a clip (creator, platform, game,
    detection reasons, length, original link), never video, go to the provider you chose: your
    Anthropic key or your OpenAI-compatible endpoint. The key is kept in `chrome.storage.local` and
    never shown again. Chrome's on-device model runs locally.
@@ -53,14 +45,14 @@
 | `sidePanel` | Highlight feed beside the stream |
 | `activeTab` | Read the URL of the tab the popup was opened on (which channel to capture) |
 | `tabCapture`, `offscreen` | Capture that tab in an offscreen document |
-| `identity` | Sign in with Twitch, and (3.0) connecting your YouTube / X / TikTok publishing accounts (`launchWebAuthFlow`) |
+| `identity` | Sign in with Twitch (`launchWebAuthFlow`) |
 | `system.cpu`, `system.memory` | Overload protection while recording several streams (whole-machine CPU and free memory; nothing is sent anywhere) |
 | Keyboard shortcut (`commands`, Alt+Shift+R) | Arm the current tab as a recorder; it counts as the click Chrome requires |
 | Host access: `api.twitch.tv`, `id.twitch.tv`, `api.kick.com`, `id.kick.com`, `www.googleapis.com/youtube/v3/*`, `www.youtube.com/feeds/*` | The official APIs and YouTube's public upload feed. The Twitch chat WebSocket (`eventsub.wss.twitch.tv`) needs no host permission |
 
 **Optional host access (3.0), asked for only when you set something up:** `api.anthropic.com` or your
-own AI endpoint (when you save an AI key); `www.googleapis.com`, `api.x.com`, `open.tiktokapis.com` /
-`*.tiktokapis.com` and your TikTok token server (when you connect a publishing account).
+own AI endpoint (when you save an AI key). StreamHunter has no access to YouTube, TikTok or X
+upload APIs: it never posts. You upload the clips you download yourself.
 
 No `tabs`, `<all_urls>`, `downloads`, `cookies` or content scripts.
 
@@ -77,7 +69,7 @@ No `tabs`, `<all_urls>`, `downloads`, `cookies` or content scripts.
 
 * Anyone with access to this Chrome profile can see the saved app credentials and clips. Use a
   profile you control, and **Remove** credentials in Settings → Platforms when you're done.
-* The same goes for publishing tokens and AI keys (3.0). **Disconnect** accounts in Settings →
-  Publishing and remove keys in Settings → AI when you no longer need them. You can also revoke
-  StreamHunter's access in your Google, X or TikTok account settings.
+* The same goes for AI keys (3.0): remove them in Settings → AI when you no longer need them.
+  StreamHunter stores no social media accounts or tokens; publishing accounts saved by earlier 3.0
+  test builds are deleted on update.
 * Clips and highlights are deleted when the extension is removed or its site data is cleared.

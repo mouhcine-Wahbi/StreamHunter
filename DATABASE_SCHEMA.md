@@ -3,7 +3,16 @@
 Everything is stored in the browser profile where the extension is installed. Nothing is synced or
 uploaded.
 
-## IndexedDB `streamhunter` (version 2) — `extension/src/local/db.ts`
+## IndexedDB `streamhunter` (version 4) — `extension/src/local/db.ts`
+
+* Version 3 (3.0) added `candidates`, `sources`, `sourceBlobs`, `assets` (index `clip`),
+  `assetBlobs` and `rights`. Clip rows gained `metadata` (title / description / hashtags per
+  platform) and `viral` (the viral-potential score).
+* Version 4 removes the `jobs` store that 3.0 test builds used for publishing. StreamHunter doesn't
+  publish; you upload clips yourself. On start the worker also deletes the old
+  `sh.publishAccounts` storage key and the `sh-publishing` alarm.
+
+The stores below are the version 2 ones, unchanged since.
 
 | Store | Key | Indexes | Contents |
 |---|---|---|---|

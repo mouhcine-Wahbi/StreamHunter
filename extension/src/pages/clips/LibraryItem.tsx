@@ -268,7 +268,7 @@ export function LibraryItem({ clip, assets, streamer, onChanged }: { clip: Libra
             )}
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
               <span className="font-medium text-fg">{clip.streamer_display_name}</span>
-              <PlatformBadge platform={clip.platform} />
+              {["twitch", "kick", "youtube"].includes(clip.platform) && <PlatformBadge platform={clip.platform} />}
               {clip.category && <span>{clip.category}</span>}
               {source && (
                 <a href={source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent underline">

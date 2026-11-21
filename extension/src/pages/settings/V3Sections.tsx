@@ -1,5 +1,5 @@
 /**
- * StreamHunter 3.0 settings: content discovery, output formats, scoring, publishing and AI.
+ * StreamHunter 3.0 settings: content discovery, output formats, scoring, titles/descriptions and AI.
  * Each section only edits its own part of the settings; everything is sanitized on save.
  */
 import { useEffect, useState } from "react";

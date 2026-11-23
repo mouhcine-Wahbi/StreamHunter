@@ -7,7 +7,8 @@ import type { VerticalLayout } from "@/types/api";
 import { db } from "./db";
 import type { LayoutKind } from "@/processing/layout";
 
-export type AssetKind = "vertical" | "landscape";
+/** 4.0: "edited_vertical" is a Short made by the editor (companion) from the original clip; never queued here. */
+export type AssetKind = "vertical" | "landscape" | "edited_vertical";
 export type AssetStatus = "queued" | "processing" | "ready" | "failed";
 
 export interface Asset {
@@ -31,8 +32,21 @@ export interface Asset {
   reused_original: boolean;
   has_thumbnail: boolean;
   notes: string[];
+  /** Vertical: where the "follow the action" window was, [seconds, 0..1] every 0.25 s. */
+  action_path?: [number, number][] | null;
+  /** Edited Shorts (4.0): the template and the job that made it, and what it cost. */
+  template?: string | null;
+  edit_job_id?: number | null;
+  metrics?: EditMetrics | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface EditMetrics {
+  wall_ms: number;
+  cpu_ms: number;
+  peak_rss_bytes: number;
+  encoder: string;
 }
 
 export const MAX_ATTEMPTS = 2;

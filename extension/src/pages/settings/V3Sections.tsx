@@ -262,6 +262,43 @@ export function AiSection({ s, update }: V3SectionProps) {
   );
 }
 
+/** 4.0: automatic editing into vertical Shorts (needs the companion). */
+export function EditingSection({ s, update }: V3SectionProps) {
+  const e = s.editing;
+  return (
+    <Section
+      id="editing"
+      title="Editing"
+      description="Turns your best clips into vertical 1080×1920 Shorts on this computer, with the companion and FFmpeg. It crops and stacks the original picture (facecam and the action StreamHunter followed), starts a little before the strongest moment when it comes late, and evens out the loudness. Nothing is invented and the original clip is never changed: the edited Short is saved as its own version. Landscape (X) versions are never edited."
+    >
+      <Field inline label="Edit clips">
+        {({ id }) => <Switch id={id} label="Edit clips" checked={e.enabled} onChange={(enabled) => void update({ editing: { enabled } })} />}
+      </Field>
+      <Field inline label="Edit automatically from" hint="Viral-potential score. Initially 85.">
+        {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={e.autoFrom} min={1} max={100} onCommit={(autoFrom) => void update({ editing: { autoFrom } })} />}
+      </Field>
+      <Field inline label="Offer an Edit button from" hint="Initially 70. Below this, clips aren't edited.">
+        {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={e.offerFrom} min={0} max={100} onCommit={(offerFrom) => void update({ editing: { offerFrom } })} />}
+      </Field>
+      <Field inline label="Even out loudness" hint="About −14 LUFS, what YouTube and TikTok play at.">
+        {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Even out loudness" checked={e.loudness} onChange={(loudness) => void update({ editing: { loudness } })} />}
+      </Field>
+      <Field inline label="Encoder" hint="Hardware uses far less CPU and memory; software makes slightly smaller files.">
+        {({ id, describedBy }) => (
+          <Select id={id} aria-describedby={describedBy} className="w-60" value={e.encoder} onChange={(ev) => void update({ editing: { encoder: ev.target.value as Settings["editing"]["encoder"] } })}>
+            <option value="videotoolbox">Hardware (VideoToolbox, Mac)</option>
+            <option value="x264">Software (x264)</option>
+          </Select>
+        )}
+      </Field>
+      <Field inline label="Wait while recording" hint="Edits start when no stream is being recorded (checked every 5 minutes).">
+        {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Wait while recording" checked={e.pauseWhileRecording} onChange={(pauseWhileRecording) => void update({ editing: { pauseWhileRecording } })} />}
+      </Field>
+      <p className="text-xs text-fg-subtle">Captions (needs Whisper) and animated templates (Remotion) come in later updates; captions will stay off unless you turn them on.</p>
+    </Section>
+  );
+}
+
 export function V3Sections(props: V3SectionProps) {
   return (
     <>
@@ -269,6 +306,7 @@ export function V3Sections(props: V3SectionProps) {
       <FormatsSection {...props} />
       <ScoringSection {...props} />
       <AiSection {...props} />
+      <EditingSection {...props} />
       <CompanionSection />
     </>
   );

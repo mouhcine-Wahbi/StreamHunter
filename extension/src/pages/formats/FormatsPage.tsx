@@ -14,7 +14,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiStateView } from "@/components/ApiStateView";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { sendRequest } from "@/services/runtime";
-import { assetBlob, assetThumbnail, type Asset, type AssetKind, type AssetStatus } from "@/local/assets";
+import { assetBlob, assetThumbnail, type Asset, type AssetStatus } from "@/local/assets";
 import { clipThumbnail, type LocalClip } from "@/local/clips";
 import { LAYOUT_LABEL, type LayoutKind } from "@/processing/layout";
 import { useObjectUrl } from "@/pages/clips/ClipCard";
@@ -50,7 +50,7 @@ function Preview({ asset, clip, vertical }: { asset: Asset | undefined; clip: Lo
   );
 }
 
-function FormatRow({ clip, asset, kind, onChanged }: { clip: LocalClip; asset: Asset | undefined; kind: AssetKind; onChanged: () => void }) {
+function FormatRow({ clip, asset, kind, onChanged }: { clip: LocalClip; asset: Asset | undefined; kind: "vertical" | "landscape"; onChanged: () => void }) {
   const [layout, setLayout] = useState<LayoutKind | "">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +113,7 @@ function FormatRow({ clip, asset, kind, onChanged }: { clip: LocalClip; asset: A
   );
 }
 
-export function FormatsPage({ kind }: { kind: AssetKind }) {
+export function FormatsPage({ kind }: { kind: "vertical" | "landscape" }) {
   const [tick, setTick] = useState(0);
   const clips = useApiQuery<Page<LocalClip>>(`/api/v1/clips?limit=200&_=${tick}`);
   const assets = useApiQuery<Asset[]>(`/api/v1/assets?_=${tick}`);

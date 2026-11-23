@@ -128,6 +128,22 @@ export interface Settings {
     /** openai_compatible only: base URL (e.g. http://localhost:11434/v1 for a local model). */
     endpoint: string;
   };
+  /** 4.0 automatic editing (needs the companion). Only vertical 1080×1920 Shorts are edited. */
+  editing: {
+    enabled: boolean;
+    /** Edit automatically from this viral-potential score. */
+    autoFrom: number;
+    /** Offer "Edit" (you decide) from this score, below autoFrom. Below it: no edit offered. */
+    offerFrom: number;
+    style: "clean_gaming";
+    /** Captions need Whisper (phase 4.4); off by default. */
+    captions: boolean;
+    /** Normalize loudness to about −14 LUFS. */
+    loudness: boolean;
+    encoder: "videotoolbox" | "x264";
+    /** Wait until no stream is recorded before editing. */
+    pauseWhileRecording: boolean;
+  };
   locale: {
     /** IANA time zone, or "auto" for the browser's zone. */
     timeZone: string;
@@ -162,6 +178,7 @@ export const DEFAULT_SETTINGS: Settings = {
   scoring: { weights: { hook: 25, emotion: 20, engagement: 20, story: 15, share: 10, platform: 10 }, highThreshold: 85, mediumThreshold: 60 },
   metadata: { attribution: true },
   ai: { onDevice: true, external: "none", model: "", endpoint: "" },
+  editing: { enabled: true, autoFrom: 85, offerFrom: 70, style: "clean_gaming", captions: false, loudness: true, encoder: "videotoolbox", pauseWhileRecording: false },
   locale: { timeZone: "auto", language: "en" },
   privacy: { retentionDays: 30 },
 };

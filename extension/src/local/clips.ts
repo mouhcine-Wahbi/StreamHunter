@@ -1,6 +1,7 @@
 import type { Clip } from "@/types/api";
 import { db } from "./db";
 import { deleteAssetsOf } from "./assets";
+import { deleteEditJobsOf } from "./edits";
 
 /** What found a clip: fused signal kinds, or "manual" for Save last N s. */
 export type DetectionType = "audio" | "chat" | "visual" | "viewers" | "manual";
@@ -153,7 +154,8 @@ export async function renameClip(id: number, title: string): Promise<LocalClip> 
 }
 
 export async function deleteClip(id: number): Promise<void> {
-  await deleteAssetsOf(id); // its vertical / landscape versions
+  await deleteAssetsOf(id); // its vertical / landscape / edited versions
+  await deleteEditJobsOf(id);
   await db.delete("clipBlobs", id);
   await db.delete("clipThumbs", id);
   await db.delete("clips", id);

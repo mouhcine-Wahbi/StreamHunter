@@ -5,7 +5,7 @@
  * yourself; nothing here posts anywhere.
  */
 import { useState, type FormEvent } from "react";
-import { Check, Copy, Download, ExternalLink, Pencil, Sparkles, Star, Trash2 } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, Pencil, RotateCcw, Scissors, Sparkles, Star, Trash2, X } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -14,6 +14,9 @@ import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useAction } from "@/hooks/useAction";
 import { useApiClient } from "@/hooks/useApiQuery";
 import { assetBlob, assetThumbnail, type Asset, type AssetKind } from "@/local/assets";
+import { EDIT_STATE_LABEL, EDIT_TERMINAL, type EditJob } from "@/local/edits";
+import { decideEdit, TEMPLATE_LABEL } from "@/editing/rules";
+import { useSettings } from "@/hooks/useSettings";
 import { clipBlob, clipThumbnail } from "@/local/clips";
 import { DESTINATION_LABEL, type Destination } from "@/local/rights";
 import { factsOf, GENERATOR_LABEL } from "@/metadata/metadata";
@@ -29,7 +32,7 @@ import { allMetadataText, DEST_FORMAT, detectedAt, hashtagText, KIND_LABEL, libr
 const STATUS_TONE: Record<LibraryStatus, BadgeTone> = { generating: "accent", ready: "live", failed: "danger" };
 const ASSET_STATUS = { queued: "Waiting", processing: "Making…", ready: "Ready", failed: "Failed" } as const;
 const DESTS: Destination[] = ["youtube", "tiktok", "x"];
-const EDIT_ROUTE: Record<AssetKind, string> = { vertical: "#/shorts", landscape: "#/xclips" };
+const EDIT_ROUTE: Record<AssetKind, string> = { vertical: "#/shorts", landscape: "#/xclips", edited_vertical: "#/shorts" };
 
 type Version = "original" | AssetKind;
 
@@ -56,7 +59,7 @@ function VersionPreview({ clip, asset, version }: { clip: LibraryClip; asset: As
   const key = version === "original" ? clip.id * 10 : (asset?.id ?? 0) * 10 + 1;
   const video = useObjectUrl(() => (!ready ? Promise.resolve(undefined) : version === "original" ? clipBlob(clip.id) : assetBlob(asset!)), ready ? key : -key - 1);
   const thumb = useObjectUrl(() => (asset?.has_thumbnail ? assetThumbnail(asset.id) : clip.has_thumbnail ? clipThumbnail(clip.id) : Promise.resolve(undefined)), key + 5);
-  const vertical = version === "vertical";
+  const vertical = version === "vertical" || version === "edited_vertical";
   return (
     <div className={cn("overflow-hidden rounded-lg bg-black", vertical ? "mx-auto aspect-[9/16] h-72" : "aspect-video w-full")}>
       {video ? (
@@ -178,11 +181,12 @@ function MetadataTabs({ clip, assets, onChanged }: { clip: LibraryClip; assets: 
   );
 }
 
-export function LibraryItem({ clip, assets, streamer, onChanged }: { clip: LibraryClip; assets: Asset[]; streamer?: Pick<Streamer, "username" | "platform">; onChanged: () => void }) {
+export function LibraryItem({ clip, assets, edits = [], streamer, onChanged }: { clip: LibraryClip; assets: Asset[]; edits?: EditJob[]; streamer?: Pick<Streamer, "username" | "platform">; onChanged: () => void }) {
   const client = useApiClient();
   const vertical = assets.find((a) => a.kind === "vertical");
   const landscape = assets.find((a) => a.kind === "landscape");
-  const versions: Version[] = ["original", ...(["vertical", "landscape"] as const).filter((k) => assets.some((a) => a.kind === k && a.status === "ready"))];
+  const edited = assets.find((a) => a.kind === "edited_vertical" && a.status === "ready");
+  const versions: Version[] = ["original", ...(["edited_vertical", "vertical", "landscape"] as const).filter((k) => assets.some((a) => a.kind === k && a.status === "ready"))];
   const [version, setVersion] = useState<Version>("original");
   const shown: Version = versions.includes(version) ? version : "original";
   const { status, detail } = libraryStatus(clip, assets);
@@ -211,7 +215,7 @@ export function LibraryItem({ clip, assets, streamer, onChanged }: { clip: Libra
   return (
     <Card role="article" className="grid gap-4 p-3 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]" aria-label={`Clip: ${clip.title ?? clip.id}`}>
       <div className="space-y-2">
-        <VersionPreview key={shown} clip={clip} asset={shown === "original" ? undefined : shown === "vertical" ? vertical : landscape} version={shown} />
+        <VersionPreview key={shown} clip={clip} asset={shown === "original" ? undefined : shown === "vertical" ? vertical : shown === "edited_vertical" ? edited : landscape} version={shown} />
         {versions.length > 1 && (
           <div role="group" aria-label="Preview version" className="flex flex-wrap gap-1 text-xs">
             {versions.map((v) => (
@@ -225,6 +229,7 @@ export function LibraryItem({ clip, assets, streamer, onChanged }: { clip: Libra
           <div className="font-medium text-fg">Downloads</div>
           <div className="flex flex-wrap gap-1.5">
             <DownloadLink clip={clip} version="original" />
+            {edited && <DownloadLink clip={clip} version="edited_vertical" asset={edited} />}
             {vertical?.status === "ready" && <DownloadLink clip={clip} version="vertical" asset={vertical} />}
             {landscape?.status === "ready" && <DownloadLink clip={clip} version="landscape" asset={landscape} />}
           </div>
@@ -232,6 +237,11 @@ export function LibraryItem({ clip, assets, streamer, onChanged }: { clip: Libra
             <li>
               Original · {clip.width ?? "?"}×{clip.height ?? "?"} · {clip.duration_seconds ?? "?"} s · {formatBytes(clip.size_bytes)}
             </li>
+            {edited && (
+              <li>
+                {KIND_LABEL.edited_vertical} · {edited.width}×{edited.height} · {edited.duration_seconds} s · {formatBytes(edited.size_bytes)} · {TEMPLATE_LABEL[edited.template ?? ""] ?? edited.template}
+              </li>
+            )}
             {(["vertical", "landscape"] as const).map((k) => {
               const a = k === "vertical" ? vertical : landscape;
               return (
@@ -351,6 +361,8 @@ export function LibraryItem({ clip, assets, streamer, onChanged }: { clip: Libra
           {why && <ScoreWhy c={clip} />}
         </div>
 
+        <EditPanel clip={clip} edits={edits} edited={edited} onChanged={onChanged} />
+
         <MetadataTabs clip={clip} assets={assets} onChanged={onChanged} />
 
         <div className="flex flex-wrap gap-1.5">
@@ -377,5 +389,90 @@ export function LibraryItem({ clip, assets, streamer, onChanged }: { clip: Libra
         {(rename.error || remove.error || favorite.error) && <p className="text-xs text-danger">{rename.error ?? remove.error ?? favorite.error}</p>}
       </div>
     </Card>
+  );
+}
+
+/**
+ * 4.0 editing: the automatic edit (score ≥ "edit automatically"), an Edit button in the review band,
+ * progress with Cancel, and Retry. The edited Short is a separate version; the original is unchanged.
+ */
+function EditPanel({ clip, edits, edited, onChanged }: { clip: LibraryClip; edits: EditJob[]; edited: Asset | undefined; onChanged: () => void }) {
+  const { settings } = useSettings();
+  const s = settings.editing;
+  const job = edits[0];
+  const score = clip.viral?.total ?? null;
+  const decision = decideEdit(score, s);
+  const start = useAction(async () => {
+    await sendRequest({ type: "edit/start", clipId: clip.id });
+    onChanged();
+  });
+  const cancel = useAction(async () => {
+    if (job) await sendRequest({ type: "edit/cancel", id: job.id });
+    onChanged();
+  });
+  const retry = useAction(async () => {
+    if (job) await sendRequest({ type: "edit/retry", id: job.id });
+    onChanged();
+  });
+  const running = job && !EDIT_TERMINAL.includes(job.state);
+  const error = start.error ?? cancel.error ?? retry.error;
+  let line: React.ReactNode;
+  if (running) {
+    line = (
+      <>
+        <span role="status" aria-label={`Edit: ${job.step}`}>
+          {job.step}
+          {job.state === "encoding" ? ` ${Math.round(job.progress * 100)}%` : "…"}
+        </span>
+        <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} loading={cancel.pending} onClick={() => void cancel.run()}>
+          Cancel edit
+        </Button>
+      </>
+    );
+  } else if (job?.state === "failed" || job?.state === "cancelled") {
+    line = (
+      <>
+        <span role="status" aria-label={`Edit: ${EDIT_STATE_LABEL[job.state]}`} className={job.state === "failed" ? "text-danger" : "text-fg-muted"}>
+          Edit {job.state === "failed" ? `failed: ${job.error ?? "unknown error"}` : "cancelled"}
+        </span>
+        <Button size="sm" variant="secondary" icon={<RotateCcw className="size-3.5" />} loading={retry.pending} onClick={() => void retry.run()}>
+          Retry edit
+        </Button>
+      </>
+    );
+  } else if (edited) {
+    const m = edited.metrics;
+    line = (
+      <span role="status" aria-label="Edit: Ready" className="text-fg-muted">
+        Edited Short ready ({job?.trigger === "manual" ? "you asked for it" : `edited automatically at score ${job?.score ?? score}`}).
+        {m && ` Took ${(m.wall_ms / 1000).toFixed(1)} s, ${(m.cpu_ms / 1000).toFixed(1)} s CPU, ${formatBytes(m.peak_rss_bytes)} memory (${m.encoder}).`}
+        {edited.notes.length > 0 && ` ${edited.notes.join(" ")}`}
+      </span>
+    );
+  } else if (!s.enabled) {
+    line = <span className="text-fg-subtle">Automatic editing is off (Settings → Editing).</span>;
+  } else if (decision === "none") {
+    line = <span className="text-fg-subtle">{score === null ? "Not scored yet; clips are edited from the viral-potential score." : `Not edited: score ${score} is below ${s.offerFrom}.`}</span>;
+  } else {
+    line = (
+      <>
+        <span className="text-fg-muted">
+          {decision === "auto" ? `Score ${score} ≥ ${s.autoFrom}: edited automatically when the companion is connected.` : `Score ${score}: worth reviewing. Edit it into a vertical Short if you want.`}
+        </span>
+        <Button size="sm" variant="secondary" icon={<Scissors className="size-3.5" />} loading={start.pending} onClick={() => void start.run()}>
+          Edit into a Short
+        </Button>
+      </>
+    );
+  }
+  return (
+    <div className="space-y-1 rounded-md border border-border p-2 text-xs" aria-label="Editing">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium text-fg">Editing</span>
+        {line}
+      </div>
+      {running && <div className="h-1 overflow-hidden rounded bg-ink-800"><div className="h-full bg-accent" style={{ width: `${Math.round(job.progress * 100)}%` }} /></div>}
+      {error && <p className="text-danger">{error}</p>}
+    </div>
   );
 }

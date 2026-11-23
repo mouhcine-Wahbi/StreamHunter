@@ -11,6 +11,7 @@ import type { Asset } from "@/local/assets";
 import type { Page, Streamer } from "@/types/api";
 import { ClipCard } from "./ClipCard";
 import { LibraryItem } from "./LibraryItem";
+import { EDIT_TERMINAL, type EditJob } from "@/local/edits";
 import { applyFilters, libraryStatus, NO_FILTERS, STATUS_LABEL, type LibraryClip, type LibraryFilters } from "./library";
 
 export function ClipGrid({ items, onChanged, ranked = false }: { items: LocalClip[]; onChanged: () => void; ranked?: boolean }) {
@@ -33,6 +34,9 @@ export function ClipsPage() {
     `/api/v1/clips?limit=500${sort !== "recent" ? `&sort=${sort}` : ""}${show === "favorites" ? "&favorite=true" : ""}${platform !== "all" ? `&platform=${platform}` : ""}&_=${tick}`,
   );
   const assetsQ = useApiQuery<Asset[]>(`/api/v1/assets?_=${tick}`);
+  const editsQ = useApiQuery<EditJob[]>(`/api/v1/edit-jobs?_=${tick}`);
+  const editsOf = (id: number) => (editsQ.data ?? []).filter((j) => j.clip_id === id);
+  const editing = (editsQ.data ?? []).some((j) => !EDIT_TERMINAL.includes(j.state));
   const streamersQ = useApiQuery<Page<Streamer>>("/api/v1/streamers?limit=500");
   const byClip = useMemo(() => {
     const m = new Map<number, Asset[]>();
@@ -45,10 +49,10 @@ export function ClipsPage() {
   const creators = useMemo(() => [...new Set(all.map((c) => c.streamer_display_name))].sort((a, b) => a.localeCompare(b)), [all]);
   const generating = all.some((c) => libraryStatus(c, assetsOf(c.id)).status === "generating");
   useEffect(() => {
-    if (!generating) return;
-    const t = setInterval(() => setTick((x) => x + 1), 2500);
+    if (!generating && !editing) return;
+    const t = setInterval(() => setTick((x) => x + 1), editing ? 1500 : 2500);
     return () => clearInterval(t);
-  }, [generating]);
+  }, [generating, editing]);
   const reload = () => setTick((x) => x + 1);
   const set = <K extends keyof LibraryFilters>(k: K, v: LibraryFilters[K]) => setF((x) => ({ ...x, [k]: v }));
   const filtered = JSON.stringify(f) !== JSON.stringify(NO_FILTERS);
@@ -126,6 +130,7 @@ export function ClipsPage() {
           </Button>
         )}
       </div>
+      <EditQueue jobs={editsQ.data ?? []} titleOf={(id) => all.find((c) => c.id === id)?.title ?? `Clip ${id}`} />
       <ApiStateView query={query} feature="clips">
         {(page) => {
           if (page.items.length === 0)
@@ -142,12 +147,35 @@ export function ClipsPage() {
                 {items.length === page.items.length ? `${items.length} clip${items.length === 1 ? "" : "s"}` : `${items.length} of ${page.items.length} clips match the filters`}
               </p>
               {items.map((c) => (
-                <LibraryItem key={c.id} clip={c} assets={assetsOf(c.id)} streamer={streamers.get(c.streamer_id)} onChanged={reload} />
+                <LibraryItem key={c.id} clip={c} assets={assetsOf(c.id)} edits={editsOf(c.id)} streamer={streamers.get(c.streamer_id)} onChanged={reload} />
               ))}
             </div>
           );
         }}
       </ApiStateView>
     </>
+  );
+}
+
+/** 4.0: edits waiting, running or failed, across all clips (each clip shows its own controls too). */
+function EditQueue({ jobs, titleOf }: { jobs: EditJob[]; titleOf: (clipId: number) => string }) {
+  const open = jobs.filter((j) => j.state !== "done" && j.state !== "cancelled");
+  if (!open.length) return null;
+  return (
+    <section aria-label="Editing queue" className="mb-4 space-y-1 rounded-md border border-border p-2 text-xs">
+      <div className="font-medium text-fg">Editing queue · one at a time on this computer</div>
+      <ul className="space-y-0.5">
+        {open.map((j) => (
+          <li key={j.id} className="flex flex-wrap gap-2">
+            <span className="text-fg">{titleOf(j.clip_id)}</span>
+            <span className={j.state === "failed" ? "text-danger" : "text-fg-muted"}>
+              {j.state === "failed" ? `Failed: ${j.error ?? "unknown error"}` : j.step}
+              {j.state === "encoding" ? ` ${Math.round(j.progress * 100)}%` : ""}
+            </span>
+            <span className="text-fg-subtle">{j.trigger === "auto" ? `automatic (score ${j.score})` : "you asked"}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

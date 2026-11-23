@@ -29,7 +29,7 @@ export function libraryStatus(clip: LibraryClip, assets: Asset[]): { status: Lib
   return { status: "ready", detail: null };
 }
 
-export const KIND_LABEL: Record<AssetKind, string> = { vertical: "Vertical 9:16", landscape: "Landscape" };
+export const KIND_LABEL: Record<AssetKind, string> = { vertical: "Vertical 9:16", landscape: "Landscape", edited_vertical: "Edited Short" };
 
 /** A file name per version, next to the original's: `<creator>_<time>_<id>-vertical.mp4`. */
 export function versionFileName(clip: LibraryClip, kind: AssetKind | "original"): string {

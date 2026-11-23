@@ -1,6 +1,6 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-21 (3.0 in progress, branch `streamhunter-3.0`)_
+_Last updated: 2026-11-23 (4.0 in progress, branch `streamhunter-3.0`)_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
@@ -16,6 +16,19 @@ Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possi
 | Installer: host manifest for one extension ID, launcher (paths with spaces and quotes), uninstall | ✅ unit tests; used for the real-Chrome run | Run against a test Chrome profile only; **not installed in your own Chrome yet** |
 | Extension: optional `nativeMessaging` permission, companion client (connect on demand, idle disconnect after 5 min, protocol check, Chrome errors in plain words), Settings → Companion, System Health card | ✅ unit + UI tests; Settings and Health checked in real Chrome | The permission prompt itself can't be clicked by automation: the real-Chrome run used a copy of the build with the permission required. **Clicking "Allow and connect" in the real prompt is unverified** |
 | 3.0 unaffected | ✅ 230 extension tests + 10 companion tests, build | |
+
+### Phase 4.2 — Editing queue and FFmpeg auto-edit
+
+| Item | Status | Evidence / notes |
+|---|---|---|
+| Edit plans (companion `src/plan.mjs`): vertical 1080×1920 only, one panel or facecam-over-gameplay, crop follows the measured action path (piecewise-linear, ≤ 48 points, shifted by the trim), optional trim, loudnorm −14 LUFS, VideoToolbox or x264, H.264 High + AAC 160k, faststart. Checked against the probed input before running | ✅ unit + real FFmpeg tests | Nothing is invented: only crop, scale, stack, trim and loudness. A test with a path that follows a moving box keeps it centred (540 of 1080) through a trimmed clip |
+| Job queue (companion `src/jobs.mjs`): one at a time, saved to `jobs/<id>.json`, restarted after an interruption (max 2 attempts), FFmpeg at lower priority, progress, cancel (no partial file left), duplicate ids return the existing job, damaged inputs fail with a clear message, output checked (size, codecs, duration ±0.6 s) and fully decoded, thumbnail, CPU time and peak memory measured, input deleted after success | ✅ 16 companion tests (6 new) with real FFmpeg | Generated 1920×1080 videos with and without sound, a 200 KB damaged file, a 40 s video cancelled mid-encode, a job file left "encoding" |
+| Real clips (facecam.mp4, action.mp4, 20 s 1920×1080) | ✅ measured | VideoToolbox: 2.9 s wall / 3.9 s CPU / 232 MB (facecam, two panels); 2.5 s / 3.4 s / 213 MB (action path). x264: 1.6 s / 7.0 s / 804 MB. Loudness after: −14.0 / −14.0 / −14.1 LUFS |
+| Extension: DB v5 (`editJobs`, unique per clip + template + options), Settings → Editing (on; edit automatically from 85, offer Edit from 70, loudness on, VideoToolbox, wait while recording off; captions off), edit rules and plan builder, editing manager (upload → start → events + 5 s polling backup → import as a separate "Edited Short" asset; cancel, retry, resume after a worker restart, waits while recording when asked, a failed automatic edit is never retried in a loop), companion client events and keep-alive while editing | ✅ 241 extension tests (11 new), typecheck, build | Edits start after the vertical version is ready (its action path and the score exist then). Landscape sources only; output is always vertical; X versions are never edited |
+| Clip Library: Editing panel per clip (automatic / Edit button 70–84 / "not edited: below 70" / progress + Cancel / Retry), Edited Short as its own preview and download with size, template, time, CPU and memory, editing queue | ✅ UI test; real Chrome screenshot | |
+| Real Chrome end to end (Chrome 158, test profile, companion 0.2.0) | ✅ | Facecam clip: vertical version made → scored 34 (low) → **not edited at the default 85** → "edit automatically from" set to 34 and the vertical version remade → edited automatically 7 s later, trimmed to start 8 s before the peak (12.0 s), imported. Asking again returned the same edit. Action clip: Edit button path (manual) → 20.1 s Short. Both: 1080×1920 H.264 + AAC, full decode clean, played and seeked in Chrome. Companion peak 65 MB, FFmpeg peak 233–281 MB. Work folder empty afterwards |
+| Follow-the-action quality | 🟡 existing 3.0 behaviour | The Edited Short reproduces the 3.0 vertical framing exactly; on a box moving 80 px/s the 3.0 tracker lags, so the box sits at the right edge, partly cut off, from 6 s on. Not changed in this phase |
+| Unverified | ⏳ | Your own Chrome (companion not installed there); the real permission prompt; real recorded streams (only test files); a clip scoring 85+ naturally (test clips score 34–45); "wait while recording" with a real recording (unit test only); editing a long clip (> 2 min) |
 
 ## v3.0 — in progress (branch `streamhunter-3.0`, not released)
 

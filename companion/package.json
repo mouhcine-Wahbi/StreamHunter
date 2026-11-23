@@ -1,6 +1,6 @@
 {
   "name": "streamhunter-companion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "StreamHunter's optional local companion: runs FFmpeg, Whisper, yt-dlp and Remotion on this computer for the Chrome extension (native messaging).",
   "type": "module",

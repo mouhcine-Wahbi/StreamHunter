@@ -37,8 +37,10 @@ describe("removing publishing (update from an earlier 3.0 build)", () => {
     await seedV3();
     resetDbConnection();
     const d = await openDb();
-    expect(d.version).toBe(4);
+    expect(d.version).toBe(5);
     expect([...d.objectStoreNames]).not.toContain("jobs");
+    // v5 (4.0) adds the edit jobs store alongside everything that was there.
+    expect([...d.objectStoreNames]).toContain("editJobs");
     expect(await db.get("clips", 1)).toMatchObject({ title: "Kept clip" });
   });
 

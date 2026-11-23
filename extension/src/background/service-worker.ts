@@ -35,6 +35,8 @@ import { createContentManager } from "./content-manager";
 import { removePublishingData } from "./cleanup";
 import { hasPendingWork } from "@/processing/pending";
 import { COMPANION_KEY, createCompanionManager } from "@/companion/client";
+import { createEditingManager } from "./editing-manager";
+import { getAsset } from "@/local/assets";
 
 /** Optional: also create a native Twitch clip for each clip of a Twitch stream. */
 async function afterClip(clipId: number): Promise<void> {
@@ -129,7 +131,15 @@ const content = createContentManager({
 
 // 3.0 processing: formats are made in the offscreen document; it stays open until the queue is done.
 const processing = createProcessingManager({
-  onAssetReady: async (_assetId, clipId) => void (await content.prepare(clipId, await getSettings()).catch((e) => log("content_failed", { clipId, error: e instanceof Error ? e.message : "?" }))),
+  onAssetReady: async (assetId, clipId) => {
+    const settings = await getSettings();
+    await content.prepare(clipId, settings).catch((e) => log("content_failed", { clipId, error: e instanceof Error ? e.message : "?" }));
+    // 4.0: once the vertical version (and so the score and the action path) is ready, edit high scorers.
+    const asset = await getAsset(assetId);
+    if (asset?.kind === "vertical" || (asset?.kind === "landscape" && !settings.formats.vertical)) {
+      await editing.edit(clipId, settings, "auto").catch((e) => log("edit_failed", { clipId, error: e instanceof Error ? e.message : "?" }));
+    }
+  },
   ensureOffscreen: defaultCaptureDeps.ensureOffscreen,
   kick: () => chrome.runtime.sendMessage({ target: "offscreen", type: "process/kick" }),
   async closeIfIdle() {
@@ -192,7 +202,10 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARMS.heartbeat) void manager.tick();
-  if (alarm.name === ALARMS.maintenance) resumeProcessing();
+  if (alarm.name === ALARMS.maintenance) {
+    resumeProcessing();
+    resumeEditing();
+  }
   if (alarm.name === ALARMS.discovery) void getSettings().then((s) => (s.discovery.enabled ? runDiscovery(s) : null)).catch((e) => log("discovery_failed", { error: e instanceof Error ? e.message : "?" }));
 });
 
@@ -226,11 +239,20 @@ const companion = createCompanionManager({
   save: (status) => chrome.storage.local.set({ [COMPANION_KEY]: status }),
 });
 
+/** 4.0: automatic editing through the companion (score ≥ autoFrom), Edit button from offerFrom. */
+const editing = createEditingManager({
+  companion,
+  isRecording: async () => (await getSlots()).some((s) => s.status === "capturing" || s.status === "starting"),
+  log,
+});
+const resumeEditing = () => void getSettings().then((s) => editing.resume(s)).catch((e) => log("edit_resume_failed", { error: e instanceof Error ? e.message : "?" }));
+resumeEditing();
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedSender(sender)) return false;
   // Messages addressed to the offscreen document are not for the worker.
   if ((message as { target?: unknown } | null)?.target === "offscreen") return false;
-  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval, processing, content, companion).then(sendResponse);
+  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval, processing, content, companion, editing).then(sendResponse);
   return true; // keep the channel open for the async response
 });
 

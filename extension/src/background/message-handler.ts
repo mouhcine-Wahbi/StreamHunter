@@ -1,4 +1,5 @@
 import type { CompanionManager } from "@/companion/client";
+import { EditError, type EditingManager } from "./editing-manager";
 import { getMonitoringState, getSettings } from "@/store/storage";
 import { runDiscovery } from "@/discovery/runner";
 import { isRuntimeRequest, type RuntimeResponse } from "@/types/messages";
@@ -28,6 +29,8 @@ export async function handleMessage(
   content?: ContentManager,
   /** 4.0 local companion. */
   companion?: CompanionManager,
+  /** 4.0 automatic editing. */
+  editing?: EditingManager,
 ): Promise<RuntimeResponse> {
   if (!isRuntimeRequest(message)) return { ok: false, error: "Unknown message" };
   try {
@@ -108,6 +111,19 @@ export async function handleMessage(
       case "companion/endpoint":
         if (!companion) return { ok: false, error: "The companion isn't available here." };
         return { ok: true, data: await companion.endpoint() };
+      case "edit/start":
+      case "edit/cancel":
+      case "edit/retry": {
+        if (!editing) return { ok: false, error: "Editing isn't available here." };
+        try {
+          if (message.type === "edit/start") return { ok: true, data: await editing.edit(Number(message.clipId), await getSettings(), "manual") };
+          if (message.type === "edit/cancel") return { ok: true, data: (await editing.cancel(Number(message.id))) ?? null };
+          return { ok: true, data: await editing.retry(Number(message.id)) };
+        } catch (e) {
+          if (e instanceof EditError) return { ok: false, error: e.message };
+          throw e;
+        }
+      }
       case "ai/status":
         return { ok: true, data: content ? await content.status() : { onDevice: "absent", where: null } };
       case "process/clip-made":

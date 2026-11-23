@@ -86,6 +86,8 @@ export function sanitizeSettings(input: unknown): Settings {
   const pub = isRecord(s.publishing) ? s.publishing : {};
   const meta = isRecord(s.metadata) ? s.metadata : {};
   const ai = isRecord(s.ai) ? s.ai : {};
+  const ed = isRecord(s.editing) ? s.editing : {};
+  const offerFrom = clampInt(ed.offerFrom, 0, 100, d.editing.offerFrom);
   const strList = (v: unknown, fallback: string[], max = 30, len = 60) =>
     Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean).map((x) => x.slice(0, len)))].slice(0, max) : fallback;
   const text = (v: unknown, fallback: string, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : fallback);
@@ -184,6 +186,16 @@ export function sanitizeSettings(input: unknown): Settings {
     },
     metadata: {
       attribution: bool(meta.attribution ?? pub.attribution, d.metadata.attribution),
+    },
+    editing: {
+      enabled: bool(ed.enabled, d.editing.enabled),
+      autoFrom: Math.max(offerFrom, clampInt(ed.autoFrom, 0, 100, d.editing.autoFrom)),
+      offerFrom,
+      style: oneOf(ed.style, ["clean_gaming"] as const, d.editing.style),
+      captions: bool(ed.captions, d.editing.captions),
+      loudness: bool(ed.loudness, d.editing.loudness),
+      encoder: oneOf(ed.encoder, ["videotoolbox", "x264"] as const, d.editing.encoder),
+      pauseWhileRecording: bool(ed.pauseWhileRecording, d.editing.pauseWhileRecording),
     },
     ai: {
       onDevice: bool(ai.onDevice, d.ai.onDevice),

@@ -30,6 +30,8 @@ export interface TranscodeResult {
   used: LayoutKind | "landscape";
   notes: string[];
   audio: "aac" | "opus" | "none";
+  /** Vertical only: where the action window was, [seconds into the output, 0..1] every 0.25 s (4.0 editing reuses it). */
+  actionPath: [number, number][];
 }
 
 const VIDEO_CODECS = ["avc1.64002A", "avc1.640028", "avc1.4D402A", "avc1.42E02A", "avc1.42E01F"];
@@ -77,6 +79,7 @@ export async function transcode(input: Blob | Demuxed, opts: TranscodeOptions): 
   const fps = Math.min(60, Math.max(15, Math.round(1e6 / frameDur)));
 
   const tracker = new ActionTracker();
+  const actionPath: [number, number][] = [];
   const firstPlan = opts.kind === "vertical" ? planVertical(v.width, v.height, opts.layout, 0.5, VERTICAL) : planLandscape(v.width, v.height);
   const W = firstPlan.width;
   const H = firstPlan.height;
@@ -125,6 +128,8 @@ export async function transcode(input: Blob | Demuxed, opts: TranscodeOptions): 
           if (prevGray) tracker.update(columnEnergy(prevGray, gray, 64, 36));
           prevGray = gray;
           plan = planVertical(v.width, v.height, opts.layout, tracker.position, VERTICAL);
+          const sec = (t - startUs) / 1e6;
+          if (!actionPath.length || sec - actionPath[actionPath.length - 1]![0] >= 0.25) actionPath.push([Math.round(sec * 100) / 100, Math.round(tracker.position * 1000) / 1000]);
         }
         usedPlan = plan;
         ctx.fillStyle = "#000";
@@ -173,7 +178,7 @@ export async function transcode(input: Blob | Demuxed, opts: TranscodeOptions): 
   const durationSec = (endUs - startUs) / 1e6;
   await validate(blob, W, H, durationSec);
   opts.onProgress?.(1);
-  return { blob, width: W, height: H, durationSec: Math.round(durationSec * 10) / 10, thumbnail, used: opts.kind === "landscape" ? "landscape" : usedPlan.used, notes: [...usedPlan.notes, ...audioPlan.notes], audio: audioPlan.codec };
+  return { blob, width: W, height: H, durationSec: Math.round(durationSec * 10) / 10, thumbnail, used: opts.kind === "landscape" ? "landscape" : usedPlan.used, notes: [...usedPlan.notes, ...audioPlan.notes], audio: audioPlan.codec, actionPath };
 }
 
 async function thumbOf(canvas: OffscreenCanvas): Promise<Blob | null> {

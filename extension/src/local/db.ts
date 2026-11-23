@@ -8,12 +8,14 @@
  */
 
 export const DB_NAME = "streamhunter";
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 
 export type StoreName =
   | "streamers" | "sessions" | "highlights" | "clips" | "clipBlobs" | "clipThumbs"
   // v3 (3.0): discovery, authorized sources, output assets, rights
-  | "candidates" | "sources" | "sourceBlobs" | "assets" | "assetBlobs" | "rights";
+  | "candidates" | "sources" | "sourceBlobs" | "assets" | "assetBlobs" | "rights"
+  // v5 (4.0): editing jobs run by the companion
+  | "editJobs";
 export type BlobStore = "clipBlobs" | "clipThumbs" | "sourceBlobs" | "assetBlobs";
 
 function upgrade(db: IDBDatabase, oldVersion: number): void {
@@ -23,6 +25,12 @@ function upgrade(db: IDBDatabase, oldVersion: number): void {
   if (oldVersion < 3) createV3(db);
   // v4: StreamHunter doesn't publish (you upload clips yourself); the publishing jobs store is removed.
   if (oldVersion < 4 && db.objectStoreNames.contains("jobs")) db.deleteObjectStore("jobs");
+  // v5 (4.0): one row per edit of a clip; the same clip + template + options is never edited twice.
+  if (oldVersion < 5) {
+    const edits = db.createObjectStore("editJobs", { keyPath: "id", autoIncrement: true });
+    edits.createIndex("clip", "clip_id");
+    edits.createIndex("dedupe", "dedupe_key", { unique: true });
+  }
 }
 
 /** 3.0: existing stores and data are untouched; only new stores are added. */

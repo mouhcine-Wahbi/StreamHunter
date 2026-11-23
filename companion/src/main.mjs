@@ -11,8 +11,9 @@ import { ensureLayout, inside, workDir } from "./paths.mjs";
 import { createLog } from "./log.mjs";
 import { detectTools } from "./tools.mjs";
 import { freeBytes, startFileServer } from "./server.mjs";
+import { createJobQueue } from "./jobs.mjs";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 export const PROTOCOL = 1;
 
 /** "chrome-extension://<id>/" (manifest form) → "chrome-extension://<id>" (HTTP Origin form). */
@@ -45,12 +46,20 @@ export function createCompanion({ dir, caller, write, exit, env = process.env })
   const origin = caller ? originOf(caller) : null;
   let files = null;
   let tools = null;
+  let queue = null;
+  const jobsReady = async () => {
+    tools ??= await detectTools(env);
+    if (!tools.ffmpeg.ok || !tools.ffprobe.ok) throw new Error("FFmpeg and FFprobe are needed for editing. Install them with Homebrew: brew install ffmpeg");
+    queue ??= createJobQueue({ dir, tools: { ffmpeg: tools.ffmpeg.path, ffprobe: tools.ffprobe.path }, log, emit: write });
+    return queue;
+  };
 
   const handle = async (msg) => {
     switch (msg.type) {
       case "hello": {
         files ??= await startFileServer({ dir, origins: allowed, log });
         tools ??= await detectTools(env);
+        if (tools.ffmpeg.ok && tools.ffprobe.ok) (await jobsReady()).resume();
         return { version: VERSION, protocol: PROTOCOL, pid: process.pid, node: process.version, port: files.port, token: files.token, work_dir: dir, free_bytes: freeBytes(dir), used_bytes: usedBytes(dir), tools };
       }
       case "tools":
@@ -61,6 +70,16 @@ export function createCompanion({ dir, caller, write, exit, env = process.env })
       case "files/delete":
         rmSync(inside(join(dir, "files"), msg.name), { force: true });
         return { deleted: msg.name };
+      case "edit/start":
+        return (await jobsReady()).add({ id: msg.id_job, input: msg.input, plan: msg.plan });
+      case "jobs/get":
+        return (await jobsReady()).get(msg.id_job);
+      case "jobs/list":
+        return (await jobsReady()).list();
+      case "jobs/cancel":
+        return (await jobsReady()).cancel(msg.id_job);
+      case "jobs/remove":
+        return { removed: (await jobsReady()).remove(msg.id_job) };
       case "shutdown":
         setImmediate(() => exit(0));
         return { bye: true };

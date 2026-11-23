@@ -137,7 +137,7 @@ async function makeAsset(a: Asset): Promise<boolean> {
     }
     const r = await transcode(src, { kind: "vertical", layout: a.layout, onProgress });
     await store(a, r.blob, r.thumbnail);
-    await patchAsset(a.id, { status: "ready", progress: 1, used_layout: r.used, width: r.width, height: r.height, duration_seconds: r.durationSec, size_bytes: r.blob.size, has_thumbnail: Boolean(r.thumbnail), notes: r.notes });
+    await patchAsset(a.id, { status: "ready", progress: 1, used_layout: r.used, width: r.width, height: r.height, duration_seconds: r.durationSec, size_bytes: r.blob.size, has_thumbnail: Boolean(r.thumbnail), notes: r.notes, action_path: r.actionPath.length ? r.actionPath : null });
     return true;
   } catch (e) {
     await patchAsset(a.id, { status: "failed", error: message(e), attempts: a.attempts + 1 });

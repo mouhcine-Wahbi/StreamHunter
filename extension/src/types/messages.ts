@@ -33,6 +33,10 @@ export type RuntimeRequest =
   // Local companion (4.0): connect and check tools; the file channel address for this extension's pages.
   | { type: "companion/check" }
   | { type: "companion/endpoint" }
+  // 4.0 editing (companion)
+  | { type: "edit/start"; clipId: number }
+  | { type: "edit/cancel"; id: number }
+  | { type: "edit/retry"; id: number }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }
@@ -90,6 +94,9 @@ export interface ResponseMap {
   "ai/status": { onDevice: import("@/metadata/generate").OnDeviceState; where: "worker" | "offscreen" | null };
   "companion/check": import("@/companion/client").CompanionStatus;
   "companion/endpoint": import("@/companion/client").CompanionEndpoint;
+  "edit/start": import("@/local/edits").EditJob | null;
+  "edit/cancel": import("@/local/edits").EditJob | null;
+  "edit/retry": import("@/local/edits").EditJob;
   "capture/get": CaptureState;
   "capture/list": CaptureState[];
   "capture/pause-slot": CaptureState;
@@ -127,6 +134,9 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "ai/status",
   "companion/check",
   "companion/endpoint",
+  "edit/start",
+  "edit/cancel",
+  "edit/retry",
   "capture/get",
   "capture/list",
   "capture/pause-slot",

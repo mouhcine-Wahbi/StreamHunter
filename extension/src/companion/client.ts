@@ -64,6 +64,21 @@ export function explainDisconnect(message: string | undefined): { state: Compani
   return { state: "error", message: m || "The companion couldn't be reached." };
 }
 
+/** An event the companion sends without being asked (4.2: edit job progress). */
+export interface CompanionJob {
+  id: string;
+  state: "queued" | "probing" | "encoding" | "validating" | "done" | "failed" | "cancelled";
+  step: string;
+  progress: number;
+  error: string | null;
+  attempts: number;
+  output: { video: string; thumbnail: string | null; width: number; height: number; duration: number; size: number; has_audio: boolean } | null;
+  metrics: { wall_ms: number; cpu_ms: number; peak_rss_bytes: number; encoder: string } | null;
+  notes: string[];
+  template: string;
+}
+export type CompanionEvent = { event: "job"; job: CompanionJob };
+
 export interface CompanionDeps {
   hasPermission: () => Promise<boolean>;
   connectNative: (host: string) => chrome.runtime.Port;
@@ -84,6 +99,8 @@ export function createCompanionManager(deps: CompanionDeps) {
   let nextId = 1;
   let idle: ReturnType<typeof setTimeout> | null = null;
   let disconnectReason: string | undefined;
+  const listeners = new Set<(event: CompanionEvent) => void>();
+  let holds = 0;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 
   const empty = (state: CompanionState, message: string | null): CompanionStatus => ({
@@ -92,7 +109,7 @@ export function createCompanionManager(deps: CompanionDeps) {
 
   const touch = () => {
     if (idle) clearTimeout(idle);
-    idle = setTimeout(() => close(), idleMs);
+    idle = holds > 0 ? null : setTimeout(() => close(), idleMs);
   };
 
   function close() {
@@ -116,7 +133,12 @@ export function createCompanionManager(deps: CompanionDeps) {
   function open(): chrome.runtime.Port {
     if (port) return port;
     const p = deps.connectNative(COMPANION_HOST);
-    p.onMessage.addListener((msg: { id?: number; ok: boolean; data?: unknown; error?: string }) => {
+    p.onMessage.addListener((msg: { id?: number; ok: boolean; data?: unknown; error?: string; event?: string }) => {
+      // Messages without an id are events the companion sends on its own (job progress).
+      if (msg.id === undefined && typeof msg.event === "string") {
+        for (const l of listeners) l(msg as unknown as CompanionEvent);
+        return;
+      }
       const waiting = msg.id !== undefined ? pending.get(msg.id) : undefined;
       if (!waiting) return;
       pending.delete(msg.id!);
@@ -179,7 +201,25 @@ export function createCompanionManager(deps: CompanionDeps) {
     return { base: `http://127.0.0.1:${hello!.port}`, token: hello!.token };
   }
 
-  return { check, endpoint, request, close, get connected() { return port !== null && hello !== null; } };
+  return {
+    check,
+    endpoint,
+    request,
+    close,
+    get connected() {
+      return port !== null && hello !== null;
+    },
+    /** Listen to companion events; returns an unsubscribe function. */
+    onEvent(l: (event: CompanionEvent) => void): () => void {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    /** Keep the connection (and so the companion and its running edit) open while work is pending. */
+    hold(on: boolean) {
+      holds = Math.max(0, holds + (on ? 1 : -1));
+      if (port) touch();
+    },
+  };
 }
 
 export type CompanionManager = ReturnType<typeof createCompanionManager>;

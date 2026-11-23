@@ -32,8 +32,13 @@ The installer writes only:
   Every request needs the token, this extension's `Origin`, and the loopback `Host` (no DNS rebinding).
 * Files live only in the work folder (`files/`, `jobs/`, `tmp/`, `logs/`); names are plain
   (`[A-Za-z0-9._-]`, no `..`). Uploads stop when less than 2 GB would stay free.
-* Only fixed requests: `hello`, `tools`, `disk`, `files/delete`, `shutdown` (more arrive with the
-  editing phases). No arbitrary commands, no shell.
+* Only fixed requests: `hello`, `tools`, `disk`, `files/delete`, `shutdown`, and for editing
+  `edit/start`, `jobs/get`, `jobs/list`, `jobs/cancel`, `jobs/remove`. No arbitrary commands, no shell:
+  FFmpeg runs with arguments built from a checked edit plan (`src/plan.mjs`).
+* Editing (`src/jobs.mjs`): one job at a time, saved in `jobs/`, restarted after an interruption, FFmpeg
+  at lower priority, progress sent to Chrome as events, cancel removes partial files, every output is
+  probed and fully decoded before it's offered. Inputs and outputs are deleted once the extension has
+  saved the Short.
 * Logs: `logs/companion.log` (rotated at 5 MB). Stdout is reserved for Chrome.
 
 ## Tests

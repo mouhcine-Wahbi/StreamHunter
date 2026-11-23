@@ -17,7 +17,9 @@ import { ACTIVITY_KEY, KICK_CHAT_REASON } from "@/background/chat-manager";
 import { CAPTURES_KEY, INITIAL_CAPTURE_STATE } from "@/types/capture";
 import type { Streamer } from "@/types/api";
 import { createProcessingManager } from "@/background/processing-manager";
-import { listAssets, patchAsset, queueAssets } from "@/local/assets";
+import { listAssets, patchAsset, queueAssets, type Asset } from "@/local/assets";
+import { createEditJob, patchEditJob } from "@/local/edits";
+import type { EditingManager } from "@/background/editing-manager";
 import { prepareContent, type ContentClip } from "@/local/content";
 import { DEFAULT_SETTINGS } from "@/types/settings";
 import { COMPANION_KEY, type CompanionManager, type CompanionStatus } from "@/companion/client";
@@ -678,6 +680,70 @@ describe("3.0 output formats in the dashboard", () => {
     window.location.hash = "/health";
     render(<App />);
     expect(await screen.findByLabelText("Companion tools ready")).toHaveTextContent("1 of 2 tools ready: missing or too old: yt-dlp");
+  });
+
+  it("Clip Library → Editing: edited Short as its own version, Edit in the review band, below-threshold text, Retry; Settings → Editing", async () => {
+    mockFetch(() => null);
+    const manager = createMonitoringManager();
+    const editing = { edit: vi.fn(async () => null), cancel: vi.fn(async () => undefined), retry: vi.fn(async () => undefined) } as unknown as EditingManager;
+    chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+      handleMessage(msg, manager, undefined, undefined, undefined, undefined, undefined, undefined, editing).then(respond);
+      return true;
+    });
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL: () => undefined }));
+    const blob = () => new Blob([new Uint8Array(4)], { type: "video/mp4" });
+    const s = structuredClone(DEFAULT_SETTINGS);
+    s.ai.onDevice = false;
+    const make = async (title: string, total: number) => {
+      const c = await saveClip({ candidateId: 0, sessionId: null, streamerId: 0, streamerName: "StreamerOne", platform: "twitch", title, startedAt: Date.parse("2026-11-10T12:00:00Z"), durationSec: 30, width: 1920, height: 1080, score: 80, blob: blob() });
+      const [v] = await queueAssets(c.id, ["vertical"], { layout: { kind: "center", facecam: null }, source: "default" });
+      await patchAsset(v!.id, { status: "ready", used_layout: "center", width: 1080, height: 1920, duration_seconds: 30, size_bytes: 1024 });
+      const prepared = await prepareContent(c.id, s);
+      await db.put("clips", { ...prepared, viral: { ...prepared.viral!, total } });
+      return c.id;
+    };
+    const hi = await make("Edited one", 92);
+    const mid = await make("Review one", 76);
+    await make("Low one", 55);
+    const bad = await make("Broken one", 88);
+    const now = new Date().toISOString();
+    const plan = { version: 1 as const, template: "ffmpeg_clean_v1", trim: { start: 0, end: null }, output: { width: 1080 as const, height: 1920 as const, maxFps: 60 }, panels: [], audio: { loudnorm: true }, encoder: "videotoolbox" as const, thumbnailAt: null, notes: [] };
+    const done = await createEditJob({ clip_id: hi, trigger: "auto", score: 92, plan, dedupe_key: "a" });
+    const edited = await db.put<Asset>("assets", { id: undefined as unknown as number, clip_id: hi, kind: "edited_vertical", layout: null, layout_source: null, used_layout: "center", status: "ready", error: null, attempts: 0, progress: 1, width: 1080, height: 1920, duration_seconds: 30, size_bytes: 5 * 1024 ** 2, reused_original: false, has_thumbnail: false, notes: ["Loudness normalized to about −14 LUFS."], template: "ffmpeg_clean_v1", edit_job_id: done.id, metrics: { wall_ms: 2900, cpu_ms: 3800, peak_rss_bytes: 232 * 1024 ** 2, encoder: "h264_videotoolbox" }, created_at: now, updated_at: now });
+    await db.putBlob(edited.id, blob(), "assetBlobs");
+    await patchEditJob(done.id, { state: "done", step: "Ready", asset_id: edited.id });
+    const failed = await createEditJob({ clip_id: bad, trigger: "auto", score: 88, plan, dedupe_key: "b" });
+    await patchEditJob(failed.id, { state: "failed", error: "The clip file is damaged or isn't a video." });
+    const saved: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+    window.location.hash = "/clips";
+    const { unmount } = render(<App />);
+    const card = await screen.findByRole("article", { name: "Clip: Edited one" });
+    expect(within(card).getByRole("status", { name: "Edit: Ready" })).toHaveTextContent(/edited automatically at score 92.*2\.9 s.*h264_videotoolbox.*−14 LUFS/);
+    expect(within(card).getByText(/Edited Short · 1080×1920 · 30 s · 5\.0 MB · Clean gaming \(FFmpeg\)/)).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole("button", { name: "Edited Short" }));
+    expect(within(card).getByLabelText(/Preview of Edited one \(Edited Short\)/)).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole("button", { name: "Download Edited Short MP4" }));
+    await waitFor(() => expect(saved).toEqual([`StreamerOne_2026-11-10-12-00-00_${hi}-edited_vertical.mp4`]));
+    const review = screen.getByRole("article", { name: "Clip: Review one" });
+    expect(within(review).getByText(/Score 76: worth reviewing/)).toBeInTheDocument();
+    await userEvent.click(within(review).getByRole("button", { name: "Edit into a Short" }));
+    await waitFor(() => expect(editing.edit).toHaveBeenCalledWith(mid, expect.anything(), "manual"));
+    expect(within(screen.getByRole("article", { name: "Clip: Low one" })).getByText("Not edited: score 55 is below 70.")).toBeInTheDocument();
+    const broken = screen.getByRole("article", { name: "Clip: Broken one" });
+    expect(within(broken).getByRole("status", { name: "Edit: Failed" })).toHaveTextContent("damaged");
+    expect(within(screen.getByRole("region", { name: "Editing queue" })).getByText(/Failed: The clip file is damaged/)).toBeInTheDocument();
+    await userEvent.click(within(broken).getByRole("button", { name: "Retry edit" }));
+    await waitFor(() => expect(editing.retry).toHaveBeenCalledWith(failed.id));
+    unmount();
+    window.location.hash = "/settings";
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Editing" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Edit automatically from")).toHaveValue(85);
+    expect(screen.getByLabelText("Offer an Edit button from")).toHaveValue(70);
+    expect(screen.getByRole("switch", { name: "Edit clips" })).toBeChecked();
   });
 
   it("works with no social accounts: no publishing screens, settings or connect buttons anywhere", async () => {

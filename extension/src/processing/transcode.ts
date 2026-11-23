@@ -87,6 +87,10 @@ export async function transcode(input: Blob | Demuxed, opts: TranscodeOptions): 
   const ctx = canvas.getContext("2d", { alpha: false })!;
   const probe = new OffscreenCanvas(64, 36);
   const pctx = probe.getContext("2d", { willReadFrequently: true })!;
+  // Average the picture when shrinking it to 64×36 (high quality uses mipmaps). The default low
+  // quality samples only a few pixels, so small or slow motion is missed on most frames.
+  pctx.imageSmoothingEnabled = true;
+  pctx.imageSmoothingQuality = "high";
   let prevGray: Uint8ClampedArray | null = null;
 
   const encCfg = await encoderConfig(W, H, fps);

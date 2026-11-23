@@ -137,9 +137,24 @@ export function xProblems(m: MediaInfo): string[] {
  * Follows the action for the "follow the action" crop: where the picture changes most, smoothed so
  * the window glides instead of jumping. Input per frame: motion energy per column (any count),
  * from a small downscaled difference image. Pure and deterministic.
+ *
+ * Velocity-aware: it estimates how fast the action moves and, as far as that speed is steady, aims
+ * ahead of it by the time the smoothing needs to catch up, so moving action is followed without
+ * lagging behind. Busy scenes whose motion keeps changing get little or no lead, and a dead zone
+ * holds the window still while the action is still. Repeated frames (low frame-rate sources)
+ * are glided over along the predicted path instead of freezing the window.
  */
 export class ActionTracker {
   private x = 0.5;
+  /** Estimated speed of the action, fraction of the width per frame. */
+  private v = 0;
+  /** How much the measured speed varies around the estimate (same units): high in busy, noisy scenes. */
+  private spread = 0;
+  private last = 0.5;
+  /** Frames since the last frame with measurable motion (repeated frames have none). */
+  private since = 0;
+  /** Frames between the last two measurements: how often the source repeats a frame (1 = never). */
+  private gap = 1;
   private started = false;
   constructor(
     private readonly opts = {
@@ -147,10 +162,22 @@ export class ActionTracker {
       smoothing: 0.08,
       /** Largest move per frame (fraction of the width). */
       maxStep: 0.012,
-      /** Ignore targets this close to the current position. */
+      /** While the action is still (or its speed is uncertain), ignore targets this close to the current position. */
       deadZone: 0.06,
+      /** Below this speed confidence the motion counts as uncertain (busy scenes), so the dead zone applies. */
+      holdBelow: 0.3,
       /** Below this share of total energy in the busiest third, keep still (noise, fades). */
       minFocus: 0.42,
+      /** Weight of the newest measurement in the speed estimate (about 1 s of history at 30 fps). */
+      velocityGain: 0.03,
+      /** Speed (fraction of the width per frame) below which the action counts as still. */
+      stillSpeed: 0.0004,
+      /** A target jump larger than this (cut, new subject) resets the speed estimate. */
+      jump: 0.12,
+      /** The averaged speed's error relative to the spread of single measurements (about 1/√ samples averaged). */
+      spreadWeight: 0.15,
+      /** Longest repeat (frames) the tracker glides over; longer gaps count as the action stopping. */
+      coast: 6,
     },
   ) {}
 
@@ -158,31 +185,72 @@ export class ActionTracker {
     return this.x;
   }
 
+  /** How sure the speed estimate is (0…1): near 1 for steady motion, near 0 when it keeps changing. */
+  private confidence(): number {
+    const a = Math.abs(this.v);
+    return a / (a + this.spread * this.opts.spreadWeight + 1e-9);
+  }
+
+  /** One frame towards where the action will be once the smoothing has caught up (1 / smoothing frames ahead). */
+  private follow(target: number): number {
+    const o = this.opts;
+    const c = this.confidence();
+    const lead = (this.v / o.smoothing) * c;
+    if ((Math.abs(this.v) < o.stillSpeed || c < o.holdBelow) && Math.abs(target - this.x) < o.deadZone) return this.x;
+    const aim = clamp(target + lead, 0, 1);
+    this.x = clamp(this.x + clamp((aim - this.x) * o.smoothing, -o.maxStep, o.maxStep), 0, 1);
+    return this.x;
+  }
+
   update(columns: ArrayLike<number>): number {
     const n = columns.length;
+    const o = this.opts;
     let total = 0;
     let weighted = 0;
     for (let i = 0; i < n; i++) {
       total += columns[i]!;
       weighted += columns[i]! * ((i + 0.5) / n);
     }
-    if (total <= 0 || n === 0) return this.x;
+    this.since++;
+    if (total <= 0 || n === 0) {
+      // A repeated frame (low frame-rate source): nothing measured, keep gliding along the predicted path.
+      // Only as far as the source's usual repeat, so a stop isn't overshot.
+      if (this.started && this.since < this.gap && this.gap <= o.coast && Math.abs(this.v) >= o.stillSpeed && this.confidence() >= 0.5) return this.follow(clamp(this.last + this.v * this.since, 0, 1));
+      this.v *= 1 - o.velocityGain;
+      return this.x;
+    }
     const target = weighted / total;
     // How concentrated is the motion around the target? Spread-out motion (camera pans, cuts) → stay.
     const lo = Math.floor(clamp(target - 1 / 6, 0, 1) * n);
     const hi = Math.ceil(clamp(target + 1 / 6, 0, 1) * n);
     let near = 0;
     for (let i = lo; i < hi; i++) near += columns[i]!;
-    if (near / total < this.opts.minFocus) return this.x;
-    if (!this.started) {
-      this.started = true;
-      this.x = target;
+    if (near / total < o.minFocus) {
+      this.v *= 1 - o.velocityGain;
       return this.x;
     }
-    const d = target - this.x;
-    if (Math.abs(d) < this.opts.deadZone) return this.x;
-    this.x += clamp(d * this.opts.smoothing, -this.opts.maxStep, this.opts.maxStep);
-    return this.x;
+    if (!this.started) {
+      this.started = true;
+      this.x = this.last = target;
+      this.since = 0;
+      return this.x;
+    }
+    const delta = target - this.last;
+    const frames = Math.max(1, this.since);
+    this.gap = frames;
+    this.last = target;
+    this.since = 0;
+    // Speed per frame, whatever the gap since the last measurement; weighted by that gap.
+    if (Math.abs(delta) > o.jump) {
+      this.v = 0;
+      this.spread = 0;
+    } else {
+      const g = Math.min(1, o.velocityGain * frames);
+      const measured = delta / frames;
+      this.spread += (Math.abs(measured - this.v) - this.spread) * g;
+      this.v += (measured - this.v) * g;
+    }
+    return this.follow(target);
   }
 }
 

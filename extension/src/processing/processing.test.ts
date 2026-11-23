@@ -103,9 +103,15 @@ describe("following the action", () => {
   it("ignores small moves, no motion, and motion spread over the whole frame", () => {
     const t = new ActionTracker();
     t.update(cols(0.5));
-    expect(t.update(cols(0.53))).toBe(0.5); // dead zone
-    expect(t.update(new Array(32).fill(0))).toBe(0.5);
-    expect(t.update(new Array(32).fill(10))).toBe(0.5); // camera pan / cut: everything changes
+    // A small shift that then stays put: followed smoothly, no overshoot, then held still.
+    const seen: number[] = [];
+    for (let i = 0; i < 120; i++) seen.push(t.update(cols(0.53)));
+    expect(Math.max(...seen)).toBeLessThan(0.545);
+    const settled = t.position;
+    for (let i = 0; i < 30; i++) t.update(cols(0.53));
+    expect(t.position).toBe(settled);
+    expect(t.update(new Array(32).fill(0))).toBe(settled);
+    expect(t.update(new Array(32).fill(10))).toBe(settled); // camera pan / cut: everything changes
   });
 
   it("measures motion per column from two frames", () => {

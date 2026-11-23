@@ -46,6 +46,7 @@
 | `activeTab` | Read the URL of the tab the popup was opened on (which channel to capture) |
 | `tabCapture`, `offscreen` | Capture that tab in an offscreen document |
 | `identity` | Sign in with Twitch (`launchWebAuthFlow`) |
+| `nativeMessaging` (optional, 4.0) | Asked for only when you click **Allow and connect** in Settings → Companion: talks to the local companion program that runs FFmpeg, Whisper, yt-dlp and Remotion |
 | `system.cpu`, `system.memory` | Overload protection while recording several streams (whole-machine CPU and free memory; nothing is sent anywhere) |
 | Keyboard shortcut (`commands`, Alt+Shift+R) | Arm the current tab as a recorder; it counts as the click Chrome requires |
 | Host access: `api.twitch.tv`, `id.twitch.tv`, `api.kick.com`, `id.kick.com`, `www.googleapis.com/youtube/v3/*`, `www.youtube.com/feeds/*` | The official APIs and YouTube's public upload feed. The Twitch chat WebSocket (`eventsub.wss.twitch.tv`) needs no host permission |
@@ -55,6 +56,16 @@ own AI endpoint (when you save an AI key). StreamHunter has no access to YouTube
 upload APIs: it never posts. You upload the clips you download yourself.
 
 No `tabs`, `<all_urls>`, `downloads`, `cookies` or content scripts.
+
+## The local companion (4.0, optional)
+
+* Registered for exactly one extension ID (the host manifest's `allowed_origins`); it refuses every
+  other caller.
+* Files move over `127.0.0.1` with a random per-launch token, checked `Origin` and loopback `Host`.
+  The token is never written to storage; extension pages get it from the service worker.
+* It works only inside its own folder (`~/Library/Application Support/StreamHunter`), answers only
+  fixed requests, runs no shell, and passes no cookies or sign-in to any tool.
+* It runs only while Chrome is connected to it and is removed with `node install.mjs --uninstall`.
 
 ## Other measures
 

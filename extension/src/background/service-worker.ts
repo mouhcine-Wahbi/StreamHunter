@@ -34,6 +34,7 @@ import { createProcessingManager } from "./processing-manager";
 import { createContentManager } from "./content-manager";
 import { removePublishingData } from "./cleanup";
 import { hasPendingWork } from "@/processing/pending";
+import { COMPANION_KEY, createCompanionManager } from "@/companion/client";
 
 /** Optional: also create a native Twitch clip for each clip of a Twitch stream. */
 async function afterClip(clipId: number): Promise<void> {
@@ -217,11 +218,19 @@ chrome.notifications?.onClicked.addListener((id) => {
   void chrome.notifications.clear(id);
 });
 
+/** 4.0: the optional local companion. Connected only when something needs it (Settings, jobs). */
+const companion = createCompanionManager({
+  hasPermission: () => chrome.permissions.contains({ permissions: ["nativeMessaging"] }),
+  connectNative: (host) => chrome.runtime.connectNative(host),
+  lastError: () => chrome.runtime.lastError?.message,
+  save: (status) => chrome.storage.local.set({ [COMPANION_KEY]: status }),
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isTrustedSender(sender)) return false;
   // Messages addressed to the offscreen document are not for the worker.
   if ((message as { target?: unknown } | null)?.target === "offscreen") return false;
-  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval, processing, content).then(sendResponse);
+  handleMessage(message, manager, capture, () => governor.maybeRun(), decideApproval, processing, content, companion).then(sendResponse);
   return true; // keep the channel open for the async response
 });
 

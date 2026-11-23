@@ -20,6 +20,7 @@ import { createProcessingManager } from "@/background/processing-manager";
 import { listAssets, patchAsset, queueAssets } from "@/local/assets";
 import { prepareContent, type ContentClip } from "@/local/content";
 import { DEFAULT_SETTINGS } from "@/types/settings";
+import { COMPANION_KEY, type CompanionManager, type CompanionStatus } from "@/companion/client";
 
 /** Wires runtime messages to the real handler, as the service worker would. */
 function installWorker() {
@@ -644,6 +645,39 @@ describe("3.0 output formats in the dashboard", () => {
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     await userEvent.selectOptions(screen.getByLabelText("Status"), "failed");
     expect(screen.getAllByRole("article").map((e) => e.getAttribute("aria-label"))).toEqual(["Clip: Charlie moment"]);
+  });
+
+  it("Settings → Companion: setup steps with this extension's ID, Allow asks Chrome, then shows the tools; Health shows the state", async () => {
+    mockFetch(() => null);
+    const manager = createMonitoringManager();
+    const connected: CompanionStatus = {
+      state: "connected", message: null, version: "0.1.0", protocol: 1, node: "v22.23.5", work_dir: "/Users/me/Library/Application Support/StreamHunter", free_bytes: 300 * 1024 ** 3, used_bytes: 5 * 1024 ** 2, checked_at: new Date().toISOString(),
+      tools: {
+        ffmpeg: { name: "ffmpeg", found: true, path: "/opt/homebrew/bin/ffmpeg", version: "9.0.2", ok: true, detail: null, min: "6.0", why: "cutting and encoding", videotoolbox: true },
+        "yt-dlp": { name: "yt-dlp", found: true, path: "/opt/homebrew/bin/yt-dlp", version: "2025.01.01", ok: false, detail: "Version 2025.01.01 is older than 2025.11.12", min: "2025.11.12", why: "YouTube" },
+      },
+    };
+    const companion = { check: vi.fn(async () => (await chrome.storage.local.set({ [COMPANION_KEY]: connected }), connected)), endpoint: vi.fn(), request: vi.fn(), close: vi.fn(), connected: true } as unknown as CompanionManager;
+    chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+      handleMessage(msg, manager, undefined, undefined, undefined, undefined, undefined, companion).then(respond);
+      return true;
+    });
+    const request = vi.spyOn(chrome.permissions, "request").mockImplementation((async () => true) as never);
+    window.location.hash = "/settings";
+    const { unmount } = render(<App />);
+    expect(await screen.findByRole("status", { name: "Companion: Not checked yet" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Install command")).toHaveTextContent(`node install.mjs --extension-id ${chrome.runtime.id}`);
+    await userEvent.click(screen.getByRole("button", { name: "Allow and connect" }));
+    expect(request).toHaveBeenCalledWith({ permissions: ["nativeMessaging"] });
+    expect(await screen.findByRole("status", { name: "Companion: Connected" })).toBeInTheDocument();
+    const tools = screen.getByRole("table", { name: "Companion tools" });
+    expect(within(tools).getByText("hardware encoding (VideoToolbox)")).toBeInTheDocument();
+    expect(within(tools).getByText(/older than 2025\.11\.12 · needs 2025\.11\.12/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Install command")).toBeNull();
+    unmount();
+    window.location.hash = "/health";
+    render(<App />);
+    expect(await screen.findByLabelText("Companion tools ready")).toHaveTextContent("1 of 2 tools ready: missing or too old: yt-dlp");
   });
 
   it("works with no social accounts: no publishing screens, settings or connect buttons anywhere", async () => {

@@ -12,6 +12,7 @@ import { FACTOR_LABEL, type FactorKey } from "@/scoring/score";
 import { sendRequest } from "@/services/runtime";
 import type { DeepPartial, Settings } from "@/types/settings";
 import { KeywordEditor, NumberField, Section } from "./sections";
+import { CompanionSection } from "./CompanionSection";
 
 export interface V3SectionProps {
   s: Settings;
@@ -268,6 +269,7 @@ export function V3Sections(props: V3SectionProps) {
       <FormatsSection {...props} />
       <ScoringSection {...props} />
       <AiSection {...props} />
+      <CompanionSection />
     </>
   );
 }

@@ -4,6 +4,19 @@ _Last updated: 2026-11-21 (3.0 in progress, branch `streamhunter-3.0`)_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
+## v4.0 — in progress (branch `streamhunter-3.0`, plan in docs/STREAMHUNTER_4_PLAN.md)
+
+### Phase 4.1 — Local companion (native messaging)
+
+| Item | Status | Evidence / notes |
+|---|---|---|
+| Companion (`companion/`, Node 22+, no dependencies): native messaging framing (1 MB limit to Chrome, 64 MiB from Chrome), fixed requests only, exits when Chrome disconnects, logs to a file | ✅ unit + end-to-end tests; tested in real Chrome | Real Chrome 158: Chrome started it, it stopped when Chrome quit |
+| File channel on 127.0.0.1: per-launch token, Origin and Host checks, safe names, size limit, 2 GB disk reserve, no partial files left | ✅ unit tests; tested in real Chrome | 50 MB extension page → companion → back: sha256 identical both ways; 49 ms up, 69 ms down; a request without the token got 401 |
+| Tool detection with versions and minimums (FFmpeg incl. VideoToolbox / x264 / loudnorm, FFprobe, Whisper, yt-dlp, Deno) | ✅ unit tests; real tools on this Mac | FFmpeg 9.0.2, Whisper 20250625, yt-dlp 2026.10.26, Deno 2.9.8 found; a check takes about 5 s (Whisper's Python import) |
+| Installer: host manifest for one extension ID, launcher (paths with spaces and quotes), uninstall | ✅ unit tests; used for the real-Chrome run | Run against a test Chrome profile only; **not installed in your own Chrome yet** |
+| Extension: optional `nativeMessaging` permission, companion client (connect on demand, idle disconnect after 5 min, protocol check, Chrome errors in plain words), Settings → Companion, System Health card | ✅ unit + UI tests; Settings and Health checked in real Chrome | The permission prompt itself can't be clicked by automation: the real-Chrome run used a copy of the build with the permission required. **Clicking "Allow and connect" in the real prompt is unverified** |
+| 3.0 unaffected | ✅ 230 extension tests + 10 companion tests, build | |
+
 ## v3.0 — in progress (branch `streamhunter-3.0`, not released)
 
 Same labels as v2.0 below. 2.0 is kept intact; the backup tag `backup/v2.0-before-3.0` points at the last 2.0 commit.

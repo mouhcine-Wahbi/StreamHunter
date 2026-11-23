@@ -130,7 +130,7 @@ export function createFakeChrome() {
       clear: async () => true,
       onClicked: new Event<[string]>(),
     },
-    permissions: { request: async () => true },
+    permissions: { request: async () => true, contains: async () => false },
   };
 
   return {

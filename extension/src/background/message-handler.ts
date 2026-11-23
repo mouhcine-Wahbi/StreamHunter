@@ -1,3 +1,4 @@
+import type { CompanionManager } from "@/companion/client";
 import { getMonitoringState, getSettings } from "@/store/storage";
 import { runDiscovery } from "@/discovery/runner";
 import { isRuntimeRequest, type RuntimeResponse } from "@/types/messages";
@@ -25,6 +26,8 @@ export async function handleMessage(
   processing?: ProcessingManager,
   /** 3.0 metadata and score. */
   content?: ContentManager,
+  /** 4.0 local companion. */
+  companion?: CompanionManager,
 ): Promise<RuntimeResponse> {
   if (!isRuntimeRequest(message)) return { ok: false, error: "Unknown message" };
   try {
@@ -99,6 +102,12 @@ export async function handleMessage(
           if (e instanceof ContentError) return { ok: false, error: e.message };
           throw e;
         }
+      case "companion/check":
+        if (!companion) return { ok: false, error: "The companion isn't available here." };
+        return { ok: true, data: await companion.check() };
+      case "companion/endpoint":
+        if (!companion) return { ok: false, error: "The companion isn't available here." };
+        return { ok: true, data: await companion.endpoint() };
       case "ai/status":
         return { ok: true, data: content ? await content.status() : { onDevice: "absent", where: null } };
       case "process/clip-made":

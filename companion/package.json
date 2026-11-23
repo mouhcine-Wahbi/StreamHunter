@@ -1,0 +1,13 @@
+{
+  "name": "streamhunter-companion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StreamHunter's optional local companion: runs FFmpeg, Whisper, yt-dlp and Remotion on this computer for the Chrome extension (native messaging).",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "bin": { "streamhunter-companion": "src/main.mjs" },
+  "scripts": {
+    "test": "node --test test/",
+    "install-host": "node install.mjs"
+  }
+}

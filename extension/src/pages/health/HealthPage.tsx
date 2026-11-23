@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { HardDrive, Plug, RotateCcw, Trash2 } from "lucide-react";
+import { Cpu, HardDrive, Plug, RotateCcw, Trash2 } from "lucide-react";
+import { useStorageValue } from "@/hooks/useStorageValue";
+import { COMPANION_KEY, type CompanionStatus } from "@/companion/client";
+import { COMPANION_LABEL, COMPANION_TONE } from "@/pages/settings/CompanionSection";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge, Dot } from "@/components/ui/Badge";
@@ -21,6 +24,34 @@ import type { Platform } from "@/types/api";
 import { formatBytes, formatRelative } from "@/utils/format";
 
 const LOW_DISK = 2 * 1024 ** 3;
+
+/** 4.0: the optional local companion (state, tools, work folder). Details and setup in Settings → Companion. */
+function CompanionCard() {
+  const status = useStorageValue<CompanionStatus>(COMPANION_KEY);
+  const tools = status?.tools ? Object.values(status.tools) : [];
+  return (
+    <Card>
+      <CardHeader icon={<Cpu className="size-4" />} title="Companion" description="Local video tools for automatic editing (optional)." />
+      <CardBody className="space-y-1 text-xs">
+        <div className="flex items-center gap-2">
+          <Badge tone={status ? COMPANION_TONE[status.state] : "neutral"}>{status ? COMPANION_LABEL[status.state] : "Not checked yet"}</Badge>
+          {status && <span className="text-fg-subtle">checked {formatRelative(status.checked_at)}</span>}
+        </div>
+        {tools.length > 0 && (
+          <p className="text-fg-muted" aria-label="Companion tools ready">
+            {tools.filter((t) => t.ok).length} of {tools.length} tools ready
+            {tools.some((t) => !t.ok) ? `: missing or too old: ${tools.filter((t) => !t.ok).map((t) => t.name).join(", ")}` : ""}
+          </p>
+        )}
+        {status?.work_dir && <p className="text-fg-muted">Work folder uses {formatBytes(status.used_bytes ?? 0)}; {formatBytes(status.free_bytes ?? 0)} free on the disk.</p>}
+        {status?.message && <p className="text-fg-muted">{status.message}</p>}
+        <a href="#/settings" className="text-accent underline">
+          Settings → Companion
+        </a>
+      </CardBody>
+    </Card>
+  );
+}
 
 /** Browser storage: what is used, whether Chrome may evict it, manual cleanup. */
 function StorageCard() {
@@ -147,6 +178,7 @@ export function HealthPage({ monitoring }: { monitoring: ReturnType<typeof useMo
         <div className="space-y-6">
           <SystemCard />
           <StorageCard />
+          <CompanionCard />
           <ConnectivityCard errors={monitoring.state.platformErrors ?? {}} />
         </div>
         <div className="space-y-6">

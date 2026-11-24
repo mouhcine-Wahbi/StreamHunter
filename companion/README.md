@@ -34,7 +34,7 @@ The installer writes only:
 * Files live only in the work folder (`files/`, `jobs/`, `tmp/`, `logs/`); names are plain
   (`[A-Za-z0-9._-]`, no `..`). Uploads stop when less than 2 GB would stay free.
 * Only fixed requests: `hello`, `tools`, `disk`, `files/delete`, `shutdown`, and for editing
-  `edit/start`, `transcribe/start`, `jobs/get`, `jobs/list`, `jobs/cancel`, `jobs/remove`. No arbitrary commands, no shell:
+  `edit/start`, `transcribe/start`, `fetch/start`, `jobs/get`, `jobs/list`, `jobs/cancel`, `jobs/remove`. No arbitrary commands, no shell:
   FFmpeg runs with arguments built from a checked edit plan (`src/plan.mjs`).
 * Editing (`src/jobs.mjs`): one job at a time, saved in `jobs/`, restarted after an interruption, FFmpeg
   at lower priority, progress sent to Chrome as events, cancel removes partial files, every output is
@@ -55,6 +55,17 @@ The installer writes only:
   doesn't. Words without speech-like sound under them are dropped (and listed as dropped), as are
   repeated text and Whisper's own "no speech" segments. Kept text is Whisper's, unchanged. Captions in
   edited Shorts are built from these words only when you turn Captions on (off by default).
+* yt-dlp (`src/fetch.mjs`, request `fetch/start`, 4.6): **off unless you turn on Settings → YouTube
+  Clipper → "Allow the download tool"**, and only for a video you approved as your own or with
+  written permission, confirmed for that video. The companion accepts only an 11-character video id
+  and builds the URL itself. yt-dlp always runs with `--ignore-config --no-cookies
+  --no-cookies-from-browser --no-playlist` and never with cookies, a login, netrc, a client
+  certificate or extra headers (checked before every run). The video's details are checked first;
+  private, members-only, paid, sign-in-required, age-restricted, live or upcoming and DRM-protected
+  videos are refused, and a refusal is never retried another way. Downloads go to `tmp/`, are limited
+  to 1080p and 4 GB, are probed and compared with the video's length, and only then moved to
+  `files/`. YouTube's terms may not allow downloading even your own videos with third-party tools;
+  you decide whether you may use it.
 * **Remotion licence and network:** Remotion is free for individuals and companies of up to three
   people; larger companies need a company licence (remotion.dev/license). No licence key is passed,
   so Remotion sends **no usage event**; nothing leaves this computer while rendering.

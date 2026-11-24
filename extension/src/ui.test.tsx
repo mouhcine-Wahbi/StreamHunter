@@ -6,7 +6,7 @@ import { Popup } from "@/popup/Popup";
 import { SidePanel } from "@/sidepanel/SidePanel";
 import { createMonitoringManager } from "@/background/monitoring-manager";
 import { handleMessage } from "@/background/message-handler";
-import { getSettings } from "@/store/storage";
+import { getSettings, updateSettings } from "@/store/storage";
 import { json, mockFetch } from "@/test/http";
 import { configurePlatforms, fakePlatforms } from "@/test/platforms";
 import { getCredentials, setCredentials } from "@/platforms/credentials";
@@ -829,6 +829,7 @@ describe("4.5 YouTube Video Clipper", () => {
     await userEvent.click(within(panel).getByRole("checkbox", { name: /I confirm I have these rights/ }));
     await userEvent.click(within(panel).getByRole("button", { name: "Approve source" }));
     await waitFor(() => expect(within(screen.getByLabelText("Video: My tournament run")).getByLabelText("Rights status")).toHaveTextContent(/Approved source.*Authorized for processing.*My own video/));
+    expect(screen.queryByLabelText("Download tool")).toBeNull(); // yt-dlp is off by default
     await userEvent.upload(screen.getByLabelText("Video file"), new File([new Uint8Array(500)], "run.mp4", { type: "video/mp4" }));
     await userEvent.click(screen.getByRole("button", { name: "Import and analyse" }));
     expect(await screen.findByRole("status", { name: "Source status" })).toHaveTextContent("Waiting to analyse…");
@@ -843,5 +844,34 @@ describe("4.5 YouTube Video Clipper", () => {
     await userEvent.click(within(seg).getByRole("button", { name: "Approve segment" }));
     await waitFor(() => expect(within(screen.getByLabelText("Segment 0:15–0:35")).getByText("Approved: cutting…")).toBeInTheDocument(), { timeout: 6000 });
     expect(((await db.get<{ pending_clips: unknown[] }>("sources", src!.id))!.pending_clips)).toHaveLength(1);
+  }, 20000);
+
+  it("4.6 with the download tool turned on: a per-video confirmation, then the companion fetches it", async () => {
+    await updateSettings({ clipper: { allowDownloadTool: true } });
+    const manager = createMonitoringManager();
+    const processing = { kick: vi.fn(async () => undefined) } as unknown as Parameters<typeof handleMessage>[5];
+    const { importForVideo } = await import("@/clipper/clipper");
+    const editing = { fetchVideo: vi.fn(async (id: number) => importForVideo(id, new File([new Uint8Array(500)], "abcdefghijk.mp4", { type: "video/mp4" }))), segments: vi.fn(async () => []) } as unknown as EditingManager;
+    chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+      handleMessage(msg, manager, undefined, undefined, undefined, processing, undefined, undefined, editing).then(respond);
+      return true;
+    });
+    window.location.hash = "/clipper";
+    render(<App />);
+    await userEvent.type(await screen.findByLabelText("YouTube video URL"), "https://youtu.be/abcdefghijk");
+    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    const panel = await screen.findByLabelText("Video: YouTube video abcdefghijk");
+    await userEvent.click(within(panel).getByLabelText("My own video"));
+    await userEvent.type(within(panel).getByLabelText("Rights evidence"), "My own channel");
+    await userEvent.click(within(panel).getByRole("checkbox", { name: /I confirm I have these rights/ }));
+    await userEvent.click(within(panel).getByRole("button", { name: "Approve source" }));
+    const tool = await screen.findByLabelText("Download tool");
+    const btn = within(tool).getByRole("button", { name: "Fetch with yt-dlp" });
+    expect(btn).toBeDisabled();
+    await userEvent.click(within(tool).getByRole("checkbox", { name: /this is my own video and I may download it/ }));
+    await userEvent.click(btn);
+    await waitFor(() => expect(editing.fetchVideo).toHaveBeenCalledWith(expect.any(Number), true, expect.objectContaining({ clipper: { allowDownloadTool: true } })));
+    await waitFor(() => expect(processing!.kick).toHaveBeenCalled());
+    expect(await screen.findByRole("status", { name: "Source status" })).toHaveTextContent("Waiting to analyse…");
   }, 20000);
 });

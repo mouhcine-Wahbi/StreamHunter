@@ -42,6 +42,8 @@ export type RuntimeRequest =
   // 4.5 YouTube Video Clipper: segments of an analysed source; approve or reject one segment
   | { type: "clipper/segments"; sourceId: number }
   | { type: "clipper/segment"; id: number; approve: boolean }
+  // 4.6: fetch an approved video with yt-dlp (opt-in; your own video or written permission; confirmed per video)
+  | { type: "clipper/fetch"; candidateId: number; confirmed: boolean }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }
@@ -105,6 +107,7 @@ export interface ResponseMap {
   "transcript/start": import("@/local/transcripts").Transcript;
   "clipper/segments": import("@/clipper/clipper").Segment[];
   "clipper/segment": import("@/clipper/clipper").Segment;
+  "clipper/fetch": import("@/local/sources").SourceFile;
   "capture/get": CaptureState;
   "capture/list": CaptureState[];
   "capture/pause-slot": CaptureState;
@@ -148,6 +151,7 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "transcript/start",
   "clipper/segments",
   "clipper/segment",
+  "clipper/fetch",
   "capture/get",
   "capture/list",
   "capture/pause-slot",

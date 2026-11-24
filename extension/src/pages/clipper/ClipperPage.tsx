@@ -5,7 +5,7 @@
  * → clips, edited into Shorts by the usual score rules. Nothing is downloaded from YouTube here.
  */
 import { useEffect, useRef, useState } from "react";
-import { Check, ExternalLink, FileVideo, Link2, Search, ShieldCheck, Scissors, X } from "lucide-react";
+import { Check, Download, ExternalLink, FileVideo, Link2, Search, ShieldCheck, Scissors, X } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -16,6 +16,7 @@ import { RightsBadge } from "@/components/rights/RightsForm";
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
 import { useAction } from "@/hooks/useAction";
 import { sendRequest } from "@/services/runtime";
+import { useSettings } from "@/hooks/useSettings";
 import { BASIS_LABEL, durationMatch, importForVideo, isApproved, type Segment } from "@/clipper/clipper";
 import type { Candidate, SourceBasis } from "@/discovery/discovery";
 import type { SourceFile } from "@/local/sources";
@@ -289,12 +290,48 @@ function ImportCard({ c, onChanged }: { c: Candidate; onChanged: () => void }) {
             </Button>
           </div>
           {add.error && <p className="text-danger">{add.error}</p>}
+          <FetchOption c={c} onDone={() => {
+            setTick((x) => x + 1);
+            onChanged();
+          }} />
         </CardBody>
       </Card>
       {mine.map((s) => (
         <SourceCard key={s.id} c={c} s={s} tick={tick} onChanged={() => setTick((x) => x + 1)} />
       ))}
     </>
+  );
+}
+
+/**
+ * 4.6: yt-dlp, only when turned on in Settings, for a video approved as your own or with written
+ * permission, confirmed here for this video. Hidden otherwise.
+ */
+function FetchOption({ c, onDone }: { c: Candidate; onDone: () => void }) {
+  const { settings } = useSettings();
+  const [confirmed, setConfirmed] = useState(false);
+  const fetch = useAction(async () => {
+    await sendRequest({ type: "clipper/fetch", candidateId: c.id, confirmed });
+    setConfirmed(false);
+    onDone();
+  });
+  if (!settings.clipper.allowDownloadTool) return null;
+  const basis = c.clipper?.basis;
+  if (basis !== "own" && basis !== "permission")
+    return <p className="text-fg-subtle">The download tool is only for your own videos or videos you have written permission to download. Import the file you have.</p>;
+  return (
+    <div className="space-y-1.5 border-t border-ink-700/70 pt-2" aria-label="Download tool">
+      <p className="text-fg-muted">Or fetch it with yt-dlp in the companion (no cookies or sign-in; private, members-only, paid, age-restricted, live and protected videos are refused).</p>
+      <label className="flex items-start gap-1.5">
+        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
+        <span>{basis === "own" ? "I confirm this is my own video and I may download it." : "I confirm I have written permission from the rights holder to download this video."}</span>
+      </label>
+      <Button size="sm" variant="secondary" icon={<Download className="size-3.5" />} loading={fetch.pending} disabled={!confirmed} onClick={() => void fetch.run()}>
+        Fetch with yt-dlp
+      </Button>
+      {fetch.pending && <p className="text-fg-subtle">Checking and downloading… this can take a while for long videos.</p>}
+      {fetch.error && <p className="text-danger">{fetch.error}</p>}
+    </div>
   );
 }
 
@@ -335,6 +372,7 @@ function SourceCard({ c, s, tick, onChanged }: { c: Candidate; s: SourceFile; ti
       <CardHeader icon={<Scissors className="size-4" />} title={`3. Segments of ${s.name}`} description="Proposed from what was measured: loud reactions and other signals, with the words said (Whisper). Approve the ones to cut; each becomes a clip, edited into a Short by your Editing settings." />
       <CardBody className="space-y-2 text-xs" aria-label={`Source ${s.name}`}>
         <p className="text-fg-muted" role="status" aria-label="Source status">
+          {s.obtained_via === "yt-dlp" ? "Fetched with yt-dlp · " : ""}
           {ANALYSIS[s.analysis]}
           {s.duration_seconds !== null && ` · ${mmss(s.duration_seconds)}`} · {SPEECH[s.transcript_status ?? "none"]}
           {s.transcript?.dropped ? ` (${s.transcript.dropped} piece${s.transcript.dropped === 1 ? "" : "s"} of invented text dropped)` : ""}

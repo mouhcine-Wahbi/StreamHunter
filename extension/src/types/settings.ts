@@ -145,6 +145,14 @@ export interface Settings {
     /** Wait until no stream is recorded before editing. */
     pauseWhileRecording: boolean;
   };
+  /** 4.5–4.6 YouTube Video Clipper. */
+  clipper: {
+    /**
+     * 4.6: allow fetching a video with yt-dlp in the companion, only for your own videos or with
+     * written permission, confirmed per video; no cookies or sign-in. Off by default.
+     */
+    allowDownloadTool: boolean;
+  };
   locale: {
     /** IANA time zone, or "auto" for the browser's zone. */
     timeZone: string;
@@ -180,6 +188,7 @@ export const DEFAULT_SETTINGS: Settings = {
   metadata: { attribution: true },
   ai: { onDevice: true, external: "none", model: "", endpoint: "" },
   editing: { enabled: true, autoFrom: 85, offerFrom: 70, style: "clean_gaming_motion", captions: false, loudness: true, encoder: "videotoolbox", pauseWhileRecording: false },
+  clipper: { allowDownloadTool: false },
   locale: { timeZone: "auto", language: "en" },
   privacy: { retentionDays: 30 },
 };

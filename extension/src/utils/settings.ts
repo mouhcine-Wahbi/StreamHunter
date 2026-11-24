@@ -197,6 +197,9 @@ export function sanitizeSettings(input: unknown): Settings {
       encoder: oneOf(ed.encoder, ["videotoolbox", "x264"] as const, d.editing.encoder),
       pauseWhileRecording: bool(ed.pauseWhileRecording, d.editing.pauseWhileRecording),
     },
+    clipper: {
+      allowDownloadTool: bool(isRecord(s.clipper) ? s.clipper.allowDownloadTool : undefined, d.clipper.allowDownloadTool),
+    },
     ai: {
       onDevice: bool(ai.onDevice, d.ai.onDevice),
       external: oneOf(ai.external, ["none", "anthropic", "openai_compatible"] as const, d.ai.external),

@@ -122,16 +122,23 @@ export async function handleMessage(
       case "edit/cancel":
       case "edit/retry":
       case "transcript/start":
-      case "clipper/segments": {
+      case "clipper/segments":
+      case "clipper/fetch": {
         if (!editing) return { ok: false, error: "Editing isn't available here." };
         try {
+          if (message.type === "clipper/fetch") {
+            const s = await editing.fetchVideo(Number(message.candidateId), message.confirmed === true, await getSettings());
+            await requestAnalysis(s.id);
+            await processing?.kick();
+            return { ok: true, data: s };
+          }
           if (message.type === "edit/start") return { ok: true, data: await editing.edit(Number(message.clipId), await getSettings(), "manual") };
           if (message.type === "edit/cancel") return { ok: true, data: (await editing.cancel(Number(message.id))) ?? null };
           if (message.type === "transcript/start") return { ok: true, data: await editing.transcribe(Number(message.clipId)) };
           if (message.type === "clipper/segments") return { ok: true, data: await editing.segments(Number(message.sourceId)) };
           return { ok: true, data: await editing.retry(Number(message.id)) };
         } catch (e) {
-          if (e instanceof EditError || ((message.type === "transcript/start" || message.type === "clipper/segments") && e instanceof Error)) return { ok: false, error: e.message };
+          if (e instanceof EditError || ((message.type === "transcript/start" || message.type === "clipper/segments" || message.type === "clipper/fetch") && e instanceof Error)) return { ok: false, error: e.message };
           throw e;
         }
       }

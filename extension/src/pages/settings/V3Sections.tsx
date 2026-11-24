@@ -309,6 +309,24 @@ export function EditingSection({ s, update }: V3SectionProps) {
   );
 }
 
+export function ClipperSection({ s, update }: V3SectionProps) {
+  return (
+    <Section
+      id="clipper"
+      title="YouTube Clipper"
+      description="StreamHunter never downloads from YouTube on its own: you import the file you obtained through an authorized route (YouTube Studio's download for your own videos)."
+    >
+      <Field
+        inline
+        label="Allow the download tool (yt-dlp)"
+        hint="Off by default. When on, the Clipper offers to fetch a video with yt-dlp in the companion, only for videos you approved as your own or with written permission, and you confirm it for each video. No cookies or sign-in are ever used. Private, members-only, paid, age-restricted, live and DRM-protected videos are refused. YouTube's terms may not allow downloading even your own videos with third-party tools: you are responsible for using it only where you may."
+      >
+        {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Allow the download tool (yt-dlp)" checked={s.clipper.allowDownloadTool} onChange={(allowDownloadTool) => void update({ clipper: { allowDownloadTool } })} />}
+      </Field>
+    </Section>
+  );
+}
+
 export function V3Sections(props: V3SectionProps) {
   return (
     <>
@@ -317,6 +335,7 @@ export function V3Sections(props: V3SectionProps) {
       <ScoringSection {...props} />
       <AiSection {...props} />
       <EditingSection {...props} />
+      <ClipperSection {...props} />
       <CompanionSection />
     </>
   );

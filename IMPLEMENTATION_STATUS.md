@@ -30,6 +30,15 @@ Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possi
 | Follow-the-action tracking (fix after 4.2) | ✅ unit tests (7 new), replay of real clips, real Chrome | Two causes, both fixed. (1) Chrome shrank each frame to the 64×36 motion probe at low quality, sampling only a few pixels, so motion was seen on 108 of 600 frames; the probe now uses high-quality smoothing (averaging). (2) The tracker had a dead zone and closed 8% of the gap per frame, so moving action always trailed; it now estimates the speed and aims ahead as far as that speed is steady, glides over repeated frames (low frame-rate sources), and keeps the dead zone while the action is still or its speed uncertain. Real Chrome, action.mp4 (box moving 80 px/s): box off-centre median **30 px** in the Short (was 371 px), never cut by the edge (was cut in 32 of 38 samples). Trade-off: on the busy test pattern (facecam.mp4) the window follows its moving elements more readily: 9 moves over 80 px in 20 s instead of 4. Not measured: the extra CPU of high-quality smoothing in the probe; real streams |
 | Unverified | ⏳ | Your own Chrome (companion not installed there); the real permission prompt; real recorded streams (only test files); a clip scoring 85+ naturally (test clips score 34–45); "wait while recording" with a real recording (unit test only); editing a long clip (> 2 min) |
 
+### Phase 4.6 — yt-dlp, opt-in
+
+| Item | Status | Evidence / notes |
+|---|---|---|
+| Settings → YouTube Clipper → "Allow the download tool (yt-dlp)", **off by default**. The Clipper shows "Fetch with yt-dlp" only when it is on, for a video approved as your own or with written permission (not "licensed"), with a confirmation box per video | ✅ unit + UI tests | |
+| Companion 0.5.0 `fetch/start`: only an 11-character id (the URL is built by the companion), `--ignore-config --no-cookies --no-cookies-from-browser --no-playlist`; cookies, login, netrc, client certificates, extra headers and remote components refused before every run; availability checked first (public / unlisted only; private, members-only, paid, sign-in, age-restricted, live/upcoming, DRM refused); a yt-dlp error (e.g. "Sign in to confirm…") is shown and never retried; 1080p, 4 GB, length compared; tmp/ cleaned; cancel leaves nothing | ✅ 5 new companion tests (32 total) with a fake yt-dlp that returns the documented JSON fields | Proves our checks and arguments, not YouTube's answers |
+| Extension: the fetched file is imported like one you chose (same approval, rights and analysis), marked "Fetched with yt-dlp" | ✅ 2 unit + 1 UI test (266 total), typecheck, build | |
+| Unverified | ⏳ | **No real download was made** (you chose test files only): yt-dlp against YouTube, its real availability fields for members-only / age-restricted videos, and the JavaScript runtime (Deno) path are untested. Whether YouTube's terms allow it for your videos is your decision |
+
 ### Phase 4.5 — YouTube Video Clipper
 
 | Item | Status | Evidence / notes |

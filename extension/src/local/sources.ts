@@ -44,6 +44,8 @@ export interface SourceFile {
   /** 4.5: Whisper transcript of the whole file (companion), used for segment excerpts and boundaries. */
   transcript?: { model: string; language: string | null; segments: { start: number; end: number; text: string; words: { w: string; s: number; e: number }[] }[]; dropped: number; created_at: string } | null;
   transcript_status?: "none" | "running" | "done" | "failed" | "unavailable";
+  /** 4.6: how the file arrived: imported by you, or fetched with yt-dlp (opt-in) after your confirmation. */
+  obtained_via?: "import" | "yt-dlp";
   transcript_error?: string | null;
   added_at: string;
 }
@@ -106,7 +108,7 @@ export async function listSources(): Promise<SourceFile[]> {
 
 export async function updateSource(
   id: number,
-  patch: Partial<Pick<SourceFile, "analysis" | "analysis_error" | "moments" | "duration_seconds" | "width" | "height" | "pending_clips" | "clip_ids" | "clip_error" | "transcript" | "transcript_status" | "transcript_error">>,
+  patch: Partial<Pick<SourceFile, "analysis" | "analysis_error" | "moments" | "duration_seconds" | "width" | "height" | "pending_clips" | "clip_ids" | "clip_error" | "transcript" | "transcript_status" | "transcript_error" | "obtained_via">>,
 ): Promise<SourceFile> {
   const s = await db.get<SourceFile>("sources", id);
   if (!s) throw new RightsError("That source file no longer exists.");

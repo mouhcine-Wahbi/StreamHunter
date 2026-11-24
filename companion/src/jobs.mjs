@@ -7,6 +7,7 @@ import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, setPriority } from "node:os";
 import { dirname, join } from "node:path";
+import { assertSafe, checkArgs, downloadArgs, refusal, VIDEO_ID, ytdlpError } from "./fetch.mjs";
 import { activity, cleanTranscript, envelope, WHISPER_MODEL, whisperArgs } from "./transcript.mjs";
 import { checkOutput, checkPlan, expectedDuration, ffmpegArgs, motionProps, readProbe, TEMPLATE_FFMPEG } from "./plan.mjs";
 import { fileURLToPath } from "node:url";
@@ -327,6 +328,73 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
     }
   }
 
+  /**
+   * 4.6: fetch a YouTube video with yt-dlp (opt-in, your own video or written permission). The
+   * availability check comes first; any refusal is final. Output goes to tmp/ and only a complete,
+   * checked file is moved to files/.
+   */
+  async function fetchVideo(job) {
+    const id = job.options.video_id;
+    const tmp = join(dir, "tmp", `${job.id}-ytdlp`);
+    const name = `${job.id}-fetched.mp4`;
+    const result = join(files, name);
+    const started = Date.now();
+    running = { id: job.id, child: null };
+    try {
+      update(job, { state: "checking", step: "Checking that the video is public or unlisted", progress: 0, attempts: job.attempts + 1, error: null });
+      if (!tools.ytdlp) throw new Error("yt-dlp isn't installed (or is too old). Install it with Homebrew: brew install yt-dlp deno");
+      const env = { ...process.env, PATH: `${dirname(tools.ffmpeg)}:${process.env.PATH ?? "/usr/bin:/bin"}` };
+      const chk = await run(tools.ytdlp, assertSafe(checkArgs({ id, deno: tools.deno ?? null })), null, { env });
+      if (job.state === "cancelled") throw new Cancelled();
+      if (chk.code !== 0) throw new Error(`Not fetched: ${ytdlpError(chk.err) ?? "yt-dlp couldn't read the video."}`);
+      let info;
+      try {
+        info = JSON.parse(chk.out);
+      } catch {
+        info = null;
+      }
+      const why = refusal(info, id);
+      if (why) throw new Error(`Not fetched: ${why}`);
+
+      update(job, { state: "downloading", step: "Downloading with yt-dlp", progress: 0.02 });
+      rmSync(tmp, { recursive: true, force: true });
+      mkdirSync(tmp, { recursive: true });
+      let lastEmit = 0;
+      const dl = await run(tools.ytdlp, assertSafe(downloadArgs({ id, out: join(tmp, "video.%(ext)s"), ffmpeg: tools.ffmpeg, deno: tools.deno ?? null })), (line) => {
+        const m = /^\[download\]\s+([\d.]+)%/.exec(line.trim());
+        if (m && Date.now() - lastEmit > 500) {
+          lastEmit = Date.now();
+          update(job, { progress: Math.min(0.9, 0.02 + (Number(m[1]) / 100) * 0.88) });
+        }
+      }, { env });
+      if (job.state === "cancelled") throw new Cancelled();
+      if (dl.code !== 0) throw new Error(`Not fetched: ${ytdlpError(dl.err) ?? "yt-dlp stopped with an error."}`);
+      const got = readdirSync(tmp).find((n) => n === "video.mp4");
+      if (!got) throw new Error("yt-dlp didn't produce an MP4 file (it may have stopped at the size limit of 4 GB).");
+
+      update(job, { state: "verifying", step: "Checking the file", progress: 0.95 });
+      const out = await probe(join(tmp, got));
+      if (!out || !out.duration || !out.width) throw new Error("The downloaded file is damaged.");
+      if (Math.abs(out.duration - info.duration) > Math.max(2, info.duration * 0.01)) throw new Error(`The downloaded file is ${Math.round(out.duration)} s long but the video is ${Math.round(info.duration)} s.`);
+      renameSync(join(tmp, got), result);
+      update(job, {
+        state: "done",
+        step: "Ready",
+        progress: 1,
+        output: { video: name, video_id: id, title: String(info.title ?? "").slice(0, 300), channel: String(info.channel ?? info.uploader ?? "").slice(0, 200), availability: info.availability, duration: Math.round(out.duration * 100) / 100, width: out.width, height: out.height, size: statSync(result).size, has_audio: out.hasAudio },
+        metrics: { wall_ms: Date.now() - started, cpu_ms: 0, peak_rss_bytes: 0, encoder: "yt-dlp" },
+        notes: [`Fetched with yt-dlp (no cookies, no sign-in): ${info.availability} video.`],
+      });
+    } catch (e) {
+      rmSync(result, { force: true });
+      if (job.state !== "cancelled") update(job, { state: "failed", step: "Failed", error: e.message });
+      if (!(e instanceof Cancelled)) log("job_failed", { id: job.id, error: e.message });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+      running = null;
+    }
+  }
+
   let pumping = false;
   async function pump() {
     if (pumping) return;
@@ -339,7 +407,7 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
           update(next, { state: "failed", step: "Failed", error: next.error ?? "Stopped after repeated interruptions." });
           continue;
         }
-        await (next.kind === "transcribe" ? transcribe(next) : work(next));
+        await (next.kind === "transcribe" ? transcribe(next) : next.kind === "fetch" ? fetchVideo(next) : work(next));
       }
     } finally {
       pumping = false;
@@ -349,12 +417,17 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
   return {
     /** Adds a job; the same id is never added twice (duplicates return the existing job). */
     add({ id, input, plan, kind = "edit", options = null }) {
+      if (kind === "fetch") input = `${id}-fetched.mp4`;
       if (!isSafeName(id) || !isSafeName(input)) throw new Error("Invalid job id or file name");
-      if (kind !== "edit" && kind !== "transcribe") throw new Error("Unknown job kind");
+      if (kind !== "edit" && kind !== "transcribe" && kind !== "fetch") throw new Error("Unknown job kind");
+      if (kind === "fetch") {
+        if (!VIDEO_ID.test(String(options?.video_id ?? ""))) throw new Error("Invalid video id");
+        if (options?.confirmed !== true) throw new Error("Confirm that you own this video or have written permission to download it.");
+      }
       if (kind === "transcribe" && options?.language != null && !/^[a-z]{2,3}$/.test(options.language)) throw new Error("Invalid language");
       const existing = jobs.get(id);
       if (existing && existing.state !== "failed" && existing.state !== "cancelled") return publicJob(existing);
-      const job = { id, kind, input, plan: kind === "edit" ? plan : null, options: kind === "transcribe" ? { language: options?.language ?? null } : null, template: kind === "edit" ? (plan?.template ?? TEMPLATE_FFMPEG) : null, state: "queued", step: "Waiting", progress: 0, attempts: 0, error: null, output: null, metrics: null, notes: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      const job = { id, kind, input, plan: kind === "edit" ? plan : null, options: kind === "transcribe" ? { language: options?.language ?? null } : kind === "fetch" ? { video_id: options.video_id, confirmed: true, basis: options.basis === "permission" ? "permission" : "own" } : null, template: kind === "edit" ? (plan?.template ?? TEMPLATE_FFMPEG) : null, state: "queued", step: "Waiting", progress: 0, attempts: 0, error: null, output: null, metrics: null, notes: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
       jobs.set(id, job);
       save(job);
       void pump();

@@ -11,6 +11,9 @@ import { LocalApi } from "@/local/local-api";
 import { json, mockFetch } from "@/test/http";
 import type { Candidate } from "@/discovery/discovery";
 import { applyFilters, clipType, NO_FILTERS, type LibraryClip } from "@/pages/clips/library";
+import { createEditingManager } from "@/background/editing-manager";
+import { DEFAULT_SETTINGS } from "@/types/settings";
+import { sanitizeSettings } from "@/utils/settings";
 import { buildSegments, decideSegment, decideSource, durationMatch, importForVideo, listSegments, parseYouTubeUrl, saveSegments, type SpeechSegment } from "./clipper";
 
 const api = () => new LocalApi(() => createAdapters());
@@ -147,5 +150,70 @@ describe("Clip Library: type", () => {
     const local = { ...base, id: 3, platform: "local", source_id: 5 } as unknown as LibraryClip;
     expect([clipType(base), clipType(yt), clipType(local)]).toEqual(["livestream", "youtube_video", "local_file"]);
     expect(applyFilters([base, yt, local], () => [], { ...NO_FILTERS, type: "youtube_video" }).map((c) => c.id)).toEqual([2]);
+  });
+});
+
+describe("4.6 yt-dlp (opt-in)", () => {
+  function companion(result: { error?: string } = {}) {
+    const calls: { type: string; payload: Record<string, unknown> }[] = [];
+    const jobs = new Map<string, Record<string, unknown>>();
+    const bytes = new Uint8Array(4000);
+    return {
+      calls,
+      deps: {
+        endpoint: async () => ({ base: "http://127.0.0.1:1", token: "t" }),
+        request: async <T,>(type: string, payload: Record<string, unknown> = {}): Promise<T> => {
+          calls.push({ type, payload });
+          const id = payload.id_job as string;
+          if (type === "fetch/start") {
+            jobs.set(id, { id, kind: "fetch", state: "checking", step: "Checking", progress: 0 });
+            return jobs.get(id) as T;
+          }
+          if (type === "jobs/get") {
+            const j = jobs.get(id);
+            if (j && j.state === "checking") Object.assign(j, result.error ? { state: "failed", error: result.error } : { state: "done", output: { video: `${id}-fetched.mp4` }, metrics: { wall_ms: 1 } });
+            return (j ?? null) as T;
+          }
+          if (type === "jobs/remove") return { removed: jobs.delete(id) } as T;
+          throw new Error(`Unknown request: ${type}`);
+        },
+        onEvent: () => () => undefined,
+        hold: () => undefined,
+      },
+      fetchImpl: (async () => new Response(bytes)) as unknown as typeof fetch,
+    };
+  }
+  const settings = (on: boolean) => ({ ...DEFAULT_SETTINGS, clipper: { allowDownloadTool: on } });
+
+  it("off by default; needs approval as your own video or written permission, and a confirmation per video", async () => {
+    expect(DEFAULT_SETTINGS.clipper.allowDownloadTool).toBe(false);
+    expect(sanitizeSettings({}).clipper.allowDownloadTool).toBe(false);
+    const c = await candidate();
+    const f = companion();
+    const m = createEditingManager({ companion: f.deps, isRecording: async () => false, fetch: f.fetchImpl, pollMs: 5 });
+    await expect(m.fetchVideo(c.id, true, settings(false))).rejects.toThrow(/download tool is off/);
+    await expect(m.fetchVideo(c.id, true, settings(true))).rejects.toThrow(/Approve the video/);
+    await decideSource(c.id, { approve: true, input: { ...approveInput, basis: "licensed", evidence: "CC BY: https://youtube.com/..." } });
+    await expect(m.fetchVideo(c.id, true, settings(true))).rejects.toThrow(/only for your own videos or videos you have written permission/);
+    await decideSource(c.id, { approve: true, input: approveInput });
+    await expect(m.fetchVideo(c.id, false, settings(true))).rejects.toThrow(/Confirm that you own/);
+    expect(f.calls).toEqual([]); // the companion was never asked
+  });
+
+  it("the companion gets only the id (no URL, no cookies); a refusal is shown as is; success imports the file", async () => {
+    const c = await candidate();
+    await decideSource(c.id, { approve: true, input: { ...approveInput, basis: "permission", evidence: "Email from the creator, 2026-11-20" } });
+    const no = companion({ error: "Not fetched: The video is private." });
+    const m1 = createEditingManager({ companion: no.deps, isRecording: async () => false, fetch: no.fetchImpl, pollMs: 5 });
+    await expect(m1.fetchVideo(c.id, true, settings(true))).rejects.toThrow("Not fetched: The video is private.");
+    expect(await listSources()).toEqual([]);
+    expect(no.calls.filter((x) => x.type === "fetch/start")).toHaveLength(1);
+
+    const ok = companion();
+    const m = createEditingManager({ companion: ok.deps, isRecording: async () => false, fetch: ok.fetchImpl, pollMs: 5 });
+    const s = await m.fetchVideo(c.id, true, settings(true));
+    expect(ok.calls.find((x) => x.type === "fetch/start")!.payload).toEqual({ id_job: `sh-fetch-${c.id}`, video_id: ID, confirmed: true, basis: "permission" });
+    expect(s).toMatchObject({ candidate_id: c.id, platform: "youtube", obtained_via: "yt-dlp", size_bytes: 4000, rights: { status: "processing", evidence: "Email from the creator, 2026-11-20" } });
+    expect(ok.calls.at(-1)).toMatchObject({ type: "jobs/remove" });
   });
 });

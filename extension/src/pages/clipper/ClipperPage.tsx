@@ -1,26 +1,24 @@
 /**
- * 4.5 YouTube Video Clipper: search or paste a URL → the video's details → why you may use it
- * (approve or reject) → import the file you obtained through an authorized route → analysis
- * (loudness here, speech with Whisper in the companion) → candidate segments you approve one by one
- * → clips, edited into Shorts by the usual score rules. Nothing is downloaded from YouTube here.
+ * 4.5 YouTube Video Clipper: search or paste a URL → the video's details → import its file →
+ * analysis (loudness here, speech with Whisper in the companion) → candidate segments you approve
+ * one by one → clips, edited into Shorts by the usual score rules. No rights step. StreamHunter
+ * itself never downloads from YouTube; yt-dlp is a separate opt-in.
  */
 import { useEffect, useRef, useState } from "react";
-import { Check, Download, ExternalLink, FileVideo, Trash2, Link2, Search, ShieldCheck, Scissors, X } from "lucide-react";
+import { Check, Download, ExternalLink, FileVideo, Trash2, Link2, Search, Scissors, X } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Input, Select } from "@/components/ui/Field";
+import { Input } from "@/components/ui/Field";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { RightsBadge } from "@/components/rights/RightsForm";
 import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
 import { useAction } from "@/hooks/useAction";
 import { sendRequest } from "@/services/runtime";
 import { useSettings } from "@/hooks/useSettings";
-import { BASIS_LABEL, durationMatch, importForVideo, isApproved, type Segment } from "@/clipper/clipper";
-import type { Candidate, SourceBasis } from "@/discovery/discovery";
+import { durationMatch, importForVideo, type Segment } from "@/clipper/clipper";
+import type { Candidate } from "@/discovery/discovery";
 import type { SourceFile } from "@/local/sources";
-import { DESTINATION_LABEL, DESTINATIONS, RIGHTS_LABEL, type Destination, type RightsStatus } from "@/local/rights";
 import type { Page } from "@/types/api";
 import { formatBytes, formatDateTime } from "@/utils/format";
 
@@ -51,7 +49,7 @@ export function ClipperPage() {
     <>
       <PageHeader
         title="YouTube Video Clipper"
-        description="Make Shorts from YouTube videos you're allowed to use: your own, or with the rights holder's written permission or licence. Find the video, say why you may use it, import the file you got through an authorized route, then approve the segments you want."
+        description="Make Shorts from YouTube videos. Find the video, import its file, then approve the segments you want: each becomes a clip, edited into a Short by your Editing settings."
       />
       <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="space-y-6">
@@ -108,12 +106,6 @@ export function ClipperPage() {
   );
 }
 
-function DecisionBadge({ c }: { c: Candidate }) {
-  if (c.clipper?.approval === "approved") return <Badge tone="live">Approved source</Badge>;
-  if (c.clipper?.approval === "rejected") return <Badge tone="danger">Rejected</Badge>;
-  return <Badge tone="neutral">Not decided</Badge>;
-}
-
 function VideoList({ items, selected, onSelect }: { items: Candidate[]; selected: number | null; onSelect: (id: number) => void }) {
   return (
     <ul className="space-y-1" aria-label="Videos">
@@ -126,7 +118,6 @@ function VideoList({ items, selected, onSelect }: { items: Candidate[]; selected
               <span className="block text-fg-subtle">
                 {c.creator_name || "Unknown channel"} · {mmss(c.duration_seconds)}
               </span>
-              <DecisionBadge c={c} />
             </span>
           </button>
         </li>
@@ -136,7 +127,6 @@ function VideoList({ items, selected, onSelect }: { items: Candidate[]; selected
 }
 
 function VideoPanel({ c, onChanged }: { c: Candidate; onChanged: () => void }) {
-  const approved = isApproved(c);
   return (
     <div className="space-y-4" aria-label={`Video: ${c.title}`}>
       <Card>
@@ -153,109 +143,12 @@ function VideoPanel({ c, onChanged }: { c: Candidate; onChanged: () => void }) {
               <a href={c.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent underline">
                 <ExternalLink className="size-3" /> {c.url}
               </a>
-              {/* The rights status stays visible on every step. */}
-              <div className="flex flex-wrap items-center gap-1.5" aria-label="Rights status">
-                <DecisionBadge c={c} />
-                <RightsBadge rights={c.rights} />
-                {c.clipper?.basis && <Badge tone="neutral">{BASIS_LABEL[c.clipper.basis]}</Badge>}
-              </div>
-              {c.rights.evidence && <p className="text-fg-subtle">Evidence: {c.rights.evidence}</p>}
             </div>
           </div>
         </CardBody>
       </Card>
-      <DecisionCard c={c} onChanged={onChanged} />
-      {approved && <ImportCard c={c} onChanged={onChanged} />}
+      <ImportCard c={c} onChanged={onChanged} />
     </div>
-  );
-}
-
-function DecisionCard({ c, onChanged }: { c: Candidate; onChanged: () => void }) {
-  const client = useApiClient();
-  const [open, setOpen] = useState(!c.clipper);
-  const [basis, setBasis] = useState<SourceBasis | "">(c.clipper?.basis ?? "");
-  const [status, setStatus] = useState<RightsStatus>(c.rights.status === "publishing" ? "publishing" : "processing");
-  const [evidence, setEvidence] = useState(c.rights.evidence);
-  const [destinations, setDestinations] = useState<Destination[]>(c.rights.destinations);
-  const [confirmed, setConfirmed] = useState(false);
-  const approve = useAction(async () => {
-    await client.post(`/api/v1/clipper/videos/${c.id}/decision`, { approve: true, basis, status, evidence, destinations, confirmed });
-    setOpen(false);
-    onChanged();
-  });
-  const reject = useAction(async () => {
-    await client.post(`/api/v1/clipper/videos/${c.id}/decision`, { approve: false });
-    setOpen(false);
-    onChanged();
-  });
-  return (
-    <Card>
-      <CardHeader icon={<ShieldCheck className="size-4" />} title="1. May you use this video?" description="YouTube showing a video, and your confirmation here, are not proof of permission. StreamHunter records what you state, with the date, and only works on approved sources." />
-      <CardBody className="space-y-2 text-xs">
-        {!open && c.clipper ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-fg-muted">
-              {c.clipper.approval === "approved" ? `Approved ${formatDateTime(c.clipper.decided_at)}: ${BASIS_LABEL[c.clipper.basis!]}, ${RIGHTS_LABEL[c.rights.status]}.` : `Rejected ${formatDateTime(c.clipper.decided_at)}. Nothing will be made from it.`}
-            </span>
-            <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-              Change
-            </Button>
-          </div>
-        ) : (
-          <form
-            className="space-y-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void approve.run();
-            }}
-          >
-            <fieldset className="space-y-1">
-              <legend className="mb-1 text-fg-muted">Why you may use it</legend>
-              {(Object.keys(BASIS_LABEL) as SourceBasis[]).map((b) => (
-                <label key={b} className="flex items-center gap-1.5">
-                  <input type="radio" name={`basis-${c.id}`} checked={basis === b} onChange={() => setBasis(b)} /> {BASIS_LABEL[b]}
-                </label>
-              ))}
-            </fieldset>
-            <label className="block">
-              <span className="text-fg-muted">What you're allowed to do</span>
-              <Select aria-label="Rights level" className="mt-1 w-full" value={status} onChange={(e) => setStatus(e.target.value as RightsStatus)}>
-                <option value="processing">{RIGHTS_LABEL.processing}</option>
-                <option value="publishing">{RIGHTS_LABEL.publishing}</option>
-              </Select>
-            </label>
-            {status === "publishing" && (
-              <fieldset className="flex flex-wrap gap-3">
-                <legend className="mb-1 text-fg-muted">Allowed destinations</legend>
-                {DESTINATIONS.map((d) => (
-                  <label key={d} className="flex items-center gap-1.5">
-                    <input type="checkbox" checked={destinations.includes(d)} onChange={(e) => setDestinations(e.target.checked ? [...destinations, d] : destinations.filter((x) => x !== d))} />
-                    {DESTINATION_LABEL[d]}
-                  </label>
-                ))}
-              </fieldset>
-            )}
-            <label className="block">
-              <span className="text-fg-muted">Evidence (a link to the permission or licence, or "my own channel: …")</span>
-              <Input aria-label="Rights evidence" className="mt-1 w-full" value={evidence} onChange={(e) => setEvidence(e.target.value)} />
-            </label>
-            <label className="flex items-start gap-1.5">
-              <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
-              <span>I confirm I have these rights for this video.</span>
-            </label>
-            {(approve.error || reject.error) && <p className="text-danger">{approve.error ?? reject.error}</p>}
-            <div className="flex gap-2">
-              <Button type="submit" size="sm" variant="primary" icon={<Check className="size-3.5" />} loading={approve.pending} disabled={!basis}>
-                Approve source
-              </Button>
-              <Button type="button" size="sm" variant="ghost" icon={<X className="size-3.5" />} loading={reject.pending} onClick={() => void reject.run()}>
-                Reject
-              </Button>
-            </div>
-          </form>
-        )}
-      </CardBody>
-    </Card>
   );
 }
 
@@ -281,7 +174,7 @@ function ImportCard({ c, onChanged }: { c: Candidate; onChanged: () => void }) {
   return (
     <>
       <Card>
-        <CardHeader icon={<FileVideo className="size-4" />} title="2. Import the video file" description="StreamHunter doesn't download from YouTube. For your own videos, use YouTube Studio → Content → ⋮ → Download, then import the file here. For other videos, use the file the rights holder gave you." />
+        <CardHeader icon={<FileVideo className="size-4" />} title="1. Import the video file" description="Choose the video's file (for your own videos: YouTube Studio → Content → ⋮ → Download). StreamHunter analyses it and proposes segments to clip." />
         <CardBody className="space-y-2 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <input aria-label="Video file" type="file" accept="video/mp4,video/quicktime" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -336,29 +229,34 @@ function SourceDelete({ s, onChanged }: { s: SourceFile; onChanged: () => void }
 }
 
 /**
- * 4.6: yt-dlp, only when turned on in Settings, for a video approved as your own or with written
- * permission, confirmed here for this video. Hidden otherwise.
+ * 4.6: yt-dlp, only when turned on in Settings, and with your confirmation for this video that it
+ * is your own or that you have written permission to download it. Hidden when the setting is off.
  */
 function FetchOption({ c, onDone }: { c: Candidate; onDone: () => void }) {
   const { settings } = useSettings();
-  const [confirmed, setConfirmed] = useState(false);
+  const [basis, setBasis] = useState<"own" | "permission" | null>(null);
   const fetch = useAction(async () => {
-    await sendRequest({ type: "clipper/fetch", candidateId: c.id, confirmed });
-    setConfirmed(false);
+    if (!basis) throw new Error("Confirm that you own this video or have written permission to download it.");
+    await sendRequest({ type: "clipper/fetch", candidateId: c.id, basis });
+    setBasis(null);
     onDone();
   });
   if (!settings.clipper.allowDownloadTool) return null;
-  const basis = c.clipper?.basis;
-  if (basis !== "own" && basis !== "permission")
-    return <p className="text-fg-subtle">The download tool is only for your own videos or videos you have written permission to download. Import the file you have.</p>;
   return (
     <div className="space-y-1.5 border-t border-ink-700/70 pt-2" aria-label="Download tool">
       <p className="text-fg-muted">Or fetch it with yt-dlp in the companion (no cookies or sign-in; private, members-only, paid, age-restricted, live and protected videos are refused).</p>
-      <label className="flex items-start gap-1.5">
-        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
-        <span>{basis === "own" ? "I confirm this is my own video and I may download it." : "I confirm I have written permission from the rights holder to download this video."}</span>
-      </label>
-      <Button size="sm" variant="secondary" icon={<Download className="size-3.5" />} loading={fetch.pending} disabled={!confirmed} onClick={() => void fetch.run()}>
+      <fieldset className="space-y-1">
+        <legend className="sr-only">Download confirmation</legend>
+        <label className="flex items-start gap-1.5">
+          <input type="radio" name={`fetch-${c.id}`} checked={basis === "own"} onChange={() => setBasis("own")} className="mt-0.5" />
+          <span>This is my own video and I may download it.</span>
+        </label>
+        <label className="flex items-start gap-1.5">
+          <input type="radio" name={`fetch-${c.id}`} checked={basis === "permission"} onChange={() => setBasis("permission")} className="mt-0.5" />
+          <span>I have written permission from the rights holder to download it.</span>
+        </label>
+      </fieldset>
+      <Button size="sm" variant="secondary" icon={<Download className="size-3.5" />} loading={fetch.pending} disabled={!basis} onClick={() => void fetch.run()}>
         Fetch with yt-dlp
       </Button>
       {fetch.pending && <p className="text-fg-subtle">Checking and downloading… this can take a while for long videos.</p>}
@@ -401,7 +299,7 @@ function SourceCard({ c, s, tick, onChanged }: { c: Candidate; s: SourceFile; ti
   };
   return (
     <Card>
-      <CardHeader icon={<Scissors className="size-4" />} title={`3. Segments of ${s.name}`} description="Proposed from what was measured: loud reactions and other signals, with the words said (Whisper). Approve the ones to cut; each becomes a clip, edited into a Short by your Editing settings." />
+      <CardHeader icon={<Scissors className="size-4" />} title={`2. Segments of ${s.name}`} description="Proposed from what was measured: loud reactions and other signals, with the words said (Whisper). Approve the ones to cut; each becomes a clip, edited into a Short by your Editing settings." />
       <CardBody className="space-y-2 text-xs" aria-label={`Source ${s.name}`}>
         <p className="text-fg-muted" role="status" aria-label="Source status">
           {s.obtained_via === "yt-dlp" ? "Fetched with yt-dlp · " : ""}

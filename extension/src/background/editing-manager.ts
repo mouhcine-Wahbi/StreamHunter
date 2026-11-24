@@ -11,7 +11,7 @@ import { createEditJob, EDIT_STATE_LABEL, EDIT_TERMINAL, editJobByKey, getEditJo
 import { buildEditPlan, captionsFor, decideEdit, dedupeKey } from "@/editing/rules";
 import { getTranscript, putTranscript, type Transcript } from "@/local/transcripts";
 import { noRoomFor, sourceBlob, updateSource, type SourceFile } from "@/local/sources";
-import { importForVideo, isApproved, saveSegments, type Segment } from "@/clipper/clipper";
+import { importForVideo, saveSegments, type Segment } from "@/clipper/clipper";
 import type { Candidate } from "@/discovery/discovery";
 import { getFile, putFile, type CompanionEndpoint, type CompanionEvent, type CompanionJob } from "@/companion/client";
 import type { Settings } from "@/types/settings";
@@ -294,22 +294,19 @@ export function createEditingManager(deps: EditingDeps) {
 
   const fetching = new Map<number, Promise<SourceFile>>();
   /**
-   * 4.6: fetch an approved YouTube video with yt-dlp in the companion. Only when the setting is on,
-   * the video is approved as your own or with written permission, and you confirmed it for this
-   * video. The companion builds the URL from the id, checks availability first and uses no cookies
-   * or sign-in. The file is then imported like one you chose yourself.
+   * 4.6: fetch a YouTube video with yt-dlp in the companion. Only when the setting is on and you
+   * confirmed for this video that it is your own or that you have written permission to download
+   * it. The companion builds the URL from the id, checks availability first and uses no cookies or
+   * sign-in. The file is then imported like one you chose yourself.
    */
-  function fetchVideo(candidateId: number, confirmed: boolean, settings: Settings): Promise<SourceFile> {
+  function fetchVideo(candidateId: number, basis: "own" | "permission" | null, settings: Settings): Promise<SourceFile> {
     const running = fetching.get(candidateId);
     if (running) return running;
     const p = (async () => {
       if (!settings.clipper.allowDownloadTool) throw new EditError("The download tool is off. Turn it on in Settings → YouTube Clipper.");
       const c = await db.get<Candidate>("candidates", candidateId);
       if (!c || c.platform !== "youtube") throw new EditError("That video is no longer in StreamHunter.");
-      if (!isApproved(c)) throw new EditError("Approve the video as a source first (with why you may use it).");
-      const basis = c.clipper?.basis;
-      if (basis !== "own" && basis !== "permission") throw new EditError("yt-dlp is only for your own videos or videos you have written permission to download. For a licensed video, import the file you have.");
-      if (!confirmed) throw new EditError("Confirm that you own this video or have written permission to download it.");
+      if (basis !== "own" && basis !== "permission") throw new EditError("Confirm that you own this video or have written permission to download it.");
       const room = await noRoomFor(0);
       if (room) throw new EditError(room);
       const id = `sh-fetch-${candidateId}`;

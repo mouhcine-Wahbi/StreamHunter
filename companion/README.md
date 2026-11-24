@@ -56,8 +56,8 @@ The installer writes only:
   repeated text and Whisper's own "no speech" segments. Kept text is Whisper's, unchanged. Captions in
   edited Shorts are built from these words only when you turn Captions on (off by default).
 * yt-dlp (`src/fetch.mjs`, request `fetch/start`, 4.6): **off unless you turn on Settings → YouTube
-  Clipper → "Allow the download tool"**, and only for a video you approved as your own or with
-  written permission, confirmed for that video. The companion accepts only an 11-character video id
+  Clipper → "Allow the download tool"**, and only for a video you confirm (in the Clipper, per
+  video) is your own or that you have written permission to download. The companion accepts only an 11-character video id
   and builds the URL itself. yt-dlp always runs with `--ignore-config --no-cookies
   --no-cookies-from-browser --no-playlist` and never with cookies, a login, netrc, a client
   certificate or extra headers (checked before every run). The video's details are checked first;

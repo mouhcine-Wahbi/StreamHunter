@@ -5,7 +5,7 @@ import { deleteSource, listSources, updateCandidate } from "./sources";
 import { listAssets } from "./assets";
 import { listEditJobs } from "./edits";
 import { getTranscript } from "./transcripts";
-import { decideSource, listSegments, parseYouTubeUrl, saveFound, bareVideo, type ApproveInput } from "@/clipper/clipper";
+import { listSegments, parseYouTubeUrl, saveFound, bareVideo } from "@/clipper/clipper";
 import { youtubeSearchVideos, youtubeVideosById } from "@/discovery/discovery";
 import { youTubeApi } from "@/platforms/youtube";
 import { getCredentials } from "@/platforms/credentials";
@@ -53,12 +53,6 @@ export function v3Routes(page: <T>(items: T[], q: URLSearchParams) => unknown): 
       const found = await youtubeVideosById(youTubeApi(), [id], "Pasted URL");
       if (!found.length) throw new RightsError("YouTube didn't return that video (it may be private, removed, or a live broadcast).");
       return saveFound(found);
-    }],
-    ["POST", /^\/api\/v1\/clipper\/videos\/(\d+)\/decision$/, async (m, _q, b) => {
-      const body = (b ?? {}) as { approve?: boolean; note?: string } & Partial<ApproveInput>;
-      return body.approve
-        ? decideSource(Number(m[1]), { approve: true, input: { basis: body.basis!, status: body.status!, evidence: body.evidence ?? "", destinations: body.destinations, confirmed: Boolean(body.confirmed) } })
-        : decideSource(Number(m[1]), { approve: false, note: body.note });
     }],
     ["GET", /^\/api\/v1\/clipper\/segments$/, async (_m, q) => {
       const s = q.get("source");

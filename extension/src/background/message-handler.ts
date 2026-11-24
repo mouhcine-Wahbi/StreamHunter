@@ -137,7 +137,7 @@ export async function handleMessage(
         if (!editing) return { ok: false, error: "Editing isn't available here." };
         try {
           if (message.type === "clipper/fetch") {
-            const s = await editing.fetchVideo(Number(message.candidateId), message.confirmed === true, await getSettings());
+            const s = await editing.fetchVideo(Number(message.candidateId), message.basis === "own" || message.basis === "permission" ? message.basis : null, await getSettings());
             await requestAnalysis(s.id);
             await processing?.kick();
             return { ok: true, data: s };

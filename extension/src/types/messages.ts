@@ -43,8 +43,8 @@ export type RuntimeRequest =
   // 4.5 YouTube Video Clipper: segments of an analysed source; approve or reject one segment
   | { type: "clipper/segments"; sourceId: number }
   | { type: "clipper/segment"; id: number; approve: boolean }
-  // 4.6: fetch an approved video with yt-dlp (opt-in; your own video or written permission; confirmed per video)
-  | { type: "clipper/fetch"; candidateId: number; confirmed: boolean }
+  // 4.6: fetch a video with yt-dlp (opt-in; you confirm per video: your own, or written permission)
+  | { type: "clipper/fetch"; candidateId: number; basis: "own" | "permission" }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }

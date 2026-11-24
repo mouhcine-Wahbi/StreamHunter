@@ -14,7 +14,7 @@ import { applyFilters, clipType, NO_FILTERS, type LibraryClip } from "@/pages/cl
 import { createEditingManager } from "@/background/editing-manager";
 import { DEFAULT_SETTINGS } from "@/types/settings";
 import { sanitizeSettings } from "@/utils/settings";
-import { buildSegments, decideSegment, decideSource, durationMatch, importForVideo, listSegments, parseYouTubeUrl, recoverClipper, saveSegments, type SpeechSegment } from "./clipper";
+import { buildSegments, CLIPPER_RIGHTS, decideSegment, durationMatch, importForVideo, listSegments, parseYouTubeUrl, recoverClipper, saveSegments, type SpeechSegment } from "./clipper";
 
 const api = () => new LocalApi(() => createAdapters());
 const ID = "dQw4w9WgXcQ";
@@ -25,7 +25,6 @@ const video = (id: string, over: Record<string, unknown> = {}) => ({
   contentDetails: { duration: "PT2M5S" },
 });
 const file = (bytes = 2000) => new File([new Uint8Array(bytes)], "my-video.mp4", { type: "video/mp4" });
-const approveInput = { basis: "own" as const, status: "processing" as const, evidence: "My own channel: https://youtube.com/@me", confirmed: true };
 
 async function candidate(): Promise<Candidate> {
   await setCredentials("youtube", { apiKey: "AIzaFakeTestKey0123456789abcdef" });
@@ -72,22 +71,18 @@ describe("Clipper: finding a video", () => {
   });
 });
 
-describe("Clipper: approval gate and import", () => {
-  it("approving needs why, evidence, confirmation and at least processing; reject is recorded; nothing imports without approval", async () => {
+describe("Clipper: import", () => {
+  it("no rights step: a chosen video's file imports directly, recorded as not asked; the video's own rights stay as they were", async () => {
     const c = await candidate();
-    await expect(importForVideo(c.id, file())).rejects.toThrow(/Approve the video/);
-    await expect(decideSource(c.id, { approve: true, input: { ...approveInput, confirmed: false } })).rejects.toThrow(/Confirm/);
-    await expect(decideSource(c.id, { approve: true, input: { ...approveInput, evidence: "" } })).rejects.toThrow(/evidence/);
-    await expect(decideSource(c.id, { approve: true, input: { ...approveInput, status: "analysis" } })).rejects.toThrow(/Authorized for processing/);
-    await expect(decideSource(c.id, { approve: true, input: { ...approveInput, basis: "" as never } })).rejects.toThrow(/why you may use/);
-    const rejected = await decideSource(c.id, { approve: false, note: "Not mine" });
-    expect(rejected.clipper).toMatchObject({ approval: "rejected", note: "Not mine" });
-    await expect(importForVideo(c.id, file())).rejects.toBeInstanceOf(RightsError);
-    const ok = await api().post<Candidate>(`/api/v1/clipper/videos/${c.id}/decision`, { approve: true, ...approveInput });
-    expect(ok).toMatchObject({ clipper: { approval: "approved", basis: "own" }, rights: { status: "processing", evidence: approveInput.evidence } });
+    expect(c.rights.status).toBe("unknown");
     const s = await importForVideo(c.id, file());
-    expect(s).toMatchObject({ candidate_id: c.id, platform: "youtube", original_url: `https://www.youtube.com/watch?v=${ID}`, rights: { status: "processing" } });
-    expect(await db.get<Candidate>("candidates", c.id)).toMatchObject({ processing: "source_added" });
+    expect(s).toMatchObject({ candidate_id: c.id, platform: "youtube", original_url: `https://www.youtube.com/watch?v=${ID}`, rights: CLIPPER_RIGHTS, analysis: "not_analyzed" });
+    expect(s.rights).toEqual({ status: "processing", evidence: "Not asked (YouTube Clipper)", destinations: [], confirmed_at: null });
+    expect(await db.get<Candidate>("candidates", c.id)).toMatchObject({ processing: "source_added", rights: { status: "unknown" } });
+    // The old decision endpoint is gone.
+    await expect(api().post(`/api/v1/clipper/videos/${c.id}/decision`, { approve: true })).rejects.toMatchObject({ status: 404 });
+    // Still only video files, and only YouTube videos.
+    await expect(importForVideo(c.id, new File(["x"], "a.txt", { type: "text/plain" }))).rejects.toBeInstanceOf(RightsError);
   });
 
   it("the imported file is compared with the video's length", () => {
@@ -122,7 +117,6 @@ describe("Clipper: segments", () => {
 
   it("each segment is approved (cut into a clip) or rejected; regenerating keeps your decisions", async () => {
     const c = await candidate();
-    await decideSource(c.id, { approve: true, input: approveInput });
     const src = await importForVideo(c.id, file());
     await db.put("sources", { ...src, analysis: "analyzed", duration_seconds: 125, moments, transcript_status: "done", transcript: { model: "large-v3-turbo", language: "en", segments: speech, dropped: 0, created_at: "" } });
     let segs = await saveSegments((await listSources())[0]!);
@@ -133,10 +127,8 @@ describe("Clipper: segments", () => {
     await decideSegment(segs[1]!.id, false);
     segs = await saveSegments((await listSources())[0]!);
     expect(segs.map((s) => [s.start, s.status])).toEqual([[7.7, "approved"], [65, "rejected"]]);
-    // The decision on the video still guards the segments.
-    await decideSource(c.id, { approve: false });
-    await db.put("segments", { ...segs[1]!, status: "pending" });
-    await expect(decideSegment(segs[1]!.id, true)).rejects.toThrow(/isn't approved/);
+    // A rejected segment can still be approved later (no video-level approval needed).
+    expect(await decideSegment(segs[1]!.id, true)).toMatchObject({ status: "approved" });
     // Deleting the source deletes its segments.
     await deleteSource(src.id);
     expect(await listSegments(src.id)).toEqual([]);
@@ -185,35 +177,31 @@ describe("4.6 yt-dlp (opt-in)", () => {
   }
   const settings = (on: boolean) => ({ ...DEFAULT_SETTINGS, clipper: { allowDownloadTool: on } });
 
-  it("off by default; needs approval as your own video or written permission, and a confirmation per video", async () => {
+  it("off by default; needs a confirmation for this video (own, or written permission)", async () => {
     expect(DEFAULT_SETTINGS.clipper.allowDownloadTool).toBe(false);
     expect(sanitizeSettings({}).clipper.allowDownloadTool).toBe(false);
     const c = await candidate();
     const f = companion();
     const m = createEditingManager({ companion: f.deps, isRecording: async () => false, fetch: f.fetchImpl, pollMs: 5 });
-    await expect(m.fetchVideo(c.id, true, settings(false))).rejects.toThrow(/download tool is off/);
-    await expect(m.fetchVideo(c.id, true, settings(true))).rejects.toThrow(/Approve the video/);
-    await decideSource(c.id, { approve: true, input: { ...approveInput, basis: "licensed", evidence: "CC BY: https://youtube.com/..." } });
-    await expect(m.fetchVideo(c.id, true, settings(true))).rejects.toThrow(/only for your own videos or videos you have written permission/);
-    await decideSource(c.id, { approve: true, input: approveInput });
-    await expect(m.fetchVideo(c.id, false, settings(true))).rejects.toThrow(/Confirm that you own/);
+    await expect(m.fetchVideo(c.id, "own", settings(false))).rejects.toThrow(/download tool is off/);
+    await expect(m.fetchVideo(c.id, null, settings(true))).rejects.toThrow(/Confirm that you own/);
+    await expect(m.fetchVideo(c.id, "licensed" as never, settings(true))).rejects.toThrow(/Confirm that you own/);
     expect(f.calls).toEqual([]); // the companion was never asked
   });
 
   it("the companion gets only the id (no URL, no cookies); a refusal is shown as is; success imports the file", async () => {
     const c = await candidate();
-    await decideSource(c.id, { approve: true, input: { ...approveInput, basis: "permission", evidence: "Email from the creator, 2026-11-20" } });
     const no = companion({ error: "Not fetched: The video is private." });
     const m1 = createEditingManager({ companion: no.deps, isRecording: async () => false, fetch: no.fetchImpl, pollMs: 5 });
-    await expect(m1.fetchVideo(c.id, true, settings(true))).rejects.toThrow("Not fetched: The video is private.");
+    await expect(m1.fetchVideo(c.id, "permission", settings(true))).rejects.toThrow("Not fetched: The video is private.");
     expect(await listSources()).toEqual([]);
     expect(no.calls.filter((x) => x.type === "fetch/start")).toHaveLength(1);
 
     const ok = companion();
     const m = createEditingManager({ companion: ok.deps, isRecording: async () => false, fetch: ok.fetchImpl, pollMs: 5 });
-    const s = await m.fetchVideo(c.id, true, settings(true));
+    const s = await m.fetchVideo(c.id, "permission", settings(true));
     expect(ok.calls.find((x) => x.type === "fetch/start")!.payload).toEqual({ id_job: `sh-fetch-${c.id}`, video_id: ID, confirmed: true, basis: "permission" });
-    expect(s).toMatchObject({ candidate_id: c.id, platform: "youtube", obtained_via: "yt-dlp", size_bytes: 4000, rights: { status: "processing", evidence: "Email from the creator, 2026-11-20" } });
+    expect(s).toMatchObject({ candidate_id: c.id, platform: "youtube", obtained_via: "yt-dlp", size_bytes: 4000, rights: CLIPPER_RIGHTS });
     expect(ok.calls.at(-1)).toMatchObject({ type: "jobs/remove" });
   });
 });
@@ -221,7 +209,6 @@ describe("4.6 yt-dlp (opt-in)", () => {
 describe("4.7 storage and recovery", () => {
   it("an import that wouldn't leave 2 GB of browser storage free is refused, with the numbers", async () => {
     const c = await candidate();
-    await decideSource(c.id, { approve: true, input: approveInput });
     const est = vi.fn(async () => ({ quota: 3 * 1024 ** 3, usage: 0.5 * 1024 ** 3 }));
     Object.defineProperty(navigator, "storage", { value: { estimate: est }, configurable: true });
     try {
@@ -236,7 +223,6 @@ describe("4.7 storage and recovery", () => {
 
   it("after a restart: a running transcription is marked interrupted; a segment whose cut was lost can be approved again", async () => {
     const c = await candidate();
-    await decideSource(c.id, { approve: true, input: approveInput });
     const src = await importForVideo(c.id, file());
     await db.put("sources", { ...src, analysis: "analyzed", duration_seconds: 125, moments, transcript_status: "done", transcript: { model: "m", language: "en", segments: speech, dropped: 0, created_at: "" } });
     const segs = await saveSegments((await listSources())[0]!);

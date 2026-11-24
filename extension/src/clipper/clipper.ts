@@ -1,21 +1,20 @@
 /**
- * 4.5 YouTube Video Clipper. Find a video (search or URL), say why you may use it (your own video,
- * written permission, or a licence) and approve or reject it, then import the file you obtained
- * through an authorized route (YouTube Studio's download for your own videos). StreamHunter analyses
- * it (loudness on this computer, speech with Whisper in the companion), proposes segments with the
- * measured reasons, and cuts only the segments you approve. YouTube showing a video, and your
- * confirmation here, are not proof of permission: StreamHunter records what you state.
+ * 4.5 YouTube Video Clipper. Find a video (search or URL), import its file, and StreamHunter
+ * analyses it (loudness on this computer, speech with Whisper in the companion), proposes segments
+ * with the measured reasons, and cuts only the segments you approve. There is no rights step: the
+ * file is recorded as "not asked" (see CLIPPER_RIGHTS). StreamHunter itself never downloads from
+ * YouTube; yt-dlp is a separate opt-in (Settings → YouTube Clipper).
  */
 import { db } from "@/local/db";
-import { atLeast, RightsError, validateRights, type Destination, type RightsStatus } from "@/local/rights";
+import { RightsError, type Rights } from "@/local/rights";
 import { addSource, requestSourceClip, type SourceFile, type SuggestedMoment } from "@/local/sources";
-import { type Candidate, type ClipperDecision, type Found, type SourceBasis, upsertCandidates } from "@/discovery/discovery";
+import { type Candidate, type Found, upsertCandidates } from "@/discovery/discovery";
 
-export const BASIS_LABEL: Record<SourceBasis, string> = {
-  own: "My own video",
-  permission: "Written permission from the rights holder",
-  licensed: "Licensed for reuse (for example Creative Commons)",
-};
+/**
+ * The rights record stored with a Clipper file. You aren't asked, and the record says so: no
+ * evidence and no confirmation date. It lets the analysis and cutting run; it is not a permission.
+ */
+export const CLIPPER_RIGHTS: Rights = { status: "processing", evidence: "Not asked (YouTube Clipper)", destinations: [], confirmed_at: null };
 
 // --- URLs ------------------------------------------------------------------------------------------
 
@@ -78,48 +77,18 @@ export async function saveFound(found: Found[], now = new Date()): Promise<Candi
   return out;
 }
 
-// --- approval --------------------------------------------------------------------------------------
+// --- import ----------------------------------------------------------------------------------------
 
-export interface ApproveInput {
-  basis: SourceBasis;
-  status: RightsStatus;
-  evidence: string;
-  destinations?: Destination[];
-  confirmed: boolean;
-}
-
-/**
- * Approve a video as a source: needs the basis, evidence, your confirmation, and at least
- * "Authorized for processing" (cutting clips). Reject records that you don't want it.
- */
-export async function decideSource(candidateId: number, decision: { approve: true; input: ApproveInput } | { approve: false; note?: string }, now = new Date()): Promise<Candidate> {
-  const c = await db.get<Candidate>("candidates", candidateId);
-  if (!c) throw new RightsError("That video is no longer in StreamHunter.");
-  if (c.platform !== "youtube") throw new RightsError("The Clipper works with YouTube videos.");
-  if (!decision.approve) {
-    const clipper: ClipperDecision = { approval: "rejected", basis: null, note: String(decision.note ?? "").slice(0, 300), decided_at: now.toISOString() };
-    return db.put<Candidate>("candidates", { ...c, clipper, updated_at: now.toISOString() });
-  }
-  const i = decision.input;
-  if (!i.basis || !(i.basis in BASIS_LABEL)) throw new RightsError("Choose why you may use this video.");
-  const rights = validateRights({ status: i.status, evidence: i.evidence, destinations: i.destinations, confirmed: i.confirmed }, now);
-  if (!atLeast(rights, "processing")) throw new RightsError('Approving a source needs at least "Authorized for processing" (cutting clips from it).');
-  const clipper: ClipperDecision = { approval: "approved", basis: i.basis, note: "", decided_at: now.toISOString() };
-  return db.put<Candidate>("candidates", { ...c, rights, clipper, updated_at: now.toISOString() });
-}
-
-export const isApproved = (c: Pick<Candidate, "clipper" | "rights"> | null | undefined) => c?.clipper?.approval === "approved" && atLeast(c.rights, "processing");
-
-/** Import the file you obtained through an authorized route, for an approved video. */
+/** Import the video's file. No rights step: the file is recorded with CLIPPER_RIGHTS. */
 export async function importForVideo(candidateId: number, file: Blob & { name?: string }, now = new Date()): Promise<SourceFile> {
   const c = await db.get<Candidate>("candidates", candidateId);
   if (!c) throw new RightsError("That video is no longer in StreamHunter.");
-  if (!isApproved(c)) throw new RightsError("Approve the video as a source first (with why you may use it).");
-  return addSource(file, { candidate_id: c.id, creator_name: c.creator_name || "YouTube creator", platform: "youtube", original_url: c.url }, { status: c.rights.status, evidence: c.rights.evidence, destinations: c.rights.destinations, confirmed: true }, now);
+  if (c.platform !== "youtube") throw new RightsError("The Clipper works with YouTube videos.");
+  return addSource(file, { candidate_id: c.id, creator_name: c.creator_name || "YouTube creator", platform: "youtube", original_url: c.url }, { status: CLIPPER_RIGHTS.status }, now, { recorded: { ...CLIPPER_RIGHTS } });
 }
 
 /**
- * Does the imported file look like the approved video? Compared by length (YouTube's duration is
+ * Does the imported file look like the chosen video? Compared by length (YouTube's duration is
  * whole seconds). null when either length is unknown.
  */
 export function durationMatch(videoSec: number | null, fileSec: number | null): { ok: boolean; message: string } | null {
@@ -230,8 +199,6 @@ export async function decideSegment(id: number, approve: boolean): Promise<Segme
   if (!approve) return db.put<Segment>("segments", { ...seg, status: "rejected" });
   const source = await db.get<SourceFile>("sources", seg.source_id);
   if (!source) throw new RightsError("The source file was removed.");
-  const cand = source.candidate_id !== null ? await db.get<Candidate>("candidates", source.candidate_id) : undefined;
-  if (cand && !isApproved(cand)) throw new RightsError("The video isn't approved as a source.");
   const m = Math.floor(seg.start / 60);
   const title = `${source.creator_name} – ${m}:${String(Math.floor(seg.start % 60)).padStart(2, "0")}`;
   await requestSourceClip(source.id, { start: seg.start, end: seg.end, title, score: seg.score, reasons: seg.reasons.slice(0, 4), segment_id: seg.id });

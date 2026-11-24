@@ -798,7 +798,7 @@ describe("3.0 output formats in the dashboard", () => {
 });
 
 describe("4.5 YouTube Video Clipper", () => {
-  it("search → video → approve with why and evidence → import the file → segments → approve one", async () => {
+  it("search → video → import the file directly (no rights step) → segments → approve one", async () => {
     await setCredentials("youtube", { apiKey: "AIzaFakeTestKey0123456789abcdef" });
     mockFetch((url) => {
       const u = new URL(url);
@@ -821,14 +821,11 @@ describe("4.5 YouTube Video Clipper", () => {
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
     await userEvent.click(await screen.findByRole("button", { name: /My tournament run/ }));
     const panel = await screen.findByLabelText("Video: My tournament run");
-    expect(within(panel).getByLabelText("Rights status")).toHaveTextContent("Not decided");
-    expect(within(panel).getByText(/not proof of permission/)).toBeInTheDocument();
-    expect(within(panel).queryByText(/Import the video file/)).toBeNull();
-    await userEvent.click(within(panel).getByLabelText("My own video"));
-    await userEvent.type(within(panel).getByLabelText("Rights evidence"), "My own channel: youtube.com/@me");
-    await userEvent.click(within(panel).getByRole("checkbox", { name: /I confirm I have these rights/ }));
-    await userEvent.click(within(panel).getByRole("button", { name: "Approve source" }));
-    await waitFor(() => expect(within(screen.getByLabelText("Video: My tournament run")).getByLabelText("Rights status")).toHaveTextContent(/Approved source.*Authorized for processing.*My own video/));
+    // No rights step: no approval, evidence or permission fields; the import is there at once.
+    expect(within(panel).queryByLabelText("Rights status")).toBeNull();
+    expect(within(panel).queryByLabelText("Rights evidence")).toBeNull();
+    expect(within(panel).queryByRole("button", { name: "Approve source" })).toBeNull();
+    expect(within(panel).getByText("1. Import the video file")).toBeInTheDocument();
     expect(screen.queryByLabelText("Download tool")).toBeNull(); // yt-dlp is off by default
     await userEvent.upload(screen.getByLabelText("Video file"), new File([new Uint8Array(500)], "run.mp4", { type: "video/mp4" }));
     await userEvent.click(screen.getByRole("button", { name: "Import and analyse" }));
@@ -860,17 +857,13 @@ describe("4.5 YouTube Video Clipper", () => {
     render(<App />);
     await userEvent.type(await screen.findByLabelText("YouTube video URL"), "https://youtu.be/abcdefghijk");
     await userEvent.click(screen.getByRole("button", { name: "Open" }));
-    const panel = await screen.findByLabelText("Video: YouTube video abcdefghijk");
-    await userEvent.click(within(panel).getByLabelText("My own video"));
-    await userEvent.type(within(panel).getByLabelText("Rights evidence"), "My own channel");
-    await userEvent.click(within(panel).getByRole("checkbox", { name: /I confirm I have these rights/ }));
-    await userEvent.click(within(panel).getByRole("button", { name: "Approve source" }));
+    await screen.findByLabelText("Video: YouTube video abcdefghijk");
     const tool = await screen.findByLabelText("Download tool");
     const btn = within(tool).getByRole("button", { name: "Fetch with yt-dlp" });
     expect(btn).toBeDisabled();
-    await userEvent.click(within(tool).getByRole("checkbox", { name: /this is my own video and I may download it/ }));
+    await userEvent.click(within(tool).getByRole("radio", { name: /This is my own video and I may download it/ }));
     await userEvent.click(btn);
-    await waitFor(() => expect(editing.fetchVideo).toHaveBeenCalledWith(expect.any(Number), true, expect.objectContaining({ clipper: { allowDownloadTool: true } })));
+    await waitFor(() => expect(editing.fetchVideo).toHaveBeenCalledWith(expect.any(Number), "own", expect.objectContaining({ clipper: { allowDownloadTool: true } })));
     await waitFor(() => expect(processing!.kick).toHaveBeenCalled());
     expect(await screen.findByRole("status", { name: "Source status" })).toHaveTextContent("Waiting to analyse…");
     // Delete the source file: not while it is busy; then with a confirmation.

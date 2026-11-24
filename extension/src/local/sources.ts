@@ -81,12 +81,17 @@ export async function addSource(
   meta: { candidate_id?: number | null; creator_name: string; platform?: SourceFile["platform"]; original_url?: string | null },
   rightsInput: Parameters<typeof validateRights>[0],
   now = new Date(),
+  /**
+   * The YouTube Clipper has no rights step: it passes the record to store as is (saying it wasn't
+   * asked), and the discovered video's own rights are left untouched.
+   */
+  opts: { recorded?: Rights } = {},
 ): Promise<SourceFile> {
   if (!VIDEO_TYPES.test(file.type)) throw new RightsError("Choose an MP4, MOV or WebM video file.");
   if (file.size === 0 || file.size > MAX_SOURCE_BYTES) throw new RightsError("The file is empty or larger than 4 GB.");
   const room = await noRoomFor(file.size);
   if (room) throw new RightsError(room);
-  const rights = validateRights(rightsInput, now);
+  const rights = opts.recorded ?? validateRights(rightsInput, now);
   if (!atLeast(rights, "analysis")) throw new RightsError("StreamHunter only works with files you're authorized to use: choose at least \"Authorized for analysis\".");
   let candidate: Candidate | undefined;
   if (meta.candidate_id != null) {
@@ -112,7 +117,7 @@ export async function addSource(
     added_at: now.toISOString(),
   });
   await db.putBlob(row.id, file, "sourceBlobs");
-  if (candidate) await db.put<Candidate>("candidates", { ...candidate, rights, processing: "source_added", updated_at: now.toISOString() });
+  if (candidate) await db.put<Candidate>("candidates", { ...candidate, ...(opts.recorded ? {} : { rights }), processing: "source_added", updated_at: now.toISOString() });
   return row;
 }
 

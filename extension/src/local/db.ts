@@ -8,7 +8,7 @@
  */
 
 export const DB_NAME = "streamhunter";
-export const DB_VERSION = 6;
+export const DB_VERSION = 7;
 
 export type StoreName =
   | "streamers" | "sessions" | "highlights" | "clips" | "clipBlobs" | "clipThumbs"
@@ -17,7 +17,9 @@ export type StoreName =
   // v5 (4.0): editing jobs run by the companion
   | "editJobs"
   // v6 (4.4): Whisper transcripts, one per clip
-  | "transcripts";
+  | "transcripts"
+  // v7 (4.5): YouTube Video Clipper candidate segments
+  | "segments";
 export type BlobStore = "clipBlobs" | "clipThumbs" | "sourceBlobs" | "assetBlobs";
 
 function upgrade(db: IDBDatabase, oldVersion: number): void {
@@ -35,6 +37,8 @@ function upgrade(db: IDBDatabase, oldVersion: number): void {
   }
   // v6 (4.4): one transcript per clip (key = clip id).
   if (oldVersion < 6) db.createObjectStore("transcripts", { keyPath: "clip_id" });
+  // v7 (4.5): candidate segments of an authorized source, each approved or rejected by you.
+  if (oldVersion < 7) db.createObjectStore("segments", { keyPath: "id", autoIncrement: true }).createIndex("source", "source_id");
 }
 
 /** 3.0: existing stores and data are untouched; only new stores are added. */

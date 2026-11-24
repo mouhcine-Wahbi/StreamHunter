@@ -53,7 +53,16 @@ export function detectedAt(clip: LibraryClip): string {
   return clip.peak_at ?? clip.started_at;
 }
 
+/** 4.5: where a clip came from. */
+export type ClipType = "livestream" | "youtube_video" | "local_file";
+export const CLIP_TYPE_LABEL: Record<ClipType, string> = { livestream: "Livestream", youtube_video: "YouTube video (Clipper)", local_file: "Local file" };
+export function clipType(c: LibraryClip): ClipType {
+  if (c.source_id == null) return "livestream";
+  return c.platform === "youtube" ? "youtube_video" : "local_file";
+}
+
 export interface LibraryFilters {
+  type: "all" | ClipType;
   creator: string;
   format: "all" | AssetKind;
   minScore: number;
@@ -62,7 +71,7 @@ export interface LibraryFilters {
   status: "all" | LibraryStatus;
 }
 
-export const NO_FILTERS: LibraryFilters = { creator: "", format: "all", minScore: 0, from: "", to: "", status: "all" };
+export const NO_FILTERS: LibraryFilters = { type: "all", creator: "", format: "all", minScore: 0, from: "", to: "", status: "all" };
 
 /** The viral-potential score when there is one, else the detection score. */
 export function displayScore(clip: LibraryClip): number {
@@ -77,6 +86,7 @@ export function applyFilters(clips: LibraryClip[], assetsOf: (id: number) => Ass
     const at = new Date(detectedAt(c)).getTime();
     const assets = assetsOf(c.id);
     return (
+      (f.type === "all" || clipType(c) === f.type) &&
       (!f.creator || c.streamer_display_name === f.creator) &&
       (f.format === "all" || assets.some((a) => a.kind === f.format && a.status === "ready")) &&
       displayScore(c) >= f.minScore &&

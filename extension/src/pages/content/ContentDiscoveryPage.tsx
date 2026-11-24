@@ -20,7 +20,7 @@ import { DISCOVERY_KEY, type Candidate, type DiscoveryRun, type DiscoveryVia } f
 import type { Page } from "@/types/api";
 import { formatRelative } from "@/utils/format";
 
-const VIA_LABEL: Record<DiscoveryVia, string> = { creator_uploads: "Your creators", trending: "Trending", keyword: "Keywords" };
+const VIA_LABEL: Record<DiscoveryVia, string> = { creator_uploads: "Your creators", trending: "Trending", keyword: "Keywords", clipper: "YouTube Clipper" };
 const PROCESSING_LABEL: Record<Candidate["processing"], string> = {
   not_started: "Not processed (nothing downloaded)",
   source_added: "Authorized file added",

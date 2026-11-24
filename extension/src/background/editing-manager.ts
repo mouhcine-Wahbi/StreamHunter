@@ -10,6 +10,8 @@ import type { ContentClip } from "@/local/content";
 import { createEditJob, EDIT_STATE_LABEL, EDIT_TERMINAL, editJobByKey, getEditJob, listEditJobs, patchEditJob, type EditJob, type EditState } from "@/local/edits";
 import { buildEditPlan, captionsFor, decideEdit, dedupeKey } from "@/editing/rules";
 import { getTranscript, putTranscript, type Transcript } from "@/local/transcripts";
+import { sourceBlob, updateSource, type SourceFile } from "@/local/sources";
+import { saveSegments, type Segment } from "@/clipper/clipper";
 import { getFile, putFile, type CompanionEndpoint, type CompanionEvent, type CompanionJob } from "@/companion/client";
 import type { Settings } from "@/types/settings";
 
@@ -67,6 +69,36 @@ export function createEditingManager(deps: EditingDeps) {
    * 4.4: a transcript of the clip, made by the companion with Whisper (once per clip; kept in the
    * database). `onProgress` gets the companion's progress while it runs.
    */
+  type WhisperData = Omit<Transcript, "clip_id" | "metrics" | "created_at">;
+  /** Runs Whisper in the companion on a file and returns its (guarded) transcript. */
+  async function runWhisper(id: string, blob: Blob, holdKey: number, onProgress?: (cj: CompanionJob) => void): Promise<{ data: WhisperData; metrics: CompanionJob["metrics"] }> {
+    hold(holdKey, true);
+    try {
+      const ep = await deps.companion.endpoint();
+      let cj = await deps.companion.request<CompanionJob | null>("jobs/get", { id_job: id }).catch(() => null);
+      if (!cj || cj.state === "failed" || cj.state === "cancelled") {
+        await putFile(ep, `${id}-in.mp4`, blob, fetchImpl);
+        cj = await deps.companion.request<CompanionJob>("transcribe/start", { id_job: id, input: `${id}-in.mp4` }).catch((e: unknown) => {
+          const m = e instanceof Error ? e.message : String(e);
+          throw new EditError(/Unknown request/i.test(m) ? "This companion can't transcribe yet. Update it (run the installer from the new StreamHunter folder)." : m);
+        });
+      }
+      while (cj && cj.state !== "done" && cj.state !== "failed" && cj.state !== "cancelled") {
+        onProgress?.(cj);
+        await sleep(deps.pollMs ? Math.min(deps.pollMs, 1000) : 1000);
+        cj = await deps.companion.request<CompanionJob | null>("jobs/get", { id_job: id });
+      }
+      if (!cj) throw new EditError("The companion lost the transcription; try again.");
+      if (cj.state !== "done") throw new EditError(cj.error ?? "The transcription was cancelled.");
+      const out = cj.output as unknown as TranscribeOutput;
+      const data = JSON.parse(await (await getFile(ep, out.transcript, fetchImpl)).text()) as WhisperData;
+      await deps.companion.request("jobs/remove", { id_job: id }).catch(() => undefined);
+      return { data, metrics: cj.metrics };
+    } finally {
+      hold(holdKey, false);
+    }
+  }
+
   function transcribe(clipId: number, onProgress?: (cj: CompanionJob) => void): Promise<Transcript> {
     const running = transcribing.get(clipId);
     if (running) return running;
@@ -75,46 +107,55 @@ export function createEditingManager(deps: EditingDeps) {
       if (have) return have;
       const blob = await db.get<Blob>("clipBlobs", clipId);
       if (!blob) throw new EditError("The original clip file is missing.");
-      const id = trId(clipId);
-      hold(-clipId, true);
-      try {
-        const ep = await deps.companion.endpoint();
-        let cj = await deps.companion.request<CompanionJob | null>("jobs/get", { id_job: id }).catch(() => null);
-        if (!cj || cj.state === "failed" || cj.state === "cancelled") {
-          await putFile(ep, `${id}-in.mp4`, blob, fetchImpl);
-          cj = await deps.companion.request<CompanionJob>("transcribe/start", { id_job: id, input: `${id}-in.mp4` }).catch((e: unknown) => {
-            const m = e instanceof Error ? e.message : String(e);
-            throw new EditError(/Unknown request/i.test(m) ? "This companion can't transcribe yet. Update it (run the installer from the new StreamHunter folder)." : m);
-          });
-        }
-        while (cj && cj.state !== "done" && cj.state !== "failed" && cj.state !== "cancelled") {
-          onProgress?.(cj);
-          await sleep(deps.pollMs ? Math.min(deps.pollMs, 1000) : 1000);
-          cj = await deps.companion.request<CompanionJob | null>("jobs/get", { id_job: id });
-        }
-        if (!cj) throw new EditError("The companion lost the transcription; try again.");
-        if (cj.state !== "done") throw new EditError(cj.error ?? "The transcription was cancelled.");
-        const out = cj.output as unknown as TranscribeOutput;
-        const data = JSON.parse(await (await getFile(ep, out.transcript, fetchImpl)).text()) as Omit<Transcript, "clip_id" | "metrics" | "created_at">;
-        const t = await putTranscript({
-          clip_id: clipId,
-          model: data.model,
-          language: data.language ?? null,
-          duration: data.duration,
-          segments: data.segments ?? [],
-          dropped: data.dropped ?? [],
-          metrics: cj.metrics ? { wall_ms: cj.metrics.wall_ms, cpu_ms: cj.metrics.cpu_ms, peak_rss_bytes: cj.metrics.peak_rss_bytes } : null,
-          created_at: new Date().toISOString(),
-        });
-        await deps.companion.request("jobs/remove", { id_job: id }).catch(() => undefined);
-        log("transcript_done", { clip: clipId, segments: t.segments.length, dropped: t.dropped.length, ...(cj.metrics ?? {}) });
-        return t;
-      } finally {
-        hold(-clipId, false);
-      }
+      const { data, metrics } = await runWhisper(trId(clipId), blob, -clipId, onProgress);
+      const t = await putTranscript({
+        clip_id: clipId,
+        model: data.model,
+        language: data.language ?? null,
+        duration: data.duration,
+        segments: data.segments ?? [],
+        dropped: data.dropped ?? [],
+        metrics: metrics ? { wall_ms: metrics.wall_ms, cpu_ms: metrics.cpu_ms, peak_rss_bytes: metrics.peak_rss_bytes } : null,
+        created_at: new Date().toISOString(),
+      });
+      log("transcript_done", { clip: clipId, segments: t.segments.length, dropped: t.dropped.length, ...(metrics ?? {}) });
+      return t;
     })();
     transcribing.set(clipId, p);
     void p.finally(() => transcribing.delete(clipId)).catch(() => undefined);
+    return p;
+  }
+
+  const sourceRuns = new Map<number, Promise<SourceFile>>();
+  /**
+   * 4.5: transcript of a whole authorized source (Clipper). Without the companion or Whisper the
+   * source is marked "unavailable" and its segments simply have no speech excerpts.
+   */
+  function transcribeSource(sourceId: number): Promise<SourceFile> {
+    const running = sourceRuns.get(sourceId);
+    if (running) return running;
+    const p = (async () => {
+      let s = await db.get<SourceFile>("sources", sourceId);
+      if (!s) throw new EditError("That source file no longer exists.");
+      if (s.transcript_status === "done") return s;
+      const blob = await sourceBlob(sourceId);
+      if (!blob) throw new EditError("The source file is no longer stored.");
+      const there = await deps.companion.endpoint().then(() => true, () => false);
+      if (!there) return updateSource(sourceId, { transcript_status: "unavailable", transcript_error: "The companion isn't connected, so there are no speech excerpts." });
+      s = await updateSource(sourceId, { transcript_status: "running", transcript_error: null });
+      try {
+        const { data } = await runWhisper(`sh-trs-${sourceId}`, blob, -1_000_000 - sourceId);
+        return await updateSource(sourceId, {
+          transcript_status: "done",
+          transcript_error: null,
+          transcript: { model: data.model, language: data.language ?? null, segments: data.segments ?? [], dropped: (data.dropped ?? []).length, created_at: new Date().toISOString() },
+        });
+      } catch (e) {
+        return updateSource(sourceId, { transcript_status: "failed", transcript_error: e instanceof Error ? e.message : String(e) });
+      }
+    })();
+    sourceRuns.set(sourceId, p);
+    void p.finally(() => sourceRuns.delete(sourceId)).catch(() => undefined);
     return p;
   }
 
@@ -322,6 +363,13 @@ export function createEditingManager(deps: EditingDeps) {
       await pollActive();
     },
     pollActive,
+    /** 4.5: speech of a whole source (if the companion is there), then its candidate segments. */
+    async segments(sourceId: number): Promise<Segment[]> {
+      const s = await db.get<SourceFile>("sources", sourceId);
+      if (!s) throw new EditError("That source file no longer exists.");
+      if (s.analysis !== "analyzed") throw new EditError("Analyse the file first.");
+      return saveSegments(await transcribeSource(sourceId));
+    },
     /** 4.4: transcribe a clip now (Library → Transcribe); the stored transcript if there is one. */
     async transcribe(clipId: number): Promise<Transcript> {
       if (!(await db.get<ContentClip>("clips", clipId))) throw new EditError("That clip no longer exists.");

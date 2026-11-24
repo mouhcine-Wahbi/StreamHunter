@@ -8,6 +8,7 @@ import { getCaptureState, getSlots, type CaptureManager } from "./capture-manage
 import { SYSTEM_KEY, type SystemLoad } from "@/types/capture";
 import { ApprovalError, type Approval, type ApprovalAction } from "@/local/approvals";
 import { requestAnalysis, requestSourceClip } from "@/local/sources";
+import { decideSegment } from "@/clipper/clipper";
 import { RightsError } from "@/local/rights";
 import { ProcessingError, type ProcessingManager } from "./processing-manager";
 import type { ContentManager } from "./content-manager";
@@ -78,12 +79,18 @@ export async function handleMessage(
       }
       case "source/analyze":
       case "source/clip":
+      case "clipper/segment":
       case "assets/make": {
         if (!processing) return { ok: false, error: "Processing is only available in the installed extension" };
         try {
           if (message.type === "assets/make") {
             const kinds = Array.isArray(message.kinds) ? message.kinds.filter((k) => k === "vertical" || k === "landscape") : undefined;
             return { ok: true, data: await processing.makeAssets(Number(message.clipId), await getSettings(), kinds, message.layout ?? null) };
+          }
+          if (message.type === "clipper/segment") {
+            const seg = await decideSegment(Number(message.id), Boolean(message.approve));
+            if (seg.status === "approved") await processing.kick();
+            return { ok: true, data: seg };
           }
           const id = Number(message.id);
           const data =
@@ -114,15 +121,17 @@ export async function handleMessage(
       case "edit/start":
       case "edit/cancel":
       case "edit/retry":
-      case "transcript/start": {
+      case "transcript/start":
+      case "clipper/segments": {
         if (!editing) return { ok: false, error: "Editing isn't available here." };
         try {
           if (message.type === "edit/start") return { ok: true, data: await editing.edit(Number(message.clipId), await getSettings(), "manual") };
           if (message.type === "edit/cancel") return { ok: true, data: (await editing.cancel(Number(message.id))) ?? null };
           if (message.type === "transcript/start") return { ok: true, data: await editing.transcribe(Number(message.clipId)) };
+          if (message.type === "clipper/segments") return { ok: true, data: await editing.segments(Number(message.sourceId)) };
           return { ok: true, data: await editing.retry(Number(message.id)) };
         } catch (e) {
-          if (e instanceof EditError || (message.type === "transcript/start" && e instanceof Error)) return { ok: false, error: e.message };
+          if (e instanceof EditError || ((message.type === "transcript/start" || message.type === "clipper/segments") && e instanceof Error)) return { ok: false, error: e.message };
           throw e;
         }
       }

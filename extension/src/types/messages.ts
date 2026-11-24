@@ -39,6 +39,9 @@ export type RuntimeRequest =
   | { type: "edit/retry"; id: number }
   // 4.4: transcribe a clip with Whisper in the companion
   | { type: "transcript/start"; clipId: number }
+  // 4.5 YouTube Video Clipper: segments of an analysed source; approve or reject one segment
+  | { type: "clipper/segments"; sourceId: number }
+  | { type: "clipper/segment"; id: number; approve: boolean }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }
@@ -100,6 +103,8 @@ export interface ResponseMap {
   "edit/cancel": import("@/local/edits").EditJob | null;
   "edit/retry": import("@/local/edits").EditJob;
   "transcript/start": import("@/local/transcripts").Transcript;
+  "clipper/segments": import("@/clipper/clipper").Segment[];
+  "clipper/segment": import("@/clipper/clipper").Segment;
   "capture/get": CaptureState;
   "capture/list": CaptureState[];
   "capture/pause-slot": CaptureState;
@@ -141,6 +146,8 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "edit/cancel",
   "edit/retry",
   "transcript/start",
+  "clipper/segments",
+  "clipper/segment",
   "capture/get",
   "capture/list",
   "capture/pause-slot",

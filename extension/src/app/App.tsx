@@ -13,6 +13,7 @@ import { HealthPage } from "@/pages/health/HealthPage";
 import { ContentDiscoveryPage } from "@/pages/content/ContentDiscoveryPage";
 import { FormatsPage } from "@/pages/formats/FormatsPage";
 import { NAV, ROUTES, type Route } from "./routes";
+import { ClipperPage } from "@/pages/clipper/ClipperPage";
 
 
 export function App() {
@@ -46,6 +47,9 @@ export function App() {
       break;
     case "/content":
       page = <ContentDiscoveryPage />;
+      break;
+    case "/clipper":
+      page = <ClipperPage />;
       break;
     case "/shorts":
       page = <FormatsPage kind="vertical" />;

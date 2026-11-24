@@ -20,7 +20,7 @@ import { dataList, num, str, time } from "@/platforms/types";
 import { db } from "@/local/db";
 import { NO_RIGHTS, type Rights } from "@/local/rights";
 
-export type DiscoveryVia = "creator_uploads" | "trending" | "keyword";
+export type DiscoveryVia = "creator_uploads" | "trending" | "keyword" | "clipper";
 export type CandidateProcessing = "not_started" | "source_added" | "analyzing" | "analyzed" | "failed";
 
 export interface Candidate {
@@ -47,6 +47,8 @@ export interface Candidate {
   popularity: { score: number; explain: string[] };
   /** Rights for THIS item (creator-level rights may also apply). Discovered items start at unknown. */
   rights: Rights;
+  /** 4.5 YouTube Video Clipper: your decision on this video as a source (with the basis for it). */
+  clipper?: ClipperDecision;
   processing: CandidateProcessing;
   processing_error: string | null;
   dismissed: boolean;
@@ -54,7 +56,15 @@ export interface Candidate {
   updated_at: string;
 }
 
-export type Found = Omit<Candidate, "id" | "popularity" | "rights" | "processing" | "processing_error" | "dismissed" | "discovered_at" | "updated_at">;
+export type SourceBasis = "own" | "permission" | "licensed";
+export interface ClipperDecision {
+  approval: "approved" | "rejected";
+  basis: SourceBasis | null;
+  note: string;
+  decided_at: string;
+}
+
+export type Found = Omit<Candidate, "id" | "popularity" | "rights" | "processing" | "processing_error" | "dismissed" | "discovered_at" | "updated_at" | "clipper">;
 
 export interface DiscoveryFilters {
   /** Only videos published within this many days. */
@@ -185,6 +195,21 @@ export async function youtubeKeyword(api: YtApi, opts: { q: string; publishedAft
   const ids = items(body).map((i) => str(obj(i.id).videoId)).filter((x): x is string => x !== null);
   if (ids.length === 0) return [];
   return (await videoDetails(api, ids)).map((v) => fromYouTubeVideo(v, "keyword", `Keyword "${opts.q}" on YouTube`)).filter((x): x is Found => x !== null);
+}
+
+/** 4.5: one or more videos by id (videos.list, 1 unit per 50). Live and upcoming broadcasts are left out. */
+export async function youtubeVideosById(api: YtApi, ids: string[], reason: string): Promise<Found[]> {
+  if (!ids.length) return [];
+  return (await videoDetails(api, ids)).map((v) => fromYouTubeVideo(v, "clipper", reason)).filter((x): x is Found => x !== null);
+}
+
+/** 4.5: Clipper search (search.list, 100 units, + videos.list for durations, 1 unit). */
+export async function youtubeSearchVideos(api: YtApi, q: string, max = 10): Promise<Found[]> {
+  const body = await api.get("/search", { part: "snippet", type: "video", q, maxResults: String(Math.min(25, max)) }, 100);
+  const ids = items(body).map((i) => str(obj(i.id).videoId)).filter((x): x is string => x !== null);
+  const found = await youtubeVideosById(api, ids, `Clipper search "${q}"`);
+  // Keep YouTube's relevance order.
+  return ids.map((id) => found.find((f) => f.source_id === id)).filter((x): x is Found => Boolean(x));
 }
 
 // --- Twitch ----------------------------------------------------------------------------------------

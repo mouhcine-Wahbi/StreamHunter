@@ -94,11 +94,18 @@ async function nextSourceClip(): Promise<{ clipId: number; sourceId: number } | 
     });
     await db.put<LocalClip & { source_id: number; original_url: string | null; source_offset_sec: number }>("clips", { ...clip, source_id: s.id, original_url: s.original_url, source_offset_sec: req!.start });
     await updateSource(s.id, { clip_ids: [...(s.clip_ids ?? []), clip.id], clip_error: null });
+    if (req!.segment_id !== undefined) await patchSegment(req!.segment_id, { status: "extracted", clip_id: clip.id, error: null });
     return { clipId: clip.id, sourceId: s.id };
   } catch (e) {
     await updateSource(s.id, { clip_error: message(e) });
+    if (req!.segment_id !== undefined) await patchSegment(req!.segment_id, { status: "failed", error: message(e) });
     return null;
   }
+}
+
+async function patchSegment(id: number, patch: Record<string, unknown>): Promise<void> {
+  const seg = await db.get<Record<string, unknown>>("segments", id);
+  if (seg) await db.put("segments", { ...seg, ...patch, id });
 }
 
 const fmt = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;

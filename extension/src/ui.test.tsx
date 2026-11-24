@@ -796,3 +796,52 @@ describe("3.0 output formats in the dashboard", () => {
     await waitFor(async () => expect(await db.get("rights", "twitch:77")).toMatchObject({ status: "publishing", destinations: ["youtube"] }));
   });
 });
+
+describe("4.5 YouTube Video Clipper", () => {
+  it("search → video → approve with why and evidence → import the file → segments → approve one", async () => {
+    await setCredentials("youtube", { apiKey: "AIzaFakeTestKey0123456789abcdef" });
+    mockFetch((url) => {
+      const u = new URL(url);
+      if (u.pathname === "/youtube/v3/search") return json({ items: [{ id: { videoId: "abcdefghijk" } }] });
+      if (u.pathname === "/youtube/v3/videos")
+        return json({ items: [{ id: "abcdefghijk", snippet: { title: "My tournament run", channelTitle: "My Channel", channelId: "UC" + "a".repeat(22), publishedAt: "2026-11-01T10:00:00Z", liveBroadcastContent: "none", thumbnails: {} }, statistics: { viewCount: "1200" }, contentDetails: { duration: "PT2M" } }] });
+      return null;
+    });
+    const manager = createMonitoringManager();
+    const processing = { kick: vi.fn(async () => undefined) } as unknown as Parameters<typeof handleMessage>[5];
+    const { saveSegments } = await import("@/clipper/clipper");
+    const editing = { segments: vi.fn(async (id: number) => saveSegments((await db.get("sources", id)) as never)) } as unknown as EditingManager;
+    chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+      handleMessage(msg, manager, undefined, undefined, undefined, processing, undefined, undefined, editing).then(respond);
+      return true;
+    });
+    window.location.hash = "/clipper";
+    render(<App />);
+    await userEvent.type(await screen.findByLabelText("Search YouTube"), "tournament");
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    await userEvent.click(await screen.findByRole("button", { name: /My tournament run/ }));
+    const panel = await screen.findByLabelText("Video: My tournament run");
+    expect(within(panel).getByLabelText("Rights status")).toHaveTextContent("Not decided");
+    expect(within(panel).getByText(/not proof of permission/)).toBeInTheDocument();
+    expect(within(panel).queryByText(/Import the video file/)).toBeNull();
+    await userEvent.click(within(panel).getByLabelText("My own video"));
+    await userEvent.type(within(panel).getByLabelText("Rights evidence"), "My own channel: youtube.com/@me");
+    await userEvent.click(within(panel).getByRole("checkbox", { name: /I confirm I have these rights/ }));
+    await userEvent.click(within(panel).getByRole("button", { name: "Approve source" }));
+    await waitFor(() => expect(within(screen.getByLabelText("Video: My tournament run")).getByLabelText("Rights status")).toHaveTextContent(/Approved source.*Authorized for processing.*My own video/));
+    await userEvent.upload(screen.getByLabelText("Video file"), new File([new Uint8Array(500)], "run.mp4", { type: "video/mp4" }));
+    await userEvent.click(screen.getByRole("button", { name: "Import and analyse" }));
+    expect(await screen.findByRole("status", { name: "Source status" })).toHaveTextContent("Waiting to analyse…");
+    expect(processing!.kick).toHaveBeenCalled();
+    // The processing queue finishes the analysis (here: by hand); the page then finds segments.
+    const [src] = (await db.all<{ id: number }>("sources"));
+    await db.put("sources", { ...(await db.get<{ id: number }>("sources", src!.id))!, analysis: "analyzed", duration_seconds: 61, moments: [{ at: 20, start: 15, end: 35, score: 72, reasons: ["Loud reaction (+12 dB)"], kinds: ["audio"] }] } as { id: number });
+    const seg = await screen.findByLabelText("Segment 0:15–0:35", {}, { timeout: 6000 });
+    expect(editing.segments).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("The file is 61 s long but the YouTube video is 120 s. Is it the right file?")).toBeInTheDocument();
+    expect(within(seg).getByText("· Loud reaction (+12 dB)")).toBeInTheDocument();
+    await userEvent.click(within(seg).getByRole("button", { name: "Approve segment" }));
+    await waitFor(() => expect(within(screen.getByLabelText("Segment 0:15–0:35")).getByText("Approved: cutting…")).toBeInTheDocument(), { timeout: 6000 });
+    expect(((await db.get<{ pending_clips: unknown[] }>("sources", src!.id))!.pending_clips)).toHaveLength(1);
+  }, 20000);
+});

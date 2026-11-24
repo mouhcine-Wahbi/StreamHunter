@@ -12,7 +12,7 @@ import type { Page, Streamer } from "@/types/api";
 import { ClipCard } from "./ClipCard";
 import { LibraryItem } from "./LibraryItem";
 import { EDIT_TERMINAL, type EditJob } from "@/local/edits";
-import { applyFilters, libraryStatus, NO_FILTERS, STATUS_LABEL, type LibraryClip, type LibraryFilters } from "./library";
+import { applyFilters, CLIP_TYPE_LABEL, libraryStatus, NO_FILTERS, STATUS_LABEL, type ClipType, type LibraryClip, type LibraryFilters } from "./library";
 
 export function ClipGrid({ items, onChanged, ranked = false }: { items: LocalClip[]; onChanged: () => void; ranked?: boolean }) {
   return (
@@ -83,6 +83,17 @@ export function ClipsPage() {
       />
       <div className="mb-4 flex flex-wrap items-end gap-2 text-xs" role="group" aria-label="Filters">
         <label className="space-y-0.5">
+          <span className="block text-fg-subtle">Type</span>
+          <Select aria-label="Type" value={f.type} onChange={(e) => set("type", e.target.value as LibraryFilters["type"])} className="w-48">
+            <option value="all">Any type</option>
+            {(Object.keys(CLIP_TYPE_LABEL) as ClipType[]).map((t) => (
+              <option key={t} value={t}>
+                {CLIP_TYPE_LABEL[t]}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="space-y-0.5">
           <span className="block text-fg-subtle">Creator</span>
           <Select aria-label="Creator" value={f.creator} onChange={(e) => set("creator", e.target.value)} className="w-40">
             <option value="">All creators</option>
@@ -99,6 +110,7 @@ export function ClipsPage() {
             <option value="all">Any format</option>
             <option value="vertical">Vertical 9:16 ready (Shorts, TikTok)</option>
             <option value="landscape">Landscape ready (X)</option>
+            <option value="edited_vertical">Edited Short ready</option>
           </Select>
         </label>
         <label className="space-y-0.5">

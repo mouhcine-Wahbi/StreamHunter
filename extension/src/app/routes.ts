@@ -1,4 +1,4 @@
-import { Clapperboard, Compass, HeartPulse, LayoutDashboard, Radio, Settings, Smartphone, Sparkles, Telescope, Twitter, Users, type LucideIcon } from "lucide-react";
+import { Clapperboard, Compass, Scissors, HeartPulse, LayoutDashboard, Radio, Settings, Smartphone, Sparkles, Telescope, Twitter, Users, type LucideIcon } from "lucide-react";
 
 export const ROUTES = [
   "/overview",
@@ -8,6 +8,7 @@ export const ROUTES = [
   "/highlights",
   "/clips",
   "/content",
+  "/clipper",
   "/shorts",
   "/xclips",
   "/health",
@@ -22,6 +23,7 @@ export const NAV: readonly { route: Route; label: string; icon: LucideIcon; desc
   { route: "/discover", label: "Find Creators", icon: Compass, description: "Find Twitch, Kick and YouTube creators" },
   { route: "/monitoring", label: "Live Monitoring", icon: Radio, description: "Approvals, recording slots and the queue" },
   { route: "/content", label: "Content Discovery", icon: Telescope, description: "Creator uploads, trending and keywords" },
+  { route: "/clipper", label: "YouTube Clipper", icon: Scissors, description: "Shorts from YouTube videos you may use" },
   { route: "/highlights", label: "Clip Queue", icon: Sparkles, description: "Detected moments and clip processing" },
   { route: "/clips", label: "Clip Library", icon: Clapperboard, description: "Every clip, downloadable" },
   { route: "/shorts", label: "Short-form Clips", icon: Smartphone, description: "Vertical 9:16 for YouTube Shorts and TikTok" },

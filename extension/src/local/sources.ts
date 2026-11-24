@@ -41,6 +41,10 @@ export interface SourceFile {
   pending_clips?: ClipRequest[];
   clip_ids?: number[];
   clip_error?: string | null;
+  /** 4.5: Whisper transcript of the whole file (companion), used for segment excerpts and boundaries. */
+  transcript?: { model: string; language: string | null; segments: { start: number; end: number; text: string; words: { w: string; s: number; e: number }[] }[]; dropped: number; created_at: string } | null;
+  transcript_status?: "none" | "running" | "done" | "failed" | "unavailable";
+  transcript_error?: string | null;
   added_at: string;
 }
 
@@ -50,6 +54,8 @@ export interface ClipRequest {
   title?: string;
   score?: number;
   reasons?: string[];
+  /** 4.5: the Clipper segment this clip is cut for. */
+  segment_id?: number;
 }
 
 export const MAX_SOURCE_BYTES = 4 * 1024 ** 3;
@@ -100,7 +106,7 @@ export async function listSources(): Promise<SourceFile[]> {
 
 export async function updateSource(
   id: number,
-  patch: Partial<Pick<SourceFile, "analysis" | "analysis_error" | "moments" | "duration_seconds" | "width" | "height" | "pending_clips" | "clip_ids" | "clip_error">>,
+  patch: Partial<Pick<SourceFile, "analysis" | "analysis_error" | "moments" | "duration_seconds" | "width" | "height" | "pending_clips" | "clip_ids" | "clip_error" | "transcript" | "transcript_status" | "transcript_error">>,
 ): Promise<SourceFile> {
   const s = await db.get<SourceFile>("sources", id);
   if (!s) throw new RightsError("That source file no longer exists.");
@@ -128,11 +134,12 @@ export async function requestSourceClip(id: number, req: ClipRequest): Promise<S
   const end = Number(req.end);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 3 || end - start > 180) throw new RightsError("A clip must be between 3 seconds and 3 minutes long.");
   if (s.duration_seconds !== null && start >= s.duration_seconds) throw new RightsError("That start is after the end of the file.");
-  const clean: ClipRequest = { start, end, title: typeof req.title === "string" ? req.title.slice(0, 140) : "", score: typeof req.score === "number" ? req.score : 0, reasons: Array.isArray(req.reasons) ? req.reasons.slice(0, 4).map(String) : [] };
+  const clean: ClipRequest = { start, end, title: typeof req.title === "string" ? req.title.slice(0, 140) : "", score: typeof req.score === "number" ? req.score : 0, reasons: Array.isArray(req.reasons) ? req.reasons.slice(0, 4).map(String) : [], ...(Number.isInteger(req.segment_id) ? { segment_id: req.segment_id } : {}) };
   return updateSource(id, { pending_clips: [...(s.pending_clips ?? []), clean].slice(-20), clip_error: null });
 }
 
 export async function deleteSource(id: number): Promise<void> {
+  for (const seg of await db.byIndex<{ id: number }>("segments", "source", id)) await db.delete("segments", seg.id);
   await db.delete("sources", id);
   await db.delete("sourceBlobs", id);
 }

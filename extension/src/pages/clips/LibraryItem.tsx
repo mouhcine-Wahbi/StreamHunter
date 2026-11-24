@@ -28,7 +28,7 @@ import type { Streamer } from "@/types/api";
 import { formatBytes, formatDateTime, formatOffset } from "@/utils/format";
 import { ScoreView } from "@/pages/formats/ContentPanel";
 import { DETECTION_LABEL, ScoreWhy, useObjectUrl } from "./ClipCard";
-import { allMetadataText, DEST_FORMAT, detectedAt, hashtagText, KIND_LABEL, libraryStatus, STATUS_LABEL, versionFileName, type LibraryClip, type LibraryStatus } from "./library";
+import { allMetadataText, CLIP_TYPE_LABEL, clipType, DEST_FORMAT, detectedAt, hashtagText, KIND_LABEL, libraryStatus, STATUS_LABEL, versionFileName, type LibraryClip, type LibraryStatus } from "./library";
 
 const STATUS_TONE: Record<LibraryStatus, BadgeTone> = { generating: "accent", ready: "live", failed: "danger" };
 const ASSET_STATUS = { queued: "Waiting", processing: "Making…", ready: "Ready", failed: "Failed" } as const;
@@ -280,6 +280,7 @@ export function LibraryItem({ clip, assets, edits = [], streamer, onChanged }: {
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
               <span className="font-medium text-fg">{clip.streamer_display_name}</span>
               {["twitch", "kick", "youtube"].includes(clip.platform) && <PlatformBadge platform={clip.platform} />}
+              <Badge tone="neutral">{CLIP_TYPE_LABEL[clipType(clip)]}</Badge>
               {clip.category && <span>{clip.category}</span>}
               {source && (
                 <a href={source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent underline">

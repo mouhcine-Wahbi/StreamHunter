@@ -5,8 +5,9 @@
  */
 import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { setPriority } from "node:os";
-import { join } from "node:path";
+import { availableParallelism, homedir, setPriority } from "node:os";
+import { dirname, join } from "node:path";
+import { activity, cleanTranscript, envelope, WHISPER_MODEL, whisperArgs } from "./transcript.mjs";
 import { checkOutput, checkPlan, expectedDuration, ffmpegArgs, motionProps, readProbe, TEMPLATE_FFMPEG } from "./plan.mjs";
 import { fileURLToPath } from "node:url";
 
@@ -68,7 +69,7 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
     emit({ event: "job", job: publicJob(job) });
     return job;
   };
-  const publicJob = (j) => ({ id: j.id, state: j.state, step: j.step, progress: j.progress, error: j.error, attempts: j.attempts, output: j.output, metrics: j.metrics, notes: j.notes, template: j.template });
+  const publicJob = (j) => ({ id: j.id, kind: j.kind ?? "edit", state: j.state, step: j.step, progress: j.progress, error: j.error, attempts: j.attempts, output: j.output, metrics: j.metrics, notes: j.notes, template: j.template });
 
   // Recovery: anything not finished starts again from the beginning.
   for (const n of readdirSync(jobsDir).filter((x) => x.endsWith(".json"))) {
@@ -82,10 +83,10 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
     }
   }
 
-  function run(file, args, onLine) {
+  function run(file, args, onLine, { onErr, env, raw } = {}) {
     return new Promise((resolve) => {
       // Own process group, so cancel stops the program and everything it started (Remotion's browser).
-      const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"], detached: true, cwd: dir });
+      const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"], detached: true, cwd: dir, env: env ?? process.env });
       try {
         setPriority(child.pid, nice);
       } catch {
@@ -93,7 +94,9 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
       }
       let err = "";
       let out = "";
+      const chunks = [];
       child.stdout.on("data", (d) => {
+        if (raw) return void chunks.push(d);
         out += d;
         if (onLine) {
           const lines = out.split("\n");
@@ -101,9 +104,12 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
           lines.forEach(onLine);
         }
       });
-      child.stderr.on("data", (d) => (err = (err + d).slice(-8000)));
+      child.stderr.on("data", (d) => {
+        err = (err + d).slice(-8000);
+        onErr?.(String(d));
+      });
       child.on("error", (e) => resolve({ code: -1, err: e.message, out, child }));
-      child.on("close", (code, signal) => resolve({ code, signal, err, out, child }));
+      child.on("close", (code, signal) => resolve({ code, signal, err, out, child, data: raw ? Buffer.concat(chunks) : null }));
       if (running) running.child = child;
     });
   }
@@ -238,6 +244,89 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
     }
   }
 
+  /** Whisper's model folder (the CLI's default); the model is never downloaded by the companion. */
+  const modelDir = tools.whisperModelDir ?? join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "whisper");
+
+  async function transcribe(job) {
+    const input = inside(files, job.input);
+    const outDir = join(dir, "tmp", `${job.id}-whisper`);
+    const result = join(files, `${job.id}-transcript.json`);
+    const started = Date.now();
+    running = { id: job.id, child: null };
+    let peak = 0;
+    const cpuByPid = {};
+    const timer = setInterval(async () => {
+      const pid = running?.child?.pid;
+      const s = pid ? await sampleTree(pid) : null;
+      if (s) {
+        peak = Math.max(peak, s.rssBytes);
+        for (const [p, ms] of Object.entries(s.cpu)) cpuByPid[p] = Math.max(cpuByPid[p] ?? 0, ms);
+      }
+    }, 400);
+    try {
+      update(job, { state: "probing", step: "Checking the audio", progress: 0, attempts: job.attempts + 1, error: null });
+      if (!tools.whisper) throw new Error("Whisper isn't installed. Install it with Homebrew: brew install openai-whisper");
+      if (!existsSync(join(modelDir, `${WHISPER_MODEL}.pt`)))
+        throw new Error(`Whisper's ${WHISPER_MODEL} model isn't on this computer yet (about 1.6 GB). Download it once in Terminal: whisper --model ${WHISPER_MODEL} <any audio file>`);
+      if (!existsSync(input)) throw new Error("The file wasn't received.");
+      const info = await probe(input);
+      if (!info || !info.duration) throw new Error("The file is damaged or isn't audio or video.");
+      const finish = (data, notes) => {
+        writeFileSync(result, JSON.stringify(data));
+        update(job, {
+          state: "done",
+          step: "Ready",
+          progress: 1,
+          output: { transcript: `${job.id}-transcript.json`, language: data.language, segments: data.segments.length, dropped: data.dropped.length, duration: data.duration },
+          metrics: { wall_ms: Date.now() - started, cpu_ms: Object.values(cpuByPid).reduce((a, b) => a + b, 0), peak_rss_bytes: peak, encoder: `whisper ${WHISPER_MODEL}` },
+          notes,
+        });
+        rmSync(input, { force: true });
+      };
+      if (!info.hasAudio) return finish({ model: WHISPER_MODEL, language: null, duration: info.duration, segments: [], dropped: [] }, ["The file has no audio, so there is no transcript."]);
+
+      update(job, { state: "analyzing", step: "Measuring where the sound is speech-like", progress: 0.02 });
+      const pcm = await run(tools.ffmpeg, ["-v", "error", "-i", input, "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"], null, { raw: true });
+      if (job.state === "cancelled") throw new Cancelled();
+      if (pcm.code !== 0) throw new Error(`FFmpeg couldn't read the audio: ${pcm.err.trim().slice(0, 200)}`);
+      const act = activity(envelope(pcm.data));
+
+      update(job, { state: "transcribing", step: `Transcribing on this computer (Whisper ${WHISPER_MODEL})`, progress: 0.05 });
+      mkdirSync(outDir, { recursive: true });
+      // Whisper calls FFmpeg itself: Chrome starts the companion with a minimal PATH.
+      const env = { ...process.env, PATH: `${dirname(tools.ffmpeg)}:${process.env.PATH ?? "/usr/bin:/bin"}` };
+      let lastEmit = 0;
+      const threads = Math.max(1, Math.floor(availableParallelism() / 2));
+      const w = await run(tools.whisper, whisperArgs({ input, outDir, modelDir, language: job.options?.language ?? null, threads }), null, {
+        env,
+        onErr: (chunk) => {
+          const m = [...chunk.matchAll(/(\d+)%\|/g)].at(-1);
+          if (m && Date.now() - lastEmit > 500) {
+            lastEmit = Date.now();
+            update(job, { progress: Math.min(0.95, 0.05 + (Number(m[1]) / 100) * 0.9) });
+          }
+        },
+      });
+      if (job.state === "cancelled") throw new Cancelled();
+      const name = readdirSync(outDir).find((n) => n.endsWith(".json"));
+      if (w.code !== 0 || !name) throw new Error(`Whisper failed: ${(w.err || w.signal || "unknown error").trim().split("\n").filter((l) => !/%\|/.test(l)).slice(-2).join(" ")}`);
+      const raw = JSON.parse(readFileSync(join(outDir, name), "utf8"));
+      const clean = cleanTranscript(raw, act, info.duration);
+      const notes = [];
+      if (clean.dropped.length) notes.push(`${clean.dropped.length} piece${clean.dropped.length === 1 ? "" : "s"} of text dropped: no speech in the sound there (Whisper can invent text over music, noise or silence).`);
+      if (!clean.segments.length) notes.push("No speech was found.");
+      finish({ model: WHISPER_MODEL, language: raw.language ?? null, duration: info.duration, ...clean }, notes);
+    } catch (e) {
+      rmSync(result, { force: true });
+      if (job.state !== "cancelled") update(job, { state: "failed", step: "Failed", error: e.message });
+      if (!(e instanceof Cancelled)) log("job_failed", { id: job.id, error: e.message });
+    } finally {
+      clearInterval(timer);
+      rmSync(outDir, { recursive: true, force: true });
+      running = null;
+    }
+  }
+
   let pumping = false;
   async function pump() {
     if (pumping) return;
@@ -250,7 +339,7 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
           update(next, { state: "failed", step: "Failed", error: next.error ?? "Stopped after repeated interruptions." });
           continue;
         }
-        await work(next);
+        await (next.kind === "transcribe" ? transcribe(next) : work(next));
       }
     } finally {
       pumping = false;
@@ -259,11 +348,13 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
 
   return {
     /** Adds a job; the same id is never added twice (duplicates return the existing job). */
-    add({ id, input, plan }) {
+    add({ id, input, plan, kind = "edit", options = null }) {
       if (!isSafeName(id) || !isSafeName(input)) throw new Error("Invalid job id or file name");
+      if (kind !== "edit" && kind !== "transcribe") throw new Error("Unknown job kind");
+      if (kind === "transcribe" && options?.language != null && !/^[a-z]{2,3}$/.test(options.language)) throw new Error("Invalid language");
       const existing = jobs.get(id);
       if (existing && existing.state !== "failed" && existing.state !== "cancelled") return publicJob(existing);
-      const job = { id, input, plan, template: plan?.template ?? TEMPLATE_FFMPEG, state: "queued", step: "Waiting", progress: 0, attempts: 0, error: null, output: null, metrics: null, notes: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      const job = { id, kind, input, plan: kind === "edit" ? plan : null, options: kind === "transcribe" ? { language: options?.language ?? null } : null, template: kind === "edit" ? (plan?.template ?? TEMPLATE_FFMPEG) : null, state: "queued", step: "Waiting", progress: 0, attempts: 0, error: null, output: null, metrics: null, notes: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
       jobs.set(id, job);
       save(job);
       void pump();
@@ -290,7 +381,7 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
       const job = jobs.get(id);
       if (!job) return false;
       if (running?.id === id) return false;
-      for (const n of [job.input, job.output?.video, job.output?.thumbnail]) if (n && isSafeName(n)) rmSync(join(files, n), { force: true });
+      for (const n of [job.input, job.output?.video, job.output?.thumbnail, job.output?.transcript]) if (n && isSafeName(n)) rmSync(join(files, n), { force: true });
       rmSync(join(jobsDir, `${id}.json`), { force: true });
       jobs.delete(id);
       return true;

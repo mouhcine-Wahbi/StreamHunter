@@ -1,3 +1,4 @@
+import { putTranscript } from "@/local/transcripts";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "@/app/App";
@@ -685,7 +686,14 @@ describe("3.0 output formats in the dashboard", () => {
   it("Clip Library → Editing: edited Short as its own version, Edit in the review band, below-threshold text, Retry; Settings → Editing", async () => {
     mockFetch(() => null);
     const manager = createMonitoringManager();
-    const editing = { edit: vi.fn(async () => null), cancel: vi.fn(async () => undefined), retry: vi.fn(async () => undefined) } as unknown as EditingManager;
+    const editing = {
+      edit: vi.fn(async () => null),
+      cancel: vi.fn(async () => undefined),
+      retry: vi.fn(async () => undefined),
+      transcribe: vi.fn(async (clipId: number) =>
+        putTranscript({ clip_id: clipId, model: "large-v3-turbo", language: "en", duration: 30, segments: [{ start: 3.2, end: 5, text: "Did you see that?", words: [] }, { start: 6, end: 7, text: "Let's go!", words: [] }], dropped: [{ start: 20, end: 30, text: "Thank you.", reason: "no speech in the sound" }], metrics: { wall_ms: 9100, cpu_ms: 30000, peak_rss_bytes: 4e9 }, created_at: new Date().toISOString() }),
+      ),
+    } as unknown as EditingManager;
     chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
       handleMessage(msg, manager, undefined, undefined, undefined, undefined, undefined, undefined, editing).then(respond);
       return true;
@@ -732,6 +740,15 @@ describe("3.0 output formats in the dashboard", () => {
     await userEvent.click(within(review).getByRole("button", { name: "Edit into a Short" }));
     await waitFor(() => expect(editing.edit).toHaveBeenCalledWith(mid, expect.anything(), "manual"));
     expect(within(screen.getByRole("article", { name: "Clip: Low one" })).getByText("Not edited: score 55 is below 70.")).toBeInTheDocument();
+    // 4.4: Transcribe runs Whisper in the companion; the lines show with their times, dropped text is counted.
+    const tr = within(review).getByLabelText("Transcript");
+    expect(within(tr).getByText(/Not transcribed/)).toBeInTheDocument();
+    await userEvent.click(within(tr).getByRole("button", { name: "Transcribe" }));
+    await waitFor(() => expect(editing.transcribe).toHaveBeenCalledWith(mid));
+    expect(await within(tr).findByText(/2 lines · Whisper large-v3-turbo · en · took 9\.1 s · 1 piece dropped \(no speech in the sound\)/)).toBeInTheDocument();
+    const lines = within(tr).getByRole("list", { name: "Transcript lines" });
+    expect(lines).toHaveTextContent("0:03Did you see that?0:06Let's go!");
+    expect(lines).not.toHaveTextContent("Thank you");
     const broken = screen.getByRole("article", { name: "Clip: Broken one" });
     expect(within(broken).getByRole("status", { name: "Edit: Failed" })).toHaveTextContent("damaged");
     expect(within(screen.getByRole("region", { name: "Editing queue" })).getByText(/Failed: The clip file is damaged/)).toBeInTheDocument();
@@ -744,6 +761,8 @@ describe("3.0 output formats in the dashboard", () => {
     expect(screen.getByLabelText("Edit automatically from")).toHaveValue(85);
     expect(screen.getByLabelText("Offer an Edit button from")).toHaveValue(70);
     expect(screen.getByRole("switch", { name: "Edit clips" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Captions" })).not.toBeChecked();
+    expect(screen.getByLabelText("Style")).toHaveValue("clean_gaming_motion");
   });
 
   it("works with no social accounts: no publishing screens, settings or connect buttons anywhere", async () => {

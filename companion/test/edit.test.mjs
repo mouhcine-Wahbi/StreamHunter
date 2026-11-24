@@ -127,7 +127,9 @@ test("cancel stops FFmpeg and leaves no partial output; duplicates return the ex
   q.cancel("c1");
   const j = await waitFor(q, "c1");
   assert.equal(j.state, "cancelled");
-  await new Promise((r) => setTimeout(r, 300));
+  // "cancelled" is reported at once; FFmpeg then exits and the worker removes the partial file.
+  for (let i = 0; i < 200 && q.busy; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(q.busy, false);
   assert.deepEqual(readdirSync(join(dir, "tmp")), []);
   assert.ok(!existsSync(join(dir, "files", "c1-out.mp4")));
   // A cancelled job can be started again with the same id.

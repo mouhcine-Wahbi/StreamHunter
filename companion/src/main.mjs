@@ -9,11 +9,11 @@ import { join } from "node:path";
 import { createDecoder, encode } from "./native.mjs";
 import { ensureLayout, inside, workDir } from "./paths.mjs";
 import { createLog } from "./log.mjs";
-import { detectTools } from "./tools.mjs";
+import { atLeast, detectTools } from "./tools.mjs";
 import { freeBytes, startFileServer } from "./server.mjs";
 import { createJobQueue } from "./jobs.mjs";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 export const PROTOCOL = 1;
 
 /** "chrome-extension://<id>/" (manifest form) → "chrome-extension://<id>" (HTTP Origin form). */
@@ -50,7 +50,7 @@ export function createCompanion({ dir, caller, write, exit, env = process.env })
   const jobsReady = async () => {
     tools ??= await detectTools(env);
     if (!tools.ffmpeg.ok || !tools.ffprobe.ok) throw new Error("FFmpeg and FFprobe are needed for editing. Install them with Homebrew: brew install ffmpeg");
-    queue ??= createJobQueue({ dir, tools: { ffmpeg: tools.ffmpeg.path, ffprobe: tools.ffprobe.path, node: process.execPath, remotion: Boolean(tools.remotion?.ok) }, log, emit: write });
+    queue ??= createJobQueue({ dir, tools: { ffmpeg: tools.ffmpeg.path, ffprobe: tools.ffprobe.path, node: process.execPath, remotion: Boolean(tools.remotion?.ok), whisper: tools.whisper?.found && atLeast(tools.whisper.version, tools.whisper.min) ? tools.whisper.path : null }, log, emit: write });
     return queue;
   };
 
@@ -72,6 +72,8 @@ export function createCompanion({ dir, caller, write, exit, env = process.env })
         return { deleted: msg.name };
       case "edit/start":
         return (await jobsReady()).add({ id: msg.id_job, input: msg.input, plan: msg.plan });
+      case "transcribe/start":
+        return (await jobsReady()).add({ id: msg.id_job, input: msg.input, kind: "transcribe", options: { language: msg.language ?? null } });
       case "jobs/get":
         return (await jobsReady()).get(msg.id_job);
       case "jobs/list":

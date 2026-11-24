@@ -6,10 +6,11 @@ import { db } from "./db";
 import type { EditPlan } from "@/editing/rules";
 import type { EditMetrics } from "./assets";
 
-export type EditState = "uploading" | "queued" | "probing" | "encoding" | "rendering" | "validating" | "importing" | "done" | "failed" | "cancelled";
+export type EditState = "uploading" | "transcribing" | "queued" | "probing" | "encoding" | "rendering" | "validating" | "importing" | "done" | "failed" | "cancelled";
 export const EDIT_TERMINAL: readonly EditState[] = ["done", "failed", "cancelled"];
 export const EDIT_STATE_LABEL: Record<EditState, string> = {
   uploading: "Sending to the companion",
+  transcribing: "Transcribing for captions",
   queued: "Waiting",
   probing: "Checking the clip",
   encoding: "Editing",

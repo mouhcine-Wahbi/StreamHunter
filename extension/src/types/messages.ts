@@ -37,6 +37,8 @@ export type RuntimeRequest =
   | { type: "edit/start"; clipId: number }
   | { type: "edit/cancel"; id: number }
   | { type: "edit/retry"; id: number }
+  // 4.4: transcribe a clip with Whisper in the companion
+  | { type: "transcript/start"; clipId: number }
   // Capture mode (popup → worker; the popup click is what lets Chrome capture the tab).
   | { type: "capture/get"; tabId?: number }
   | { type: "capture/list" }
@@ -97,6 +99,7 @@ export interface ResponseMap {
   "edit/start": import("@/local/edits").EditJob | null;
   "edit/cancel": import("@/local/edits").EditJob | null;
   "edit/retry": import("@/local/edits").EditJob;
+  "transcript/start": import("@/local/transcripts").Transcript;
   "capture/get": CaptureState;
   "capture/list": CaptureState[];
   "capture/pause-slot": CaptureState;
@@ -137,6 +140,7 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "edit/start",
   "edit/cancel",
   "edit/retry",
+  "transcript/start",
   "capture/get",
   "capture/list",
   "capture/pause-slot",

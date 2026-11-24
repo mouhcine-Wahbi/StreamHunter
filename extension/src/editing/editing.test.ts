@@ -6,7 +6,9 @@ import { createEditingManager, EditError, type EditingDeps } from "@/background/
 import type { CompanionEvent, CompanionJob } from "@/companion/client";
 import { DEFAULT_SETTINGS, type Settings } from "@/types/settings";
 import { sanitizeSettings } from "@/utils/settings";
-import { buildEditPlan, decideEdit, dedupeKey, MAX_PATH_POINTS, TRIM } from "./rules";
+import { buildEditPlan, captionsFor, decideEdit, dedupeKey, MAX_PATH_POINTS, TRIM } from "./rules";
+import { getTranscript, quotes } from "@/local/transcripts";
+import { factsPrompt } from "@/metadata/metadata";
 
 const S = (p: Partial<Settings["editing"]> = {}): Settings => ({ ...DEFAULT_SETTINGS, editing: { ...DEFAULT_SETTINGS.editing, ...p } });
 const facecam = { kind: "facecam_top" as const, facecam: { x: 0.75, y: 0, w: 0.25, h: 0.25 } };
@@ -83,6 +85,19 @@ describe("edit rules", () => {
   });
 });
 
+/** What the fake Whisper "hears": speech at 13–16 s and 21–23 s of a 30 s clip, and one dropped piece. */
+const transcriptData = {
+  model: "large-v3-turbo",
+  language: "en",
+  duration: 30,
+  segments: [
+    { start: 4, end: 5, text: "before the trim", words: [{ w: "before", s: 4, e: 4.5 }, { w: "the", s: 4.5, e: 4.7 }, { w: "trim", s: 4.7, e: 5 }] },
+    { start: 13, end: 16, text: "Oh my god, did you see that?", words: [{ w: "Oh", s: 13, e: 13.3 }, { w: "my", s: 13.3, e: 13.5 }, { w: "god,", s: 13.5, e: 13.9 }, { w: "did", s: 14, e: 14.2 }, { w: "you", s: 14.2, e: 14.4 }, { w: "see", s: 14.4, e: 14.7 }, { w: "that?", s: 14.7, e: 16 }] },
+    { start: 21, end: 23, text: "Let's go!", words: [{ w: "Let's", s: 21, e: 21.6 }, { w: "go!", s: 21.6, e: 23 }] },
+  ],
+  dropped: [{ start: 26, end: 30, text: "Thank you.", reason: "no speech in the sound" }],
+};
+
 /** A fake companion: stores uploads, accepts edit/start, lets the test send job events. */
 function fakeCompanion({ available = true } = {}) {
   const files = new Map<string, Blob | Uint8Array>();
@@ -90,6 +105,7 @@ function fakeCompanion({ available = true } = {}) {
   const listeners = new Set<(e: CompanionEvent) => void>();
   const calls: { type: string; payload: Record<string, unknown> }[] = [];
   let holds = 0;
+  let transcribeStarts = 0;
   const companion = {
     endpoint: vi.fn(async () => {
       if (!available) throw new Error("not installed");
@@ -103,7 +119,23 @@ function fakeCompanion({ available = true } = {}) {
         jobs.set(id, j);
         return j as T;
       }
-      if (type === "jobs/get") return (jobs.get(id) ?? null) as T;
+      if (type === "transcribe/start") {
+        const j = { id, kind: "transcribe", state: "transcribing", step: "Transcribing", progress: 0.4, error: null, attempts: 1, output: null, metrics: null, notes: [], template: "" } as unknown as CompanionJob;
+        jobs.set(id, j);
+        transcribeStarts++;
+        return j as T;
+      }
+      if (type === "jobs/get") {
+        const j = jobs.get(id);
+        // A transcription finishes on the next check, with the words in its output file.
+        if (j && (j as unknown as { kind?: string }).kind === "transcribe" && j.state === "transcribing") {
+          files.set(`${id}-transcript.json`, new TextEncoder().encode(JSON.stringify(transcriptData)));
+          const done = { ...j, state: "done", progress: 1, output: { transcript: `${id}-transcript.json`, language: "en", segments: transcriptData.segments.length, dropped: transcriptData.dropped.length, duration: 30 }, metrics: { wall_ms: 9000, cpu_ms: 30000, peak_rss_bytes: 4e9, encoder: "whisper large-v3-turbo" } } as unknown as CompanionJob;
+          jobs.set(id, done);
+          return done as T;
+        }
+        return (j ?? null) as T;
+      }
       if (type === "jobs/cancel") {
         const j = jobs.get(id);
         if (j) j.state = "cancelled";
@@ -136,7 +168,7 @@ function fakeCompanion({ available = true } = {}) {
     jobs.set(id, j);
     emit(j);
   };
-  return { companion: companion as typeof companion & EditingDeps["companion"], fetchImpl, files, jobs, calls, emit, finish, holds: () => holds };
+  return { companion: companion as typeof companion & EditingDeps["companion"], fetchImpl, files, jobs, calls, emit, finish, holds: () => holds, transcribeStarts: () => transcribeStarts };
 }
 
 async function clipWith(score: number | null, { width = 1920, height = 1080 } = {}) {
@@ -255,5 +287,87 @@ describe("editing manager", () => {
     const job = await m.edit(await clipWith(90), S(), "manual");
     expect(job).toMatchObject({ state: "failed" });
     expect(job!.error).toMatch(/Update it/);
+  });
+
+  it("4.4 captions on: transcribes once with Whisper, then captions what is said, in the Short's time", async () => {
+    const f = fakeCompanion();
+    const m = createEditingManager({ companion: f.companion, isRecording: async () => false, fetch: f.fetchImpl, pollMs: 5 });
+    const clip = await clipWith(90);
+    const job = (await m.edit(clip, S({ captions: true }), "manual"))!;
+    expect(f.transcribeStarts()).toBe(1);
+    const start = f.calls.find((c) => c.type === "edit/start")!;
+    const plan = start.payload.plan as { trim: { start: number }; captions: { start: number; end: number; text: string }[]; notes: string[] };
+    expect(plan.trim.start).toBe(12);
+    // Whisper's own words, shifted by the 12 s trim; speech before the trim isn't captioned.
+    expect(plan.captions).toEqual([
+      { start: 1, end: 2, text: "Oh my god," },
+      { start: 2, end: 4.3, text: "did you see that?" },
+      { start: 9, end: 11.3, text: "Let's go!" },
+    ]);
+    expect(plan.notes).toContain("Captions: 3 lines of what is said (Whisper, on this computer).");
+    expect(job.state).toBe("queued");
+    const t = (await getTranscript(clip))!;
+    expect(t).toMatchObject({ model: "large-v3-turbo", language: "en", dropped: [{ text: "Thank you." }] });
+    expect(t.metrics?.wall_ms).toBe(9000);
+    expect(f.calls.some((c) => c.type === "jobs/remove" && c.payload.id_job === `sh-tr-${clip}`)).toBe(true);
+    // Transcribing again uses the stored transcript.
+    await m.transcribe(clip);
+    expect(f.transcribeStarts()).toBe(1);
+    // Deleting the clip deletes its transcript.
+    await deleteClip(clip);
+    expect(await getTranscript(clip)).toBeUndefined();
+  });
+
+  it("4.4 captions off (the default): no transcription, no captions", async () => {
+    const f = fakeCompanion();
+    const m = createEditingManager({ companion: f.companion, isRecording: async () => false, fetch: f.fetchImpl, pollMs: 5 });
+    await m.edit(await clipWith(90), S(), "manual");
+    expect(f.transcribeStarts()).toBe(0);
+    expect((f.calls.find((c) => c.type === "edit/start")!.payload.plan as Record<string, unknown>).captions).toBeUndefined();
+  });
+
+  it("4.4 a failed transcription fails the edit with the reason (no silent captionless Short)", async () => {
+    const f = fakeCompanion();
+    const orig = f.companion.request.getMockImplementation()!;
+    f.companion.request.mockImplementation((async (type: string, payload: Record<string, unknown>) => {
+      if (type === "transcribe/start") throw new Error("Whisper's large-v3-turbo model isn't on this computer yet");
+      return orig(type, payload);
+    }) as never);
+    const m = createEditingManager({ companion: f.companion, isRecording: async () => false, fetch: f.fetchImpl, pollMs: 5 });
+    const job = (await m.edit(await clipWith(90), S({ captions: true }), "manual"))!;
+    expect(job.state).toBe("failed");
+    expect(job.error).toMatch(/^Captions: Whisper's large-v3-turbo model/);
+    expect(f.calls.some((c) => c.type === "edit/start")).toBe(false);
+  });
+});
+
+describe("4.4 captions and quotes", () => {
+  it("caption lines: at most 4 words or 26 characters, split at sentence ends and pauses, inside the trim", () => {
+    const w = (text: string, s0: number, step = 0.3) => text.split(" ").map((x, i) => ({ w: x, s: s0 + i * step, e: s0 + i * step + 0.25 }));
+    const c = captionsFor([...w("one two three four five six", 0), ...w("Wait. After a pause", 5), ...w("outside", 40)], 0, 30);
+    expect(c.map((x) => x.text)).toEqual(["one two three four", "five six", "Wait.", "After a pause"]);
+    expect(c[1]!.end).toBeLessThanOrEqual(c[2]!.start);
+    expect(captionsFor(w("a very long sentence with extraordinarily lengthy words", 0), 0, null).every((x) => x.text.length <= 26 || !x.text.includes(" "))).toBe(true);
+    expect(captionsFor([], 0, null)).toEqual([]);
+  });
+
+  it("captions need the motion style; the plan says so", () => {
+    const p = buildEditPlan({ width: 1920, height: 1080, duration: 30, peakSec: null, layout: null, actionPath: null }, S({ captions: true, style: "clean_gaming" }).editing);
+    expect("captions" in p).toBe(false);
+    expect((p as { notes: string[] }).notes).toContain('Captions need the "with motion" style; this Short has none.');
+    const q = buildEditPlan({ width: 1920, height: 1080, duration: 30, peakSec: null, layout: null, actionPath: null }, S({ captions: true }).editing);
+    expect(q).toMatchObject({ captions: [] });
+    if ("error" in p || "error" in q) throw new Error("no plan");
+    expect(dedupeKey(1, p)).not.toBe(dedupeKey(1, q));
+  });
+
+  it("transcript quotes reach the metadata facts as exact words with times", () => {
+    const t = { clip_id: 1, model: "large-v3-turbo", language: "en", duration: 30, segments: transcriptData.segments, dropped: transcriptData.dropped, metrics: null, created_at: "" };
+    const q = quotes(t);
+    expect(q).toEqual([{ at: 4, text: "before the trim" }, { at: 13, text: "Oh my god, did you see that?" }, { at: 21, text: "Let's go!" }]);
+    const prompt = factsPrompt({ clipTitle: null, creator: "A", platform: "twitch", category: null, reasons: [], durationSec: 30, originalUrl: null, quotes: q });
+    expect(prompt).toContain('[0:13] "Oh my god, did you see that?"');
+    expect(prompt).not.toContain("Thank you");
+    expect(quotes(null)).toEqual([]);
   });
 });

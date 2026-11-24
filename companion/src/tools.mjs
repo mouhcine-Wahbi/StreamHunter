@@ -3,10 +3,12 @@
  * usual Homebrew folders are searched too. Commands run with execFile (no shell) and a timeout.
  */
 import { browserPath } from "./render.mjs";
+import { WHISPER_MODEL } from "./transcript.mjs";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
+import { homedir } from "node:os";
 
 const EXTRA_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
 
@@ -106,5 +108,14 @@ export async function detectTools(env = process.env) {
   const list = await Promise.all(Object.keys(REQUIREMENTS).map((n) => probe(n, dirs)));
   const tools = Object.fromEntries(list.map((t) => [t.name, { ...t, min: REQUIREMENTS[t.name].min, why: REQUIREMENTS[t.name].why }]));
   tools.remotion = detectRemotion();
+  if (tools.whisper.found) {
+    // The model is downloaded once by the user (about 1.6 GB); the companion never downloads it.
+    const modelDir = join(env.XDG_CACHE_HOME || join(env.HOME || homedir(), ".cache"), "whisper");
+    tools.whisper.model = existsSync(join(modelDir, `${WHISPER_MODEL}.pt`)) ? WHISPER_MODEL : null;
+    if (tools.whisper.ok && !tools.whisper.model) {
+      tools.whisper.ok = false;
+      tools.whisper.detail = `The ${WHISPER_MODEL} model isn't downloaded yet: run once in Terminal: whisper --model ${WHISPER_MODEL} <any audio file>`;
+    }
+  }
   return tools;
 }

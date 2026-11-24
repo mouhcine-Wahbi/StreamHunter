@@ -8,14 +8,16 @@
  */
 
 export const DB_NAME = "streamhunter";
-export const DB_VERSION = 5;
+export const DB_VERSION = 6;
 
 export type StoreName =
   | "streamers" | "sessions" | "highlights" | "clips" | "clipBlobs" | "clipThumbs"
   // v3 (3.0): discovery, authorized sources, output assets, rights
   | "candidates" | "sources" | "sourceBlobs" | "assets" | "assetBlobs" | "rights"
   // v5 (4.0): editing jobs run by the companion
-  | "editJobs";
+  | "editJobs"
+  // v6 (4.4): Whisper transcripts, one per clip
+  | "transcripts";
 export type BlobStore = "clipBlobs" | "clipThumbs" | "sourceBlobs" | "assetBlobs";
 
 function upgrade(db: IDBDatabase, oldVersion: number): void {
@@ -31,6 +33,8 @@ function upgrade(db: IDBDatabase, oldVersion: number): void {
     edits.createIndex("clip", "clip_id");
     edits.createIndex("dedupe", "dedupe_key", { unique: true });
   }
+  // v6 (4.4): one transcript per clip (key = clip id).
+  if (oldVersion < 6) db.createObjectStore("transcripts", { keyPath: "clip_id" });
 }
 
 /** 3.0: existing stores and data are untouched; only new stores are added. */

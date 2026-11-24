@@ -64,7 +64,7 @@ export interface EditInput {
 
 /** Same clip + template + options → same key, so it is never edited twice. */
 export function dedupeKey(clipId: number, plan: Pick<EditPlan, "template" | "trim" | "audio" | "encoder" | "panels" | "motion" | "captions">): string {
-  const opts = JSON.stringify([plan.trim, plan.audio, plan.encoder, plan.panels.map((p) => [p.sx, p.sy, p.sw, p.sh, p.dh, p.sxPath?.length ?? 0]), plan.motion ?? null, plan.captions?.length ?? 0]);
+  const opts = JSON.stringify([plan.trim, plan.audio, plan.encoder, plan.panels.map((p) => [p.sx, p.sy, p.sw, p.sh, p.dh, p.sxPath?.length ?? 0]), plan.motion ?? null, plan.captions ? "captions" : ""]);
   let h = 5381;
   for (let i = 0; i < opts.length; i++) h = ((h * 33) ^ opts.charCodeAt(i)) >>> 0;
   return `${clipId}:${plan.template}:${h.toString(36)}`;
@@ -101,6 +101,8 @@ export function buildEditPlan(input: EditInput, s: Settings["editing"]): EditPla
   const motion = s.style === "clean_gaming_motion";
   const zoomAt = input.peakSec !== null ? Math.round(Math.max(0, input.peakSec - start) * 10) / 10 : null;
   if (motion) notes.push(zoomAt !== null ? `Zooms in gently at ${zoomAt.toFixed(1)} s (the strongest moment).` : "No strongest moment is known, so there is no zoom.");
+  const captions = motion && s.captions;
+  if (s.captions && !motion) notes.push("Captions need the \"with motion\" style; this Short has none.");
   return {
     version: 1,
     template: motion ? TEMPLATE_MOTION : TEMPLATE_CLEAN,
@@ -111,6 +113,32 @@ export function buildEditPlan(input: EditInput, s: Settings["editing"]): EditPla
     encoder: s.encoder,
     thumbnailAt: input.peakSec !== null ? Math.max(0, input.peakSec - start) : null,
     ...(motion ? { motion: { zoomAt, zoomScale: MOTION.zoomScale, fadeIn: MOTION.fadeIn } } : {}),
+    // Filled from the transcript just before the edit is sent (empty when no speech was found).
+    ...(captions ? { captions: [] } : {}),
     notes,
   };
+}
+
+/** Caption chunks: short lines of Whisper's own words, in seconds of the Short. */
+export const CAPTION = { maxWords: 4, maxChars: 26, gap: 0.6, hold: 0.3, max: 400 } as const;
+
+export function captionsFor(words: { w: string; s: number; e: number }[], from: number, to: number | null): { start: number; end: number; text: string }[] {
+  const inside = words.filter((w) => w.s >= from && (to === null || w.e <= to)).map((w) => ({ w: w.w, s: w.s - from, e: w.e - from }));
+  const chunks: { w: string; s: number; e: number }[][] = [];
+  let cur: { w: string; s: number; e: number }[] = [];
+  for (const w of inside) {
+    const last = cur.at(-1);
+    const text = [...cur.map((x) => x.w), w.w].join(" ");
+    if (last && (cur.length >= CAPTION.maxWords || text.length > CAPTION.maxChars || w.s - last.e > CAPTION.gap || /[.!?…]$/.test(last.w) || (cur.length >= 2 && /[,;:]$/.test(last.w)))) {
+      chunks.push(cur);
+      cur = [];
+    }
+    cur.push(w);
+  }
+  if (cur.length) chunks.push(cur);
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  return chunks.slice(0, CAPTION.max).map((c, i) => {
+    const next = chunks[i + 1]?.[0]?.s ?? Infinity;
+    return { start: r2(c[0]!.s), end: r2(Math.min(c.at(-1)!.e + CAPTION.hold, next)), text: c.map((x) => x.w).join(" ") };
+  });
 }

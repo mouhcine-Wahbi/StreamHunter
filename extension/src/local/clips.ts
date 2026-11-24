@@ -156,6 +156,7 @@ export async function renameClip(id: number, title: string): Promise<LocalClip> 
 export async function deleteClip(id: number): Promise<void> {
   await deleteAssetsOf(id); // its vertical / landscape / edited versions
   await deleteEditJobsOf(id);
+  await db.delete("transcripts", id);
   await db.delete("clipBlobs", id);
   await db.delete("clipThumbs", id);
   await db.delete("clips", id);

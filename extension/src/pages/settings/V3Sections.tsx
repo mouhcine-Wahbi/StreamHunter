@@ -269,7 +269,7 @@ export function EditingSection({ s, update }: V3SectionProps) {
     <Section
       id="editing"
       title="Editing"
-      description="Turns your best clips into vertical 1080×1920 Shorts on this computer, with the companion and FFmpeg. It crops and stacks the original picture (facecam and the action StreamHunter followed), starts a little before the strongest moment when it comes late, and evens out the loudness. Nothing is invented and the original clip is never changed: the edited Short is saved as its own version. Landscape (X) versions are never edited."
+      description="Turns your best clips into vertical 1080×1920 Shorts on this computer, with the companion and FFmpeg. It crops and stacks the original picture (facecam and the action StreamHunter followed), starts a little before the strongest moment when it comes late, evens out the loudness and, with the motion style, zooms in gently at the strongest moment (Remotion). Nothing is invented and the original clip is never changed: the edited Short is saved as its own version. Landscape (X) versions are never edited."
     >
       <Field inline label="Edit clips">
         {({ id }) => <Switch id={id} label="Edit clips" checked={e.enabled} onChange={(enabled) => void update({ editing: { enabled } })} />}
@@ -287,6 +287,9 @@ export function EditingSection({ s, update }: V3SectionProps) {
             <option value="clean_gaming">Clean gaming (no motion)</option>
           </Select>
         )}
+      </Field>
+      <Field inline label="Captions" hint="What is said, from Whisper on this computer (needs the companion with Whisper and the motion style). Only real speech: text over music, noise or silence is dropped. Off by default.">
+        {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Captions" checked={e.captions} onChange={(captions) => void update({ editing: { captions } })} />}
       </Field>
       <Field inline label="Even out loudness" hint="About −14 LUFS, what YouTube and TikTok play at.">
         {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Even out loudness" checked={e.loudness} onChange={(loudness) => void update({ editing: { loudness } })} />}

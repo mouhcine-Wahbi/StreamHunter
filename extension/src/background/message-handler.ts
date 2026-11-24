@@ -113,14 +113,16 @@ export async function handleMessage(
         return { ok: true, data: await companion.endpoint() };
       case "edit/start":
       case "edit/cancel":
-      case "edit/retry": {
+      case "edit/retry":
+      case "transcript/start": {
         if (!editing) return { ok: false, error: "Editing isn't available here." };
         try {
           if (message.type === "edit/start") return { ok: true, data: await editing.edit(Number(message.clipId), await getSettings(), "manual") };
           if (message.type === "edit/cancel") return { ok: true, data: (await editing.cancel(Number(message.id))) ?? null };
+          if (message.type === "transcript/start") return { ok: true, data: await editing.transcribe(Number(message.clipId)) };
           return { ok: true, data: await editing.retry(Number(message.id)) };
         } catch (e) {
-          if (e instanceof EditError) return { ok: false, error: e.message };
+          if (e instanceof EditError || (message.type === "transcript/start" && e instanceof Error)) return { ok: false, error: e.message };
           throw e;
         }
       }

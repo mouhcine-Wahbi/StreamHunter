@@ -5,14 +5,15 @@
  * yourself; nothing here posts anywhere.
  */
 import { useState, type FormEvent } from "react";
-import { Check, Copy, Download, ExternalLink, Pencil, RotateCcw, Scissors, Sparkles, Star, Trash2, X } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, FileText, Pencil, RotateCcw, Scissors, Sparkles, Star, Trash2, X } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Field";
 import { PlatformBadge } from "@/components/streamers/PlatformBadge";
 import { useAction } from "@/hooks/useAction";
-import { useApiClient } from "@/hooks/useApiQuery";
+import { useApiClient, useApiQuery } from "@/hooks/useApiQuery";
+import { stamp, type Transcript } from "@/local/transcripts";
 import { assetBlob, assetThumbnail, type Asset, type AssetKind } from "@/local/assets";
 import { EDIT_STATE_LABEL, EDIT_TERMINAL, type EditJob } from "@/local/edits";
 import { decideEdit, TEMPLATE_LABEL } from "@/editing/rules";
@@ -363,6 +364,8 @@ export function LibraryItem({ clip, assets, edits = [], streamer, onChanged }: {
 
         <EditPanel clip={clip} edits={edits} edited={edited} onChanged={onChanged} />
 
+        <TranscriptPanel clip={clip} />
+
         <MetadataTabs clip={clip} assets={assets} onChanged={onChanged} />
 
         <div className="flex flex-wrap gap-1.5">
@@ -422,7 +425,7 @@ function EditPanel({ clip, edits, edited, onChanged }: { clip: LibraryClip; edit
       <>
         <span role="status" aria-label={`Edit: ${job.step}`}>
           {job.step}
-          {(job.state === "encoding" || job.state === "rendering") ? ` ${Math.round(job.progress * 100)}%` : "…"}
+          {(job.state === "encoding" || job.state === "rendering" || job.state === "transcribing") ? ` ${Math.round(job.progress * 100)}%` : "…"}
         </span>
         <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} loading={cancel.pending} onClick={() => void cancel.run()}>
           Cancel edit
@@ -473,6 +476,62 @@ function EditPanel({ clip, edits, edited, onChanged }: { clip: LibraryClip; edit
       </div>
       {running && <div className="h-1 overflow-hidden rounded bg-ink-800"><div className="h-full bg-accent" style={{ width: `${Math.round(job.progress * 100)}%` }} /></div>}
       {error && <p className="text-danger">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * 4.4: what is said in the clip, transcribed on this computer by the companion (Whisper). Exact words
+ * with their times; text Whisper produced over sound with no speech is dropped and counted.
+ */
+function TranscriptPanel({ clip }: { clip: LibraryClip }) {
+  const q = useApiQuery<Transcript | null>(`/api/v1/clips/${clip.id}/transcript`);
+  const [open, setOpen] = useState(false);
+  const run = useAction(async () => {
+    await sendRequest({ type: "transcript/start", clipId: clip.id });
+    q.reload();
+    setOpen(true);
+  });
+  const t = q.data;
+  return (
+    <div className="space-y-1 rounded-md border border-border p-2 text-xs" aria-label="Transcript">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium text-fg">Transcript</span>
+        {t ? (
+          <>
+            <span className="text-fg-muted">
+              {t.segments.length ? `${t.segments.length} line${t.segments.length === 1 ? "" : "s"}` : "No speech found"} · Whisper {t.model}
+              {t.language ? ` · ${t.language}` : ""}
+              {t.metrics ? ` · took ${(t.metrics.wall_ms / 1000).toFixed(1)} s` : ""}
+              {t.dropped.length > 0 && ` · ${t.dropped.length} piece${t.dropped.length === 1 ? "" : "s"} dropped (no speech in the sound)`}
+            </span>
+            {t.segments.length > 0 && (
+              <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+                {open ? "Hide" : "Show"}
+              </Button>
+            )}
+            {t.segments.length > 0 && <CopyButton text={t.segments.map((x) => `[${stamp(x.start)}] ${x.text}`).join("\n")} label="Copy transcript" what="transcript" />}
+          </>
+        ) : (
+          <>
+            <span className="text-fg-subtle">Not transcribed. Needs the companion with Whisper; runs on this computer.</span>
+            <Button size="sm" variant="secondary" icon={<FileText className="size-3.5" />} loading={run.pending} onClick={() => void run.run()}>
+              {run.pending ? "Transcribing…" : "Transcribe"}
+            </Button>
+          </>
+        )}
+      </div>
+      {open && t && (
+        <ol className="max-h-48 space-y-0.5 overflow-auto" aria-label="Transcript lines">
+          {t.segments.map((x) => (
+            <li key={x.start} className="flex gap-2">
+              <span className="w-10 shrink-0 tabular-nums text-fg-subtle">{stamp(x.start)}</span>
+              <span className="text-fg">{x.text}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {run.error && <p className="text-danger">{run.error}</p>}
     </div>
   );
 }

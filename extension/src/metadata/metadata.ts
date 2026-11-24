@@ -15,6 +15,8 @@ export interface ClipFacts {
   reasons: string[];
   durationSec: number | null;
   originalUrl: string | null;
+  /** 4.4: exact spoken lines from the transcript (seconds into the clip). */
+  quotes?: { at: number; text: string }[];
 }
 
 export interface DestinationMeta {
@@ -155,6 +157,8 @@ export function factsPrompt(f: ClipFacts): string {
     f.clipTitle && `Clip title chosen by the editor: ${f.clipTitle}`,
     f.reasons.length && `Why the moment was detected (measured): ${f.reasons.join("; ")}`,
     f.durationSec && `Clip length: ${Math.round(f.durationSec)} seconds`,
+    f.quotes?.length &&
+      `What is said in the clip (transcribed on this computer; exact words, quote them only as written):\n${f.quotes.map((q) => `[${Math.floor(q.at / 60)}:${String(Math.floor(q.at % 60)).padStart(2, "0")}] "${q.text}"`).join("\n")}`,
   ]
     .filter(Boolean)
     .join("\n");

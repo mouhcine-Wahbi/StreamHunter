@@ -34,7 +34,7 @@ The installer writes only:
 * Files live only in the work folder (`files/`, `jobs/`, `tmp/`, `logs/`); names are plain
   (`[A-Za-z0-9._-]`, no `..`). Uploads stop when less than 2 GB would stay free.
 * Only fixed requests: `hello`, `tools`, `disk`, `files/delete`, `shutdown`, and for editing
-  `edit/start`, `jobs/get`, `jobs/list`, `jobs/cancel`, `jobs/remove`. No arbitrary commands, no shell:
+  `edit/start`, `transcribe/start`, `jobs/get`, `jobs/list`, `jobs/cancel`, `jobs/remove`. No arbitrary commands, no shell:
   FFmpeg runs with arguments built from a checked edit plan (`src/plan.mjs`).
 * Editing (`src/jobs.mjs`): one job at a time, saved in `jobs/`, restarted after an interruption, FFmpeg
   at lower priority, progress sent to Chrome as events, cancel removes partial files, every output is
@@ -46,6 +46,15 @@ The installer writes only:
   stops it and its headless browser). The installer downloads Remotion's headless Chrome **once**
   into `node_modules/.remotion`; renders use that exact file and never download anything. Without
   Remotion the Short is still made, without motion, and says so.
+* Transcripts (`src/transcript.mjs`, request `transcribe/start`): the openai-whisper CLI with the
+  `large-v3-turbo` model, word timestamps, on this computer. The model (about 1.6 GB) is downloaded
+  once by you (`whisper --model large-v3-turbo <any audio file>`); the companion never downloads it
+  and says so if it is missing. Whisper invents text over sound with no speech (in testing: "Thank
+  you." and "I'll see you next time." over a steady tone, with a no-speech probability of 0), so every
+  word is checked against the sound: speech rises and falls between syllables, a tone, hum or silence
+  doesn't. Words without speech-like sound under them are dropped (and listed as dropped), as are
+  repeated text and Whisper's own "no speech" segments. Kept text is Whisper's, unchanged. Captions in
+  edited Shorts are built from these words only when you turn Captions on (off by default).
 * **Remotion licence and network:** Remotion is free for individuals and companies of up to three
   people; larger companies need a company licence (remotion.dev/license). No licence key is passed,
   so Remotion sends **no usage event**; nothing leaves this computer while rendering.

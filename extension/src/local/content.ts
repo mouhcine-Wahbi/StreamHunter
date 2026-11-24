@@ -4,6 +4,7 @@
  */
 import { db } from "./db";
 import { listAssets } from "./assets";
+import { getTranscript, quotes } from "./transcripts";
 import type { LocalClip } from "./clips";
 import type { Destination } from "./rights";
 import { factsOf, fit, type ClipMetadata, type DestinationMeta } from "@/metadata/metadata";
@@ -31,7 +32,8 @@ export async function prepareContent(id: number, settings: Settings, deps: Gener
   let metadata = clip.metadata ?? null;
   if (!metadata || opts.regenerate) {
     const keep = opts.resetEdits || !metadata ? undefined : Object.fromEntries(metadata.edited.map((d) => [d, metadata!.byDestination[d]]));
-    metadata = await generateMetadata(factsOf(clip, streamer), settings, deps, keep);
+    const q = quotes(await getTranscript(id));
+    metadata = await generateMetadata({ ...factsOf(clip, streamer), ...(q.length ? { quotes: q } : {}) }, settings, deps, keep);
   }
   return db.put<ContentClip>("clips", { ...(await load(id)).clip, viral, metadata });
 }

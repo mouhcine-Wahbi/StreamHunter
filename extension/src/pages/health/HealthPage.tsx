@@ -82,6 +82,10 @@ function StorageCard() {
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
           <dt className="text-fg-subtle">Clips</dt>
           <dd className="text-right tabular text-fg">{s ? `${s.clips} · ${formatBytes(s.clip_bytes)}` : "—"}</dd>
+          <dt className="text-fg-subtle">Versions (vertical, landscape, edited)</dt>
+          <dd className="text-right tabular text-fg">{s?.version_bytes != null ? formatBytes(s.version_bytes) : "—"}</dd>
+          <dt className="text-fg-subtle">Imported source files</dt>
+          <dd className="text-right tabular text-fg">{s?.source_files != null ? `${s.source_files} · ${formatBytes(s.source_bytes ?? 0)}` : "—"}</dd>
           <dt className="text-fg-subtle">Your limit</dt>
           <dd className="text-right tabular text-fg">
             {formatBytes(settings.storage.maxTotalMb * 1_048_576)}

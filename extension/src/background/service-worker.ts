@@ -32,6 +32,7 @@ import { createTwitchClip } from "@/platforms/twitch-clips";
 import type { Approval, ApprovalAction } from "@/local/approvals";
 import { createProcessingManager } from "./processing-manager";
 import { createContentManager } from "./content-manager";
+import { recoverClipper } from "@/clipper/clipper";
 import { removePublishingData } from "./cleanup";
 import { hasPendingWork } from "@/processing/pending";
 import { COMPANION_KEY, createCompanionManager } from "@/companion/client";
@@ -153,6 +154,10 @@ const resumeProcessing = () => void hasPendingWork().then((p) => (p ? processing
 resumeProcessing();
 void syncMaintenanceAlarm().catch(() => undefined);
 void removePublishingData().catch(() => undefined);
+// 4.7: nothing from before a restart stays "running" or "cutting" forever.
+void recoverClipper()
+  .then((r) => (r.transcripts || r.segments ? log("clipper_recovered", r) : undefined))
+  .catch(() => undefined);
 
 const manager = createMonitoringManager({
   approvals,

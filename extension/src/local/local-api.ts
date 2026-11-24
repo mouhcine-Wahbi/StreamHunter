@@ -1,3 +1,4 @@
+import { db } from "@/local/db";
 import { ApiClient, ApiError, type Method } from "@/services/api-client";
 import { PlatformError } from "@/platforms/http";
 import type { ChannelInfo } from "@/platforms/types";
@@ -189,10 +190,12 @@ export class LocalApi extends ApiClient {
 
   /** Overview totals: clips, their size and length, recording time, browser storage use. */
   private async stats() {
-    const [clips, rec, estimate] = await Promise.all([
+    const [clips, rec, estimate, sources, assets] = await Promise.all([
       clipStats(),
       chrome.storage.local.get("sh.stats"),
       navigator.storage?.estimate?.().catch(() => null) ?? Promise.resolve(null),
+      db.all<{ size_bytes: number }>("sources"),
+      db.all<{ size_bytes: number; kind: string; status: string }>("assets"),
     ]);
     const recorded = (rec["sh.stats"] as { recordedSeconds?: number } | undefined)?.recordedSeconds ?? 0;
     return {
@@ -203,6 +206,10 @@ export class LocalApi extends ApiClient {
       recorded_seconds: recorded,
       storage_used_bytes: estimate?.usage ?? null,
       storage_quota_bytes: estimate?.quota ?? null,
+      // 4.7: imported source files (Clipper) and made versions (vertical, landscape, edited Shorts).
+      source_files: sources.length,
+      source_bytes: sources.reduce((a, x) => a + (x.size_bytes || 0), 0),
+      version_bytes: assets.filter((a) => a.status === "ready").reduce((a, x) => a + (x.size_bytes || 0), 0),
     };
   }
 

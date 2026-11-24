@@ -238,6 +238,30 @@ export async function decideSegment(id: number, approve: boolean): Promise<Segme
   return db.put<Segment>("segments", { ...seg, status: "approved", error: null });
 }
 
+/**
+ * 4.7: after the extension restarts, nothing is left looking busy forever. A whole-file
+ * transcription that was running is marked interrupted. A segment approved for cutting whose cut
+ * request is gone (it is taken from the queue when cutting starts) is marked failed, to approve again.
+ */
+export async function recoverClipper(): Promise<{ transcripts: number; segments: number }> {
+  const out = { transcripts: 0, segments: 0 };
+  const sources = await db.all<SourceFile>("sources");
+  for (const s of sources) {
+    if (s.transcript_status !== "running") continue;
+    await db.put("sources", { ...s, transcript_status: "failed", transcript_error: "Interrupted (the extension restarted). Find segments again to retry." });
+    out.transcripts++;
+  }
+  const byId = new Map(sources.map((s) => [s.id, s]));
+  for (const g of await db.all<Segment>("segments")) {
+    if (g.status !== "approved" || g.clip_id !== null) continue;
+    const queued = (byId.get(g.source_id)?.pending_clips ?? []).some((r) => r.segment_id === g.id);
+    if (queued) continue;
+    await db.put<Segment>("segments", { ...g, status: "failed", error: "Interrupted while cutting (the extension restarted). Approve it again." });
+    out.segments++;
+  }
+  return out;
+}
+
 export async function deleteSegmentsOf(sourceId: number): Promise<void> {
   for (const s of await listSegments(sourceId)) await db.delete("segments", s.id);
 }

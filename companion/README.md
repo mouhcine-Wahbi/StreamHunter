@@ -69,6 +69,9 @@ The installer writes only:
 * **Remotion licence and network:** Remotion is free for individuals and companies of up to three
   people; larger companies need a company licence (remotion.dev/license). No licence key is passed,
   so Remotion sends **no usage event**; nothing leaves this computer while rendering.
+* Clean-up (4.7): at every start, leftovers in `tmp/` are removed, finished jobs the extension never
+  collected are forgotten after 7 days (with their files), files no job refers to are deleted after
+  24 hours, and damaged job records are removed. No job starts with less than 2 GB of free disk.
 * Logs: `logs/companion.log` (rotated at 5 MB). Stdout is reserved for Chrome.
 
 ## Tests

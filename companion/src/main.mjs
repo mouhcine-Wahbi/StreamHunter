@@ -28,15 +28,14 @@ export function readConfig(dir) {
   }
 }
 
-function usedBytes(dir) {
-  let total = 0;
-  for (const sub of ["files", "jobs", "tmp"]) {
-    for (const n of readdirSync(join(dir, sub))) {
-      const st = statSync(join(dir, sub, n), { throwIfNoEntry: false });
-      if (st?.isFile()) total += st.size;
-    }
-  }
-  return total;
+/** Bytes in the work folder (files, jobs, tmp, including Whisper's and yt-dlp's folders in tmp). */
+export function usedBytes(dir) {
+  const size = (p) => {
+    const st = statSync(p, { throwIfNoEntry: false });
+    if (!st) return 0;
+    return st.isDirectory() ? readdirSync(p).reduce((a, n) => a + size(join(p, n)), 0) : st.size;
+  };
+  return ["files", "jobs", "tmp"].reduce((a, sub) => a + size(join(dir, sub)), 0);
 }
 
 export function createCompanion({ dir, caller, write, exit, env = process.env }) {

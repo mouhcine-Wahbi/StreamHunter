@@ -1,6 +1,6 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-24 (4.0 in progress, branch `streamhunter-3.0`)_
+_Last updated: 2026-11-24 (4.0 phases 4.1–4.7 implemented, branch `streamhunter-3.0`, not pushed)_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
@@ -29,6 +29,17 @@ Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possi
 | Real Chrome end to end (Chrome 158, test profile, companion 0.2.0) | ✅ | Facecam clip: vertical version made → scored 34 (low) → **not edited at the default 85** → "edit automatically from" set to 34 and the vertical version remade → edited automatically 7 s later, trimmed to start 8 s before the peak (12.0 s), imported. Asking again returned the same edit. Action clip: Edit button path (manual) → 20.1 s Short. Both: 1080×1920 H.264 + AAC, full decode clean, played and seeked in Chrome. Companion peak 65 MB, FFmpeg peak 233–281 MB. Work folder empty afterwards |
 | Follow-the-action tracking (fix after 4.2) | ✅ unit tests (7 new), replay of real clips, real Chrome | Two causes, both fixed. (1) Chrome shrank each frame to the 64×36 motion probe at low quality, sampling only a few pixels, so motion was seen on 108 of 600 frames; the probe now uses high-quality smoothing (averaging). (2) The tracker had a dead zone and closed 8% of the gap per frame, so moving action always trailed; it now estimates the speed and aims ahead as far as that speed is steady, glides over repeated frames (low frame-rate sources), and keeps the dead zone while the action is still or its speed uncertain. Real Chrome, action.mp4 (box moving 80 px/s): box off-centre median **30 px** in the Short (was 371 px), never cut by the edge (was cut in 32 of 38 samples). Trade-off: on the busy test pattern (facecam.mp4) the window follows its moving elements more readily: 9 moves over 80 px in 20 s instead of 4. Not measured: the extra CPU of high-quality smoothing in the probe; real streams |
 | Unverified | ⏳ | Your own Chrome (companion not installed there); the real permission prompt; real recorded streams (only test files); a clip scoring 85+ naturally (test clips score 34–45); "wait while recording" with a real recording (unit test only); editing a long clip (> 2 min) |
+
+### Phase 4.7 — Storage and hardening
+
+| Item | Status | Evidence / notes |
+|---|---|---|
+| Companion: at start, `tmp/` leftovers are removed, finished jobs older than 7 days are forgotten with their files, files no job refers to are deleted after 24 h, damaged job records are removed (not re-read every start); no job starts with less than 2 GB free (message with the numbers); used space counts Whisper's and yt-dlp's folders | ✅ 2 new companion tests (34 total); real Chrome | Real Chrome: a leftover Whisper folder, a 3-day-old orphan file and a damaged `broken.json` placed in the work folder were removed when the companion started (logged: `housekeeping {tmp 1, files 1, bytes 5002}`, `job_unreadable_removed`) |
+| Extension: an imported or fetched source file must leave 2 GB of browser storage free (refused with the numbers); System Health → Storage shows versions and imported source files | ✅ unit test; real Chrome screenshot | Storage card: clips 11.4 MB, versions 42.4 MB, 2 source files 54.8 MB |
+| Recovery at worker start: a whole-file transcription left "running" → "Transcription failed: interrupted"; a segment left "Approved: cutting…" whose cut request was lost → "Failed", with **Approve again** | ✅ unit test; real Chrome restart | Seeded both states, killed Chrome, started it again: both recovered, the page showed "Approve again" with the reason |
+| Damaged files | ✅ real Chrome | Random bytes named .mp4 imported in the Clipper: analysis "failed" with FFmpeg's reason on the page; nothing else affected |
+| Regression | ✅ | 268 extension tests, 34 companion tests, typecheck, build; Clipper end to end again in real Chrome with companion 0.5.0 (segments 59 s, cut 2.5 s, motion Short 32 s) |
+| Unverified | ⏳ | A real full disk or browser quota (simulated in tests only); a Mac with little storage; recovery after `chrome.runtime.reload()` (Chrome blocks an unpacked test extension after a self-reload, a harness limit; a real browser restart was tested) |
 
 ### Phase 4.6 — yt-dlp, opt-in
 

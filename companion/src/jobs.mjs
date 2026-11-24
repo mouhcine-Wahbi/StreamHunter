@@ -14,6 +14,16 @@ import { fileURLToPath } from "node:url";
 
 const RENDER_WORKER = fileURLToPath(new URL("./render.mjs", import.meta.url));
 import { inside, isSafeName } from "./paths.mjs";
+import { DISK_RESERVE, freeBytes } from "./server.mjs";
+
+/** 4.7: the work folder is cleaned at every start. */
+export const RETENTION = {
+  /** A file no job refers to (an upload whose job never started, a crash) is deleted after a day. */
+  orphanMs: 24 * 3600 * 1000,
+  /** A finished job the extension never collected is forgotten after a week, with its files. */
+  finishedMs: 7 * 24 * 3600 * 1000,
+};
+const gb = (b) => `${(b / 1024 ** 3).toFixed(1)} GB`;
 
 export const TERMINAL = new Set(["done", "failed", "cancelled"]);
 export const MAX_ATTEMPTS = 2;
@@ -50,7 +60,7 @@ export function sampleTree(pid) {
   });
 }
 
-export function createJobQueue({ dir, tools, log = () => undefined, emit = () => undefined, nice = 10 }) {
+export function createJobQueue({ dir, tools, log = () => undefined, emit = () => undefined, nice = 10, free = () => freeBytes(dir), reserve = DISK_RESERVE, now = Date.now }) {
   const jobsDir = join(dir, "jobs");
   const files = join(dir, "files");
   mkdirSync(jobsDir, { recursive: true });
@@ -80,9 +90,56 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
       jobs.set(j.id, j);
       save(j);
     } catch {
-      log("job_unreadable", { file: n });
+      // A damaged job record (a crash while writing it): removed, so it isn't read on every start.
+      rmSync(join(jobsDir, n), { force: true });
+      log("job_unreadable_removed", { file: n });
     }
   }
+
+  const jobFiles = (j) => [j.input, j.output?.video, j.output?.thumbnail, j.output?.transcript].filter((n) => n && isSafeName(n));
+
+  /**
+   * 4.7: leftovers of a crash in tmp/, finished jobs older than a week (with their files), and files
+   * no job refers to that are older than a day. Only at start, when nothing runs.
+   */
+  function housekeeping() {
+    const out = { tmp: 0, jobs: 0, files: 0, bytes: 0 };
+    const size = (p) => {
+      const st = statSync(p, { throwIfNoEntry: false });
+      if (!st) return 0;
+      if (!st.isDirectory()) return st.size;
+      return readdirSync(p).reduce((a, n) => a + size(join(p, n)), 0);
+    };
+    const tmpDir = join(dir, "tmp");
+    for (const n of readdirSync(tmpDir)) {
+      out.bytes += size(join(tmpDir, n));
+      rmSync(join(tmpDir, n), { recursive: true, force: true });
+      out.tmp++;
+    }
+    const t = now();
+    for (const j of [...jobs.values()]) {
+      if (!TERMINAL.has(j.state) || t - Date.parse(j.updated_at) < RETENTION.finishedMs) continue;
+      for (const n of jobFiles(j)) {
+        out.bytes += size(join(files, n));
+        rmSync(join(files, n), { force: true });
+      }
+      rmSync(join(jobsDir, `${j.id}.json`), { force: true });
+      jobs.delete(j.id);
+      out.jobs++;
+    }
+    const used = new Set([...jobs.values()].flatMap(jobFiles));
+    for (const n of readdirSync(files)) {
+      const p = join(files, n);
+      const st = statSync(p, { throwIfNoEntry: false });
+      if (!st?.isFile() || used.has(n) || t - st.mtimeMs < RETENTION.orphanMs) continue;
+      out.bytes += st.size;
+      rmSync(p, { force: true });
+      out.files++;
+    }
+    if (out.tmp || out.jobs || out.files) log("housekeeping", out);
+    return out;
+  }
+  const cleaned = housekeeping();
 
   function run(file, args, onLine, { onErr, env, raw } = {}) {
     return new Promise((resolve) => {
@@ -407,6 +464,11 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
           update(next, { state: "failed", step: "Failed", error: next.error ?? "Stopped after repeated interruptions." });
           continue;
         }
+        const left = free();
+        if (left < reserve) {
+          update(next, { state: "failed", step: "Failed", error: `Not enough free disk space: ${gb(left)} free, and StreamHunter keeps ${gb(reserve)} free. Free some space, then try again.` });
+          continue;
+        }
         await (next.kind === "transcribe" ? transcribe(next) : next.kind === "fetch" ? fetchVideo(next) : work(next));
       }
     } finally {
@@ -454,12 +516,14 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
       const job = jobs.get(id);
       if (!job) return false;
       if (running?.id === id) return false;
-      for (const n of [job.input, job.output?.video, job.output?.thumbnail, job.output?.transcript]) if (n && isSafeName(n)) rmSync(join(files, n), { force: true });
+      for (const n of jobFiles(job)) rmSync(join(files, n), { force: true });
       rmSync(join(jobsDir, `${id}.json`), { force: true });
       jobs.delete(id);
       return true;
     },
     resume: () => void pump(),
+    /** What the start-up clean-up removed. */
+    cleaned,
     get busy() {
       return running !== null;
     },

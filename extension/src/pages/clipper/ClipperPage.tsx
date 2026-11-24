@@ -396,10 +396,10 @@ function SourceCard({ c, s, tick, onChanged }: { c: Candidate; s: SourceFile; ti
                   </span>
                   <Badge tone="accent">score {Math.round(g.score)}</Badge>
                   <Badge tone={g.status === "extracted" ? "live" : g.status === "rejected" || g.status === "failed" ? "danger" : "neutral"}>{SEG_LABEL[g.status]}</Badge>
-                  {g.status === "pending" && (
+                  {(g.status === "pending" || g.status === "failed") && (
                     <>
                       <Button size="sm" variant="secondary" icon={<Check className="size-3.5" />} onClick={() => void decide(g.id, true)}>
-                        Approve segment
+                        {g.status === "failed" ? "Approve again" : "Approve segment"}
                       </Button>
                       <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} onClick={() => void decide(g.id, false)}>
                         Reject segment
@@ -412,6 +412,7 @@ function SourceCard({ c, s, tick, onChanged }: { c: Candidate; s: SourceFile; ti
                     </a>
                   )}
                 </div>
+                {g.status === "failed" && g.error && <p className="text-danger">{g.error}</p>}
                 <ul className="text-fg-subtle">
                   {g.reasons.map((r) => (
                     <li key={r}>· {r}</li>

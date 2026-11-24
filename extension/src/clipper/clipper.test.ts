@@ -14,7 +14,7 @@ import { applyFilters, clipType, NO_FILTERS, type LibraryClip } from "@/pages/cl
 import { createEditingManager } from "@/background/editing-manager";
 import { DEFAULT_SETTINGS } from "@/types/settings";
 import { sanitizeSettings } from "@/utils/settings";
-import { buildSegments, decideSegment, decideSource, durationMatch, importForVideo, listSegments, parseYouTubeUrl, saveSegments, type SpeechSegment } from "./clipper";
+import { buildSegments, decideSegment, decideSource, durationMatch, importForVideo, listSegments, parseYouTubeUrl, recoverClipper, saveSegments, type SpeechSegment } from "./clipper";
 
 const api = () => new LocalApi(() => createAdapters());
 const ID = "dQw4w9WgXcQ";
@@ -215,5 +215,41 @@ describe("4.6 yt-dlp (opt-in)", () => {
     expect(ok.calls.find((x) => x.type === "fetch/start")!.payload).toEqual({ id_job: `sh-fetch-${c.id}`, video_id: ID, confirmed: true, basis: "permission" });
     expect(s).toMatchObject({ candidate_id: c.id, platform: "youtube", obtained_via: "yt-dlp", size_bytes: 4000, rights: { status: "processing", evidence: "Email from the creator, 2026-11-20" } });
     expect(ok.calls.at(-1)).toMatchObject({ type: "jobs/remove" });
+  });
+});
+
+describe("4.7 storage and recovery", () => {
+  it("an import that wouldn't leave 2 GB of browser storage free is refused, with the numbers", async () => {
+    const c = await candidate();
+    await decideSource(c.id, { approve: true, input: approveInput });
+    const est = vi.fn(async () => ({ quota: 3 * 1024 ** 3, usage: 0.5 * 1024 ** 3 }));
+    Object.defineProperty(navigator, "storage", { value: { estimate: est }, configurable: true });
+    try {
+      const sized = (n: number) => Object.defineProperty(file(), "size", { value: n }); // no need to allocate it
+      await expect(importForVideo(c.id, sized(600 * 1024 ** 2))).rejects.toThrow("Not enough browser storage: the file needs 0.6 GB, 2.5 GB is free, and StreamHunter keeps 2.0 GB free.");
+      expect(await listSources()).toEqual([]);
+      expect(await importForVideo(c.id, sized(100 * 1024 ** 2))).toMatchObject({ size_bytes: 100 * 1024 ** 2 });
+    } finally {
+      Object.defineProperty(navigator, "storage", { value: undefined, configurable: true });
+    }
+  });
+
+  it("after a restart: a running transcription is marked interrupted; a segment whose cut was lost can be approved again", async () => {
+    const c = await candidate();
+    await decideSource(c.id, { approve: true, input: approveInput });
+    const src = await importForVideo(c.id, file());
+    await db.put("sources", { ...src, analysis: "analyzed", duration_seconds: 125, moments, transcript_status: "done", transcript: { model: "m", language: "en", segments: speech, dropped: 0, created_at: "" } });
+    const segs = await saveSegments((await listSources())[0]!);
+    await decideSegment(segs[0]!.id, true); // queued for cutting: stays approved
+    await decideSegment(segs[1]!.id, true);
+    // The runner took the second request off the queue and the worker stopped mid-cut.
+    const s = (await listSources())[0]!;
+    await db.put("sources", { ...s, transcript_status: "running", pending_clips: s.pending_clips!.filter((r) => r.segment_id === segs[0]!.id) });
+    expect(await recoverClipper()).toEqual({ transcripts: 1, segments: 1 });
+    expect((await listSources())[0]).toMatchObject({ transcript_status: "failed", transcript_error: expect.stringMatching(/Interrupted/) });
+    expect((await listSegments(src.id)).map((g) => [g.status, g.error])).toEqual([["approved", null], ["failed", "Interrupted while cutting (the extension restarted). Approve it again."]]);
+    expect(await recoverClipper()).toEqual({ transcripts: 0, segments: 0 });
+    expect(await decideSegment(segs[1]!.id, true)).toMatchObject({ status: "approved", error: null });
+    expect((await listSources())[0]!.pending_clips!.map((r) => r.segment_id)).toEqual([segs[0]!.id, segs[1]!.id]);
   });
 });

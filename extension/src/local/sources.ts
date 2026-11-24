@@ -61,6 +61,18 @@ export interface ClipRequest {
 }
 
 export const MAX_SOURCE_BYTES = 4 * 1024 ** 3;
+/** 4.7: an import must leave this much of the browser's storage free (recording pauses below it too). */
+export const STORAGE_RESERVE = 2 * 1024 ** 3;
+
+/** null when there is room for `bytes` more in this browser's storage (or it can't be measured). */
+export async function noRoomFor(bytes: number): Promise<string | null> {
+  const e = await navigator.storage?.estimate?.().catch(() => null);
+  if (!e?.quota || e.usage == null) return null;
+  const free = e.quota - e.usage;
+  if (free - bytes >= STORAGE_RESERVE) return null;
+  const gb = (b: number) => `${(Math.max(0, b) / 1024 ** 3).toFixed(1)} GB`;
+  return `Not enough browser storage: the file needs ${gb(bytes)}, ${gb(free)} is free, and StreamHunter keeps ${gb(STORAGE_RESERVE)} free. Delete clips or source files (System Health → Storage) or free disk space.`;
+}
 const VIDEO_TYPES = /^video\/(mp4|quicktime|webm|x-matroska)$/;
 
 /** Add a file you're authorized to use. Needs at least "authorized for analysis" with evidence. */
@@ -72,6 +84,8 @@ export async function addSource(
 ): Promise<SourceFile> {
   if (!VIDEO_TYPES.test(file.type)) throw new RightsError("Choose an MP4, MOV or WebM video file.");
   if (file.size === 0 || file.size > MAX_SOURCE_BYTES) throw new RightsError("The file is empty or larger than 4 GB.");
+  const room = await noRoomFor(file.size);
+  if (room) throw new RightsError(room);
   const rights = validateRights(rightsInput, now);
   if (!atLeast(rights, "analysis")) throw new RightsError("StreamHunter only works with files you're authorized to use: choose at least \"Authorized for analysis\".");
   let candidate: Candidate | undefined;

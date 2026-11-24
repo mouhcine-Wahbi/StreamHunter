@@ -22,6 +22,9 @@ export interface ClipStats {
   recorded_seconds: number;
   storage_used_bytes: number | null;
   storage_quota_bytes: number | null;
+  source_files?: number;
+  source_bytes?: number;
+  version_bytes?: number;
 }
 
 type Tone = Extract<BadgeTone, "live" | "warn" | "danger" | "neutral" | "accent">;

@@ -10,7 +10,7 @@ import type { ContentClip } from "@/local/content";
 import { createEditJob, EDIT_STATE_LABEL, EDIT_TERMINAL, editJobByKey, getEditJob, listEditJobs, patchEditJob, type EditJob, type EditState } from "@/local/edits";
 import { buildEditPlan, captionsFor, decideEdit, dedupeKey } from "@/editing/rules";
 import { getTranscript, putTranscript, type Transcript } from "@/local/transcripts";
-import { sourceBlob, updateSource, type SourceFile } from "@/local/sources";
+import { noRoomFor, sourceBlob, updateSource, type SourceFile } from "@/local/sources";
 import { importForVideo, isApproved, saveSegments, type Segment } from "@/clipper/clipper";
 import type { Candidate } from "@/discovery/discovery";
 import { getFile, putFile, type CompanionEndpoint, type CompanionEvent, type CompanionJob } from "@/companion/client";
@@ -310,6 +310,8 @@ export function createEditingManager(deps: EditingDeps) {
       const basis = c.clipper?.basis;
       if (basis !== "own" && basis !== "permission") throw new EditError("yt-dlp is only for your own videos or videos you have written permission to download. For a licensed video, import the file you have.");
       if (!confirmed) throw new EditError("Confirm that you own this video or have written permission to download it.");
+      const room = await noRoomFor(0);
+      if (room) throw new EditError(room);
       const id = `sh-fetch-${candidateId}`;
       const holdKey = -2_000_000 - candidateId;
       hold(holdKey, true);

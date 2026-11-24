@@ -280,6 +280,14 @@ export function EditingSection({ s, update }: V3SectionProps) {
       <Field inline label="Offer an Edit button from" hint="Initially 70. Below this, clips aren't edited.">
         {({ id, describedBy }) => <NumberField id={id} describedBy={describedBy} value={e.offerFrom} min={0} max={100} onCommit={(offerFrom) => void update({ editing: { offerFrom } })} />}
       </Field>
+      <Field inline label="Style" hint="With motion needs Remotion in the companion; without it the Short is made without the zoom.">
+        {({ id, describedBy }) => (
+          <Select id={id} aria-describedby={describedBy} className="w-60" value={e.style} onChange={(ev) => void update({ editing: { style: ev.target.value as Settings["editing"]["style"] } })}>
+            <option value="clean_gaming_motion">Clean gaming with motion (zoom at the peak)</option>
+            <option value="clean_gaming">Clean gaming (no motion)</option>
+          </Select>
+        )}
+      </Field>
       <Field inline label="Even out loudness" hint="About −14 LUFS, what YouTube and TikTok play at.">
         {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Even out loudness" checked={e.loudness} onChange={(loudness) => void update({ editing: { loudness } })} />}
       </Field>
@@ -294,7 +302,6 @@ export function EditingSection({ s, update }: V3SectionProps) {
       <Field inline label="Wait while recording" hint="Edits start when no stream is being recorded (checked every 5 minutes).">
         {({ id, describedBy }) => <Switch id={id} aria-describedby={describedBy} label="Wait while recording" checked={e.pauseWhileRecording} onChange={(pauseWhileRecording) => void update({ editing: { pauseWhileRecording } })} />}
       </Field>
-      <p className="text-xs text-fg-subtle">Captions (needs Whisper) and animated templates (Remotion) come in later updates; captions will stay off unless you turn them on.</p>
     </Section>
   );
 }

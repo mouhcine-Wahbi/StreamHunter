@@ -135,7 +135,8 @@ export interface Settings {
     autoFrom: number;
     /** Offer "Edit" (you decide) from this score, below autoFrom. Below it: no edit offered. */
     offerFrom: number;
-    style: "clean_gaming";
+    /** "clean_gaming_motion": FFmpeg + Remotion (a short zoom at the strongest moment, a quick fade in). "clean_gaming": FFmpeg only. */
+    style: "clean_gaming_motion" | "clean_gaming";
     /** Captions need Whisper (phase 4.4); off by default. */
     captions: boolean;
     /** Normalize loudness to about −14 LUFS. */
@@ -178,7 +179,7 @@ export const DEFAULT_SETTINGS: Settings = {
   scoring: { weights: { hook: 25, emotion: 20, engagement: 20, story: 15, share: 10, platform: 10 }, highThreshold: 85, mediumThreshold: 60 },
   metadata: { attribution: true },
   ai: { onDevice: true, external: "none", model: "", endpoint: "" },
-  editing: { enabled: true, autoFrom: 85, offerFrom: 70, style: "clean_gaming", captions: false, loudness: true, encoder: "videotoolbox", pauseWhileRecording: false },
+  editing: { enabled: true, autoFrom: 85, offerFrom: 70, style: "clean_gaming_motion", captions: false, loudness: true, encoder: "videotoolbox", pauseWhileRecording: false },
   locale: { timeZone: "auto", language: "en" },
   privacy: { retentionDays: 30 },
 };

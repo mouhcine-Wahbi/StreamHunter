@@ -9,6 +9,7 @@ StreamHunter works without it; automatic editing and the YouTube Video Clipper n
 ```bash
 brew install ffmpeg openai-whisper yt-dlp deno node   # Node 22 or later
 cd companion
+npm ci                  # Remotion 4.0.545 + React, pinned (needed only for the motion template)
 node install.mjs --extension-id <ID from StreamHunter → Settings → Companion>
 ```
 
@@ -39,10 +40,19 @@ The installer writes only:
   at lower priority, progress sent to Chrome as events, cancel removes partial files, every output is
   probed and fully decoded before it's offered. Inputs and outputs are deleted once the extension has
   saved the Short.
+* Motion template (`remotion/`, `src/render.mjs`): after FFmpeg makes the vertical Short, Remotion
+  adds a gentle zoom (at most 1.15×) on the gameplay at the strongest moment and a quick fade in; the
+  facecam panel is never zoomed. It runs as its own process (its memory and CPU are measured, cancel
+  stops it and its headless browser). The installer downloads Remotion's headless Chrome **once**
+  into `node_modules/.remotion`; renders use that exact file and never download anything. Without
+  Remotion the Short is still made, without motion, and says so.
+* **Remotion licence and network:** Remotion is free for individuals and companies of up to three
+  people; larger companies need a company licence (remotion.dev/license). No licence key is passed,
+  so Remotion sends **no usage event**; nothing leaves this computer while rendering.
 * Logs: `logs/companion.log` (rotated at 5 MB). Stdout is reserved for Chrome.
 
 ## Tests
 
 ```bash
-npm test   # node --test, no dependencies
+npm test   # node --test (Remotion tests are skipped when it isn't installed)
 ```

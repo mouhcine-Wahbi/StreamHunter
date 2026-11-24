@@ -5,6 +5,9 @@
  * plan only crops, scales, stacks, trims and normalizes the original picture and sound.
  */
 export const TEMPLATE_FFMPEG = "ffmpeg_clean_v1";
+export const TEMPLATE_REMOTION = "remotion_clean_gaming_v1";
+export const MAX_ZOOM = 1.15;
+export const MAX_CAPTIONS = 400;
 export const MAX_PATH_POINTS = 48;
 
 const num = (v) => typeof v === "number" && Number.isFinite(v);
@@ -34,6 +37,20 @@ export function checkPlan(plan, input) {
   if (!trim || !num(trim.start) || trim.start < 0 || (trim.end !== null && (!num(trim.end) || trim.end <= trim.start))) p.push("Invalid trim");
   else if (trim.start >= input.duration) p.push("Trim starts after the end of the clip");
   if (!["videotoolbox", "x264"].includes(plan.encoder)) p.push("Unknown encoder");
+  const m = plan.motion;
+  if (m !== undefined && m !== null) {
+    if (typeof m !== "object") p.push("Invalid motion");
+    else {
+      if (m.zoomAt !== null && (!num(m.zoomAt) || m.zoomAt < 0)) p.push("Invalid zoom time");
+      if (!num(m.zoomScale) || m.zoomScale < 1 || m.zoomScale > MAX_ZOOM) p.push(`Zoom must be between 1 and ${MAX_ZOOM}`);
+      if (!num(m.fadeIn) || m.fadeIn < 0 || m.fadeIn > 1) p.push("Invalid opening fade");
+    }
+  }
+  const c = plan.captions;
+  if (c !== undefined && c !== null) {
+    if (!Array.isArray(c) || c.length > MAX_CAPTIONS || !c.every((x) => x && num(x.start) && num(x.end) && x.end > x.start && typeof x.text === "string" && x.text.length <= 200)) p.push("Invalid captions");
+    else if (c.length && !m) p.push("Captions need the Remotion template");
+  }
   return p;
 }
 
@@ -66,7 +83,7 @@ export function filterGraph(plan, input) {
     const y = Math.round(Math.min(Math.max(0, s.sy), input.height - h));
     return `crop=w=${w}:h=${h}:x=${x}:y=${y},scale=1080:${s.dh}:flags=lanczos,setsar=1`;
   });
-  const tail = `fps=${fps},format=yuv420p`;
+  const tail = `fps=${fps},scale=out_color_matrix=bt709:out_range=tv,format=yuv420p`;
   if (crops.length === 1) return `[0:v]${crops[0]},${tail}[v]`;
   return `[0:v]split=2[a][b];[a]${crops[0]}[top];[b]${crops[1]}[bot];[top][bot]vstack=inputs=2,${tail}[v]`;
 }
@@ -84,6 +101,8 @@ export function ffmpegArgs(plan, input, out) {
   } else args.push("-an");
   if (plan.encoder === "videotoolbox") args.push("-c:v", "h264_videotoolbox", "-b:v", "10M", "-maxrate", "14M", "-bufsize", "20M", "-profile:v", "high", "-allow_sw", "1");
   else args.push("-c:v", "libx264", "-preset", "medium", "-crf", "19", "-profile:v", "high");
+  // Tag the colours (BT.709) so browsers and players decode them the same way.
+  args.push("-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv");
   args.push("-g", String(Math.round(Math.min(plan.output.maxFps ?? 60, input.fps || 30) * 2)), "-movflags", "+faststart", "-f", "mp4", out);
   return args;
 }
@@ -123,4 +142,29 @@ export function checkOutput(probe, plan, input) {
   const want = expectedDuration(plan, input);
   if (Math.abs(probe.duration - want) > 0.6) p.push(`Output lasts ${probe.duration.toFixed(1)} s, expected ${want.toFixed(1)} s`);
   return p;
+}
+
+/**
+ * Props for the Remotion template from the plan and the probed base video: one punch-in around
+ * the strongest moment (0.4 s in, 1.2 s hold, 0.4 s out, clamped to the Short), the opening fade,
+ * and captions (already in the Short's time).
+ */
+export function motionProps(plan, base) {
+  const fps = base.fps || 30;
+  const total = Math.max(1, Math.round(base.duration * fps));
+  const m = plan.motion;
+  let zoom = null;
+  if (m.zoomAt !== null && m.zoomScale > 1) {
+    const at = Math.round(m.zoomAt * fps);
+    const f = [at - Math.round(0.4 * fps), at, at + Math.round(1.2 * fps), at + Math.round(1.6 * fps)].map((x) => Math.min(total - 1, Math.max(0, x)));
+    if (f[3] > f[0] && f[1] > f[0]) zoom = { frames: f, scale: Math.min(MAX_ZOOM, m.zoomScale) };
+  }
+  return {
+    durationInFrames: total,
+    fps,
+    splitY: plan.panels.length === 2 ? plan.panels[0].dh : 0,
+    zoom,
+    fadeInFrames: Math.round((m.fadeIn ?? 0) * fps),
+    captions: (plan.captions ?? []).map((c) => ({ start: c.start, end: c.end, text: c.text })),
+  };
 }

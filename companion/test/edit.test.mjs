@@ -9,6 +9,7 @@ import { checkPlan, pathExpr, readProbe, filterGraph } from "../src/plan.mjs";
 import { createJobQueue, parseCpuTime } from "../src/jobs.mjs";
 import { ensureLayout } from "../src/paths.mjs";
 import { searchDirs, which } from "../src/tools.mjs";
+import { browserPath } from "../src/render.mjs";
 
 const dirs = searchDirs(process.env);
 const ffmpeg = which("ffmpeg", dirs);
@@ -147,4 +148,106 @@ test("an interrupted job is picked up again when the companion restarts", { skip
   assert.equal(j.attempts, 2);
   assert.ok(q.remove("r1"));
   assert.ok(!existsSync(join(dir, "files", "r1-out.mp4")));
+});
+
+// ── 4.3 Remotion template ────────────────────────────────────────────────────────────────────────
+import { motionProps } from "../src/plan.mjs";
+import { detectRemotion } from "../src/tools.mjs";
+const remotionSkip = skip || (!detectRemotion().ok ? "Remotion not set up" : false);
+const withMotion = (over = {}) => stacked({ template: "remotion_clean_gaming_v1", motion: { zoomAt: 3, zoomScale: 1.12, fadeIn: 0.25 }, ...over });
+function grayFrame(p, t) {
+  return execFileSync(ffmpeg, ["-v", "error", "-ss", String(t), "-i", p, "-frames:v", "1", "-vf", "format=gray", "-f", "rawvideo", "-"], { maxBuffer: 16e6 });
+}
+const diff = (a, b, from, to) => {
+  let s = 0, n = 0;
+  for (let i = from * 1080; i < to * 1080; i += 97) (s += Math.abs(a[i] - b[i])), n++;
+  return s / n;
+};
+
+test("motion plans: zoom limited to 1.15×, captions only with the template; props from the base video", () => {
+  const input = { width: 1920, height: 1080, duration: 10, fps: 30 };
+  assert.deepEqual(checkPlan(withMotion(), input), []);
+  assert.ok(checkPlan(withMotion({ motion: { zoomAt: 3, zoomScale: 1.5, fadeIn: 0 } }), input).some((x) => x.includes("Zoom")));
+  assert.ok(checkPlan(stacked({ captions: [{ start: 0, end: 1, text: "hi" }] }), input).includes("Captions need the Remotion template"));
+  assert.ok(checkPlan(withMotion({ captions: [{ start: 2, end: 1, text: "x" }] }), input).includes("Invalid captions"));
+  const p = motionProps(withMotion(), { duration: 6, fps: 30 });
+  assert.equal(p.durationInFrames, 180);
+  assert.equal(p.splitY, 720);
+  assert.deepEqual(p.zoom, { frames: [78, 90, 126, 138], scale: 1.12 });
+  assert.equal(p.fadeInFrames, 8);
+  // A zoom at the very end is clamped to the Short.
+  assert.equal(motionProps(withMotion({ motion: { zoomAt: 5.9, zoomScale: 1.1, fadeIn: 0 } }), { duration: 6, fps: 30 }).zoom.frames[3], 179);
+  assert.equal(motionProps(withMotion({ motion: { zoomAt: null, zoomScale: 1.1, fadeIn: 0 } }), { duration: 6, fps: 30 }).zoom, null);
+});
+
+test("Remotion template: punch-in on the gameplay only, facecam untouched, valid 1080×1920 H.264 + AAC", { skip: remotionSkip, timeout: 240000 }, async () => {
+  const dir = workDir(make("a.mp4"));
+  const q = createJobQueue({ dir, tools: { ...tools, node: process.execPath, remotion: true } });
+  q.add({ id: "m1", input: "in.mp4", plan: withMotion({ encoder: "x264" }) });
+  const j = await waitFor(q, "m1", 240000);
+  assert.equal(j.state, "done", j.error);
+  assert.match(j.metrics.encoder, /Remotion/);
+  assert.ok(j.metrics.peak_rss_bytes > 100e6, "the browser's memory is counted");
+  const out = join(dir, "files", j.output.video);
+  const info = probe(out);
+  assert.deepEqual([info.width, info.height, info.videoCodec, info.audioCodec], [1080, 1920, "h264", "aac"]);
+  assert.ok(Math.abs(info.duration - 6) < 0.6);
+  // Compare against the same plan without motion (FFmpeg only).
+  const ref = workDir(make("a.mp4"));
+  const q2 = createJobQueue({ dir: ref, tools });
+  q2.add({ id: "r1", input: "in.mp4", plan: stacked({ encoder: "x264" }) });
+  const rj = await waitFor(q2, "r1");
+  const refOut = join(ref, "files", rj.output.video);
+  const [a1, b1] = [grayFrame(out, 1.5), grayFrame(refOut, 1.5)];
+  const [a3, b3] = [grayFrame(out, 3.3), grayFrame(refOut, 3.3)];
+  assert.ok(diff(a1, b1, 760, 1920) < 4, `no zoom before the peak (${diff(a1, b1, 760, 1920)})`);
+  assert.ok(diff(a3, b3, 760, 1920) > 8, `zoomed at the peak (${diff(a3, b3, 760, 1920)})`);
+  assert.ok(diff(a3, b3, 0, 700) < 4, `facecam not zoomed (${diff(a3, b3, 0, 700)})`);
+  assert.deepEqual(readdirSync(join(dir, "tmp")), []);
+});
+
+test("without Remotion the Short is still made (no zoom), with a note saying why", { skip }, async () => {
+  const dir = workDir(make("a.mp4"));
+  const q = createJobQueue({ dir, tools: { ...tools, node: process.execPath, remotion: false } });
+  q.add({ id: "f1", input: "in.mp4", plan: withMotion({ encoder: "x264", trim: { start: 0, end: 2 } }) });
+  const j = await waitFor(q, "f1");
+  assert.equal(j.state, "done", j.error);
+  assert.ok(j.notes.some((n) => n.includes("Remotion isn't set up")));
+  assert.doesNotMatch(j.metrics.encoder, /Remotion/);
+});
+
+test("cancel during the Remotion render stops it and its browser, and leaves no files", { skip: remotionSkip, timeout: 240000 }, async () => {
+  const count = () => {
+    try {
+      return execFileSync("/usr/bin/pgrep", ["-f", "chrome-headless-shell"], { encoding: "utf8" }).trim().split("\n").filter(Boolean).length;
+    } catch {
+      return 0;
+    }
+  };
+  const before = count();
+  const dir = workDir(make("long.mp4", { seconds: 40 }));
+  const q = createJobQueue({ dir, tools: { ...tools, node: process.execPath, remotion: true } });
+  q.add({ id: "mc", input: "in.mp4", plan: withMotion({ encoder: "videotoolbox" }) });
+  const end = Date.now() + 120000;
+  while (!(q.get("mc").state === "rendering" && q.get("mc").progress > 0.4) && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(q.get("mc").state, "rendering");
+  q.cancel("mc");
+  assert.equal((await waitFor(q, "mc")).state, "cancelled");
+  await new Promise((r) => setTimeout(r, 2500));
+  assert.ok(count() <= before, `headless browsers left: ${count()} (before ${before})`);
+  assert.deepEqual(readdirSync(join(dir, "tmp")), []);
+});
+
+test("Remotion's browser is found from the companion folder whatever the current folder (no second download)", { skip: remotionSkip }, () => {
+  const p = browserPath();
+  assert.ok(p && p.includes(join("node_modules", ".remotion")), p);
+  const cwd = process.cwd();
+  try {
+    process.chdir(tmpdir());
+    assert.equal(browserPath(), p);
+    assert.equal(detectRemotion().ok, true);
+  } finally {
+    process.chdir(cwd);
+  }
+  assert.equal(browserPath(tmpdir()), null);
 });

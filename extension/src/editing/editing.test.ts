@@ -59,6 +59,16 @@ describe("edit rules", () => {
     const p = buildEditPlan({ width: 1920, height: 1080, duration: 30, peakSec: null, layout: { kind: "action" }, actionPath: null }, DEFAULT_SETTINGS.editing);
     if ("error" in p) throw new Error(p.error);
     expect(p.notes.join(" ")).toMatch(/No action path/);
+    // 4.3: the motion style zooms at the strongest moment (in seconds of the Short); the plain style has no motion.
+    const m = buildEditPlan({ width: 1920, height: 1080, duration: 60, peakSec: 40, layout: null, actionPath: null }, DEFAULT_SETTINGS.editing);
+    expect(m).toMatchObject({ template: "remotion_clean_gaming_v1", trim: { start: 32 }, motion: { zoomAt: 8, zoomScale: 1.12, fadeIn: 0.25 } });
+    const early = buildEditPlan({ width: 1920, height: 1080, duration: 30, peakSec: null, layout: null, actionPath: null }, DEFAULT_SETTINGS.editing);
+    expect(early).toMatchObject({ motion: { zoomAt: null } });
+    const plain = buildEditPlan({ width: 1920, height: 1080, duration: 60, peakSec: 40, layout: null, actionPath: null }, S({ style: "clean_gaming" }).editing);
+    expect(plain).toMatchObject({ template: "ffmpeg_clean_v1" });
+    expect("motion" in plain).toBe(false);
+    if ("error" in m || "error" in plain) throw new Error("no plan");
+    expect(dedupeKey(1, m)).not.toBe(dedupeKey(1, plain));
     expect(buildEditPlan({ width: 1080, height: 1920, duration: 30, peakSec: null, layout: null, actionPath: null }, DEFAULT_SETTINGS.editing)).toEqual({ error: "Only landscape recordings are edited into Shorts." });
     expect(dedupeKey(1, p)).toBe(dedupeKey(1, { ...p }));
     expect(dedupeKey(1, p)).not.toBe(dedupeKey(1, { ...p, encoder: "x264" }));
@@ -68,7 +78,8 @@ describe("edit rules", () => {
     expect(sanitizeSettings({}).editing).toEqual(DEFAULT_SETTINGS.editing);
     expect(DEFAULT_SETTINGS.editing.captions).toBe(false);
     expect(sanitizeSettings({ editing: { autoFrom: 60, offerFrom: 80 } }).editing).toMatchObject({ autoFrom: 80, offerFrom: 80 });
-    expect(sanitizeSettings({ editing: { encoder: "nvenc", style: "wild", offerFrom: 500 } }).editing).toMatchObject({ encoder: "videotoolbox", style: "clean_gaming", offerFrom: 100 });
+    expect(sanitizeSettings({ editing: { encoder: "nvenc", style: "wild", offerFrom: 500 } }).editing).toMatchObject({ encoder: "videotoolbox", style: "clean_gaming_motion", offerFrom: 100 });
+    expect(sanitizeSettings({ editing: { style: "clean_gaming" } }).editing.style).toBe("clean_gaming");
   });
 });
 
@@ -149,7 +160,7 @@ describe("editing manager", () => {
     // (The test database doesn't keep Blobs as Blobs, so sizes are checked in real Chrome.)
     expect(f.files.has(`sh-edit-${job.id}-in.mp4`)).toBe(true);
     const start = f.calls.find((c) => c.type === "edit/start")!;
-    expect(start.payload.plan).toMatchObject({ output: { width: 1080, height: 1920 }, template: "ffmpeg_clean_v1" });
+    expect(start.payload.plan).toMatchObject({ output: { width: 1080, height: 1920 }, template: "remotion_clean_gaming_v1", motion: { zoomScale: 1.12 } });
     expect(f.holds()).toBe(1);
     f.emit({ ...f.jobs.get(job.companion_id)!, state: "encoding", step: "Making the vertical Short (FFmpeg)", progress: 0.5 });
     await settle();
@@ -160,7 +171,7 @@ describe("editing manager", () => {
     expect(done.state).toBe("done");
     const assets = await listAssets(clip);
     const edited = assets.find((a) => a.kind === "edited_vertical")!;
-    expect(edited).toMatchObject({ status: "ready", width: 1080, height: 1920, template: "ffmpeg_clean_v1", edit_job_id: job.id, has_thumbnail: true });
+    expect(edited).toMatchObject({ status: "ready", width: 1080, height: 1920, template: "remotion_clean_gaming_v1", edit_job_id: job.id, has_thumbnail: true });
     expect(edited.metrics?.encoder).toBe("h264_videotoolbox");
     expect(await assetBlob(edited)).toBeDefined();
     expect(await assetThumbnail(edited.id)).toBeDefined();

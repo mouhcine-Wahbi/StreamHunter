@@ -66,6 +66,17 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       if (Number(process.versions.node.split(".")[0]) < 22) throw new Error(`Node 22 or later is required (this is ${process.version}).`);
       const r = install({ extensionId: arg("--extension-id"), chromeDir, home });
       console.log(`Registered with Chrome: ${r.manifest}\nLauncher: ${r.launcher}\nWork folder: ${home}\n`);
+      // Remotion's headless browser (one download from Google's servers, kept in node_modules/.remotion).
+      if (existsSync(join(dirname(fileURLToPath(import.meta.url)), "node_modules", "@remotion", "renderer"))) {
+        try {
+          const { ensureBrowser } = await import("@remotion/renderer");
+    // Remotion keeps its browser under the nearest package.json from the current folder: this one.
+    process.chdir(dirname(fileURLToPath(import.meta.url)));
+          await ensureBrowser({ logLevel: "error" });
+        } catch (e) {
+          console.log(`Remotion's browser couldn't be set up: ${e?.message ?? e}`);
+        }
+      } else console.log("Remotion isn't installed (run npm install here first); edited Shorts will have no zoom or captions.");
       const tools = await detectTools();
       for (const t of Object.values(tools)) console.log(`${t.ok ? "✓" : "✗"} ${t.name.padEnd(8)} ${t.version ?? "—"}  ${t.ok ? "" : `${t.detail} (needs ${t.min} for ${t.why})`}`);
       console.log("\nReload StreamHunter → Settings → Companion → Check again.");

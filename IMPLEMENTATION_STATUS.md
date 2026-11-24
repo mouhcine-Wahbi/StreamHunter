@@ -1,6 +1,6 @@
 # StreamHunter — Implementation Status
 
-_Last updated: 2026-11-23 (4.0 in progress, branch `streamhunter-3.0`)_
+_Last updated: 2026-11-24 (4.0 in progress, branch `streamhunter-3.0`)_
 
 Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possible with official APIs
 
@@ -29,6 +29,16 @@ Legend: ✅ done & verified · 🟡 partial · ⏳ not started · 🚫 not possi
 | Real Chrome end to end (Chrome 158, test profile, companion 0.2.0) | ✅ | Facecam clip: vertical version made → scored 34 (low) → **not edited at the default 85** → "edit automatically from" set to 34 and the vertical version remade → edited automatically 7 s later, trimmed to start 8 s before the peak (12.0 s), imported. Asking again returned the same edit. Action clip: Edit button path (manual) → 20.1 s Short. Both: 1080×1920 H.264 + AAC, full decode clean, played and seeked in Chrome. Companion peak 65 MB, FFmpeg peak 233–281 MB. Work folder empty afterwards |
 | Follow-the-action tracking (fix after 4.2) | ✅ unit tests (7 new), replay of real clips, real Chrome | Two causes, both fixed. (1) Chrome shrank each frame to the 64×36 motion probe at low quality, sampling only a few pixels, so motion was seen on 108 of 600 frames; the probe now uses high-quality smoothing (averaging). (2) The tracker had a dead zone and closed 8% of the gap per frame, so moving action always trailed; it now estimates the speed and aims ahead as far as that speed is steady, glides over repeated frames (low frame-rate sources), and keeps the dead zone while the action is still or its speed uncertain. Real Chrome, action.mp4 (box moving 80 px/s): box off-centre median **30 px** in the Short (was 371 px), never cut by the edge (was cut in 32 of 38 samples). Trade-off: on the busy test pattern (facecam.mp4) the window follows its moving elements more readily: 9 moves over 80 px in 20 s instead of 4. Not measured: the extra CPU of high-quality smoothing in the probe; real streams |
 | Unverified | ⏳ | Your own Chrome (companion not installed there); the real permission prompt; real recorded streams (only test files); a clip scoring 85+ naturally (test clips score 34–45); "wait while recording" with a real recording (unit test only); editing a long clip (> 2 min) |
+
+### Phase 4.3 — Remotion motion template
+
+| Item | Status | Evidence / notes |
+|---|---|---|
+| Companion 0.3.0: Remotion 4.0.545 + React 19.2.0 pinned; template `CleanGaming` (1080×1920): gameplay zoom ≤ 1.15× around the strongest moment (eased in and out over ~2 s), 0.25 s fade in, facecam never zoomed; captions slot (off, filled in 4.4). FFmpeg makes the base, Remotion renders on top (H.264 CRF 18, AAC, BT.709 tags so colours match), remuxed with faststart | ✅ 5 new companion tests (21 total), real render | Zoom only at the peak, facecam unchanged (frame differences checked against the FFmpeg-only Short); cancel during the render stops Remotion's browser and leaves no files; without Remotion the Short is still made with a note |
+| No network while rendering | ✅ | No licence key passed (a key would send a usage event to remotion.pro). The browser path is given explicitly: found in real Chrome that Remotion otherwise looked for its browser relative to the current folder (Chrome starts the companion in `bin/`), downloaded a second 459 MB copy there and timed out; fixed and covered by a test |
+| Extension: Settings → Editing → Style ("Clean gaming with motion", default; or "Clean gaming" FFmpeg only), plan `motion {zoomAt, 1.12×, 0.25 s}`, state "Adding motion" with progress, Companion tools table shows Remotion | ✅ 248 tests, typecheck, build | |
+| Real Chrome (test profile, companion 0.3.0) | ✅ | Auto-edit (facecam, threshold lowered to 34) and manual Edit (action) both done: 1080×1920 H.264 + AAC, full decode clean, template `remotion_clean_gaming_v1`. **17.4 s and 15.2 s** wall for 12 s / 20 s Shorts (was 2–3 s with FFmpeg only); CPU 85–91 s; process-tree peak 4.2–5.0 GB (sum of RSS across the headless browser's processes, which counts shared memory more than once: an upper bound) |
+| Unverified | ⏳ | Remotion on a machine without the installer's browser download; long Shorts (only 12–20 s tested); memory on an 8 GB Mac |
 
 ## v3.0 — in progress (branch `streamhunter-3.0`, not released)
 

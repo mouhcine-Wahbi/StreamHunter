@@ -13,7 +13,7 @@ import { detectTools } from "./tools.mjs";
 import { freeBytes, startFileServer } from "./server.mjs";
 import { createJobQueue } from "./jobs.mjs";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 export const PROTOCOL = 1;
 
 /** "chrome-extension://<id>/" (manifest form) → "chrome-extension://<id>" (HTTP Origin form). */
@@ -50,7 +50,7 @@ export function createCompanion({ dir, caller, write, exit, env = process.env })
   const jobsReady = async () => {
     tools ??= await detectTools(env);
     if (!tools.ffmpeg.ok || !tools.ffprobe.ok) throw new Error("FFmpeg and FFprobe are needed for editing. Install them with Homebrew: brew install ffmpeg");
-    queue ??= createJobQueue({ dir, tools: { ffmpeg: tools.ffmpeg.path, ffprobe: tools.ffprobe.path }, log, emit: write });
+    queue ??= createJobQueue({ dir, tools: { ffmpeg: tools.ffmpeg.path, ffprobe: tools.ffprobe.path, node: process.execPath, remotion: Boolean(tools.remotion?.ok) }, log, emit: write });
     return queue;
   };
 

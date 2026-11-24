@@ -2,9 +2,11 @@
  * Finds the local tools and their versions. Chrome starts the companion with a minimal PATH, so the
  * usual Homebrew folders are searched too. Commands run with execFile (no shell) and a timeout.
  */
+import { browserPath } from "./render.mjs";
+import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
-import { accessSync, constants, readFileSync, realpathSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 
 const EXTRA_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
 
@@ -86,8 +88,23 @@ async function probe(name, dirs) {
   return { name, found: true, path, version, ok, detail: ok ? null : version ? `Version ${version} is older than ${req.min}` : "Version could not be read", ...extra };
 }
 
+export const REMOTION = { min: "4.0.545", why: "zooms, openings and captions in edited Shorts (Remotion templates)" };
+
+/** Remotion lives in the companion's own node_modules (npm install), with its headless browser. */
+export function detectRemotion(companionDir = fileURLToPath(new URL("..", import.meta.url))) {
+  const pkg = join(companionDir, "node_modules", "@remotion", "renderer", "package.json");
+  const base = { name: "remotion", min: REMOTION.min, why: REMOTION.why };
+  if (!existsSync(pkg)) return { ...base, found: false, path: null, version: null, ok: false, detail: "Not installed: run npm install in the companion folder" };
+  const version = JSON.parse(readFileSync(pkg, "utf8")).version;
+  const browser = Boolean(browserPath(companionDir));
+  const ok = atLeast(version, REMOTION.min) && browser;
+  return { ...base, found: true, path: dirname(pkg), version, ok, detail: ok ? null : !browser ? "Its headless browser isn't downloaded yet: run the installer again" : `Version ${version} is older than ${REMOTION.min}` };
+}
+
 export async function detectTools(env = process.env) {
   const dirs = searchDirs(env);
   const list = await Promise.all(Object.keys(REQUIREMENTS).map((n) => probe(n, dirs)));
-  return Object.fromEntries(list.map((t) => [t.name, { ...t, min: REQUIREMENTS[t.name].min, why: REQUIREMENTS[t.name].why }]));
+  const tools = Object.fromEntries(list.map((t) => [t.name, { ...t, min: REQUIREMENTS[t.name].min, why: REQUIREMENTS[t.name].why }]));
+  tools.remotion = detectRemotion();
+  return tools;
 }

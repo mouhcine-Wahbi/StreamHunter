@@ -7,7 +7,10 @@ import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { setPriority } from "node:os";
 import { join } from "node:path";
-import { checkOutput, checkPlan, expectedDuration, ffmpegArgs, readProbe, TEMPLATE_FFMPEG } from "./plan.mjs";
+import { checkOutput, checkPlan, expectedDuration, ffmpegArgs, motionProps, readProbe, TEMPLATE_FFMPEG } from "./plan.mjs";
+import { fileURLToPath } from "node:url";
+
+const RENDER_WORKER = fileURLToPath(new URL("./render.mjs", import.meta.url));
 import { inside, isSafeName } from "./paths.mjs";
 
 export const TERMINAL = new Set(["done", "failed", "cancelled"]);
@@ -22,12 +25,25 @@ export function parseCpuTime(s) {
   return Math.round(((Number(d ?? 0) * 24 + Number(h ?? 0)) * 3600 + Number(min) * 60 + Number(sec)) * 1000);
 }
 
-function sample(pid) {
+/** Memory and CPU time of a process and all its descendants (FFmpeg, or Remotion and its headless browser). */
+export function sampleTree(pid) {
   return new Promise((resolve) => {
-    execFile("/bin/ps", ["-o", "rss=,time=", "-p", String(pid)], { timeout: 2000 }, (err, out) => {
+    execFile("/bin/ps", ["-axo", "pid=,ppid=,rss=,time="], { timeout: 2000, maxBuffer: 4 << 20 }, (err, out) => {
       if (err) return resolve(null);
-      const [rss, time] = out.trim().split(/\s+/);
-      resolve({ rssBytes: Number(rss) * 1024, cpuMs: parseCpuTime(time) });
+      const rows = out.trim().split("\n").map((l) => l.trim().split(/\s+/));
+      const kids = new Map();
+      for (const [p, pp] of rows) kids.set(pp, [...(kids.get(pp) ?? []), p]);
+      const tree = new Set([String(pid)]);
+      const stack = [String(pid)];
+      while (stack.length) for (const k of kids.get(stack.pop()) ?? []) if (!tree.has(k)) (tree.add(k), stack.push(k));
+      let rssBytes = 0;
+      const cpu = {};
+      for (const [p, , rss, time] of rows)
+        if (tree.has(p)) {
+          rssBytes += Number(rss) * 1024;
+          cpu[p] = parseCpuTime(time);
+        }
+      resolve({ rssBytes, cpu });
     });
   });
 }
@@ -68,7 +84,8 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
 
   function run(file, args, onLine) {
     return new Promise((resolve) => {
-      const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"] });
+      // Own process group, so cancel stops the program and everything it started (Remotion's browser).
+      const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"], detached: true, cwd: dir });
       try {
         setPriority(child.pid, nice);
       } catch {
@@ -101,7 +118,7 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
     }
   }
 
-  async function process(job) {
+  async function work(job) {
     const input = inside(files, job.input);
     const out = join(files, `${job.id}-out.mp4`);
     const thumb = join(files, `${job.id}-thumb.jpg`);
@@ -117,15 +134,18 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
       if (problems.length) throw new Error(`The edit plan doesn't fit this clip: ${problems.join("; ")}`);
       const want = expectedDuration(job.plan, info);
 
+      const motion = Boolean(job.plan.motion);
+      const remotion = motion && tools.remotion;
+      const share = remotion ? 0.35 : 0.99; // part of the progress bar for the FFmpeg step
       update(job, { state: "encoding", step: "Making the vertical Short (FFmpeg)", progress: 0 });
       let peak = 0;
-      let cpu = 0;
+      const cpuByPid = {};
       const timer = setInterval(async () => {
         const pid = running?.child?.pid;
-        const s = pid ? await sample(pid) : null;
+        const s = pid ? await sampleTree(pid) : null;
         if (s) {
           peak = Math.max(peak, s.rssBytes);
-          cpu = Math.max(cpu, s.cpuMs);
+          for (const [p, ms] of Object.entries(s.cpu)) cpuByPid[p] = Math.max(cpuByPid[p] ?? 0, ms);
         }
       }, 400);
       let lastEmit = 0;
@@ -133,12 +153,62 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
         const m = /^out_time_us=(\d+)/.exec(line);
         if (m && want > 0 && Date.now() - lastEmit > 500) {
           lastEmit = Date.now();
-          update(job, { progress: Math.min(0.99, Number(m[1]) / 1e6 / want) });
+          update(job, { progress: Math.min(share, (Number(m[1]) / 1e6 / want) * share) });
         }
       });
+      if (job.state === "cancelled") {
+        clearInterval(timer);
+        throw new Cancelled();
+      }
+      if (r.code !== 0) {
+        clearInterval(timer);
+        throw new Error(`FFmpeg failed: ${(r.err || r.signal || "unknown error").trim().split("\n").slice(-3).join(" ")}`);
+      }
+      const extraNotes = [];
+      let engine = job.plan.encoder === "videotoolbox" ? "h264_videotoolbox" : "libx264";
+      if (motion && !remotion) extraNotes.push("Remotion isn't set up in the companion, so this Short has no zoom or opening fade (run the installer again).");
+      if (remotion) {
+        update(job, { state: "rendering", step: "Adding the zoom and opening (Remotion)", progress: share });
+        const base = await probe(partial);
+        const rendered = join(dir, "tmp", `${job.id}-render.mp4`);
+        const spec = join(dir, "tmp", `${job.id}-render.json`);
+        writeFileSync(spec, JSON.stringify({ workDir: dir, input: partial, output: rendered, props: motionProps(job.plan, base) }));
+        let workerError = null;
+        const rr = await run(tools.node, [RENDER_WORKER, spec], (line) => {
+          try {
+            const m = JSON.parse(line);
+            if (typeof m.progress === "number" && Date.now() - lastEmit > 500) {
+              lastEmit = Date.now();
+              update(job, { progress: Math.min(0.97, share + m.progress * (0.97 - share)) });
+            }
+            if (m.error) workerError = m.error;
+          } catch {
+            // not a progress line
+          }
+        });
+        rmSync(spec, { force: true });
+        if (job.state === "cancelled") {
+          clearInterval(timer);
+          rmSync(rendered, { force: true });
+          throw new Cancelled();
+        }
+        if (rr.code !== 0 || !existsSync(rendered)) {
+          clearInterval(timer);
+          log("render_failed", { id: job.id, code: rr.code, signal: rr.signal ?? null, stderr: (rr.err || "").slice(-4000) });
+          rmSync(rendered, { force: true });
+          throw new Error(`Remotion failed: ${workerError ?? (rr.err || "unknown error").trim().split("\n").slice(-2).join(" ")}`);
+        }
+        // Same streams, index at the front so players start right away.
+        const fin = await run(tools.ffmpeg, ["-v", "error", "-y", "-i", rendered, "-c", "copy", "-movflags", "+faststart", partial]);
+        rmSync(rendered, { force: true });
+        if (fin.code !== 0) {
+          clearInterval(timer);
+          throw new Error(`FFmpeg couldn't finish the Short: ${fin.err.trim().slice(0, 200)}`);
+        }
+        engine = `${engine} + Remotion`;
+      }
       clearInterval(timer);
-      if (job.state === "cancelled") throw new Cancelled();
-      if (r.code !== 0) throw new Error(`FFmpeg failed: ${(r.err || r.signal || "unknown error").trim().split("\n").slice(-3).join(" ")}`);
+      const cpu = Object.values(cpuByPid).reduce((a, b) => a + b, 0);
 
       update(job, { state: "validating", step: "Checking the Short plays correctly", progress: 1 });
       const outInfo = await probe(partial);
@@ -154,8 +224,8 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
         step: "Ready",
         progress: 1,
         output: { video: `${job.id}-out.mp4`, thumbnail: existsSync(thumb) ? `${job.id}-thumb.jpg` : null, width: outInfo.width, height: outInfo.height, duration: Math.round(outInfo.duration * 100) / 100, size: statSync(out).size, has_audio: outInfo.hasAudio },
-        metrics: { wall_ms: Date.now() - started, cpu_ms: cpu, peak_rss_bytes: peak, encoder: job.plan.encoder === "videotoolbox" ? "h264_videotoolbox" : "libx264" },
-        notes: [...(job.plan.notes ?? []), ...(info.hasAudio ? (job.plan.audio?.loudnorm ? ["Loudness normalized to about −14 LUFS."] : []) : ["The clip has no audio."])],
+        metrics: { wall_ms: Date.now() - started, cpu_ms: cpu, peak_rss_bytes: peak, encoder: engine },
+        notes: [...(job.plan.notes ?? []), ...extraNotes, ...(info.hasAudio ? (job.plan.audio?.loudnorm ? ["Loudness normalized to about −14 LUFS."] : []) : ["The clip has no audio."])],
       });
       rmSync(input, { force: true });
     } catch (e) {
@@ -180,7 +250,7 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
           update(next, { state: "failed", step: "Failed", error: next.error ?? "Stopped after repeated interruptions." });
           continue;
         }
-        await process(next);
+        await work(next);
       }
     } finally {
       pumping = false;
@@ -206,7 +276,13 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
       if (!job) return null;
       if (TERMINAL.has(job.state)) return publicJob(job);
       update(job, { state: "cancelled", step: "Cancelled", progress: 0 });
-      if (running?.id === id) running.child?.kill("SIGTERM");
+      if (running?.id === id && running.child?.pid) {
+        try {
+          process.kill(-running.child.pid, "SIGTERM");
+        } catch {
+          running.child.kill("SIGTERM");
+        }
+      }
       return publicJob(job);
     },
     /** Forget a finished job and delete its files (after the extension imported the output). */

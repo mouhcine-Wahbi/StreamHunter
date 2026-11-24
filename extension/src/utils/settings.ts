@@ -191,7 +191,7 @@ export function sanitizeSettings(input: unknown): Settings {
       enabled: bool(ed.enabled, d.editing.enabled),
       autoFrom: Math.max(offerFrom, clampInt(ed.autoFrom, 0, 100, d.editing.autoFrom)),
       offerFrom,
-      style: oneOf(ed.style, ["clean_gaming"] as const, d.editing.style),
+      style: oneOf(ed.style, ["clean_gaming_motion", "clean_gaming"] as const, d.editing.style),
       captions: bool(ed.captions, d.editing.captions),
       loudness: bool(ed.loudness, d.editing.loudness),
       encoder: oneOf(ed.encoder, ["videotoolbox", "x264"] as const, d.editing.encoder),

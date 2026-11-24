@@ -22,7 +22,7 @@ export const COMPANION_LABEL: Record<CompanionState, string> = {
 };
 export const COMPANION_TONE: Record<CompanionState, BadgeTone> = { connected: "live", no_permission: "warn", not_installed: "neutral", forbidden: "warn", error: "danger" };
 
-const TOOL_LABEL: Record<string, string> = { ffmpeg: "FFmpeg", ffprobe: "FFprobe", whisper: "Whisper", "yt-dlp": "yt-dlp", deno: "Deno" };
+const TOOL_LABEL: Record<string, string> = { ffmpeg: "FFmpeg", ffprobe: "FFprobe", whisper: "Whisper", "yt-dlp": "yt-dlp", deno: "Deno", remotion: "Remotion" };
 
 function CopyText({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);

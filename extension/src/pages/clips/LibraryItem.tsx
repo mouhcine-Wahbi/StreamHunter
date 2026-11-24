@@ -422,7 +422,7 @@ function EditPanel({ clip, edits, edited, onChanged }: { clip: LibraryClip; edit
       <>
         <span role="status" aria-label={`Edit: ${job.step}`}>
           {job.step}
-          {job.state === "encoding" ? ` ${Math.round(job.progress * 100)}%` : "…"}
+          {(job.state === "encoding" || job.state === "rendering") ? ` ${Math.round(job.progress * 100)}%` : "…"}
         </span>
         <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} loading={cancel.pending} onClick={() => void cancel.run()}>
           Cancel edit

@@ -67,7 +67,7 @@ export function explainDisconnect(message: string | undefined): { state: Compani
 /** An event the companion sends without being asked (4.2: edit job progress). */
 export interface CompanionJob {
   id: string;
-  state: "queued" | "probing" | "encoding" | "validating" | "done" | "failed" | "cancelled";
+  state: "queued" | "probing" | "encoding" | "rendering" | "validating" | "done" | "failed" | "cancelled";
   step: string;
   progress: number;
   error: string | null;

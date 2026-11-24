@@ -147,11 +147,12 @@ test("companion: answers only the registered extension", async () => {
   c.close();
 });
 
-test("end to end: Chrome-style launch, hello with tools and file channel, unknown request, exits when stdin closes", async () => {
+test("end to end: Chrome-style launch, hello with tools and file channel, unknown request, exits when stdin closes", async (t) => {
   const home = tmp();
   const chromeDir = tmp();
   const { launcher } = install({ extensionId: ID, chromeDir, home });
   const p = spawn(launcher, [`chrome-extension://${ID}/`], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin" } });
+  t.after(() => p.exitCode === null && p.kill());
   const msgs = [];
   p.stdout.on("data", createDecoder((m) => msgs.push(m), (e) => assert.fail(e)));
   const next = async (n) => {
@@ -164,7 +165,7 @@ test("end to end: Chrome-style launch, hello with tools and file channel, unknow
   assert.equal(hello.data.protocol, 1);
   assert.equal(hello.data.work_dir, home);
   assert.match(hello.data.token, /^[0-9a-f]{64}$/);
-  assert.deepEqual(Object.keys(hello.data.tools).sort(), ["deno", "ffmpeg", "ffprobe", "whisper", "yt-dlp"]);
+  assert.deepEqual(Object.keys(hello.data.tools).sort(), ["deno", "ffmpeg", "ffprobe", "remotion", "whisper", "yt-dlp"]);
   const put = await fetch(`http://127.0.0.1:${hello.data.port}/v1/files/t.bin`, { method: "PUT", headers: { origin: ORIGIN, "x-sh-token": hello.data.token }, body: "hello" });
   assert.equal(put.status, 200);
   assert.equal(readFileSync(join(home, "files", "t.bin"), "utf8"), "hello");

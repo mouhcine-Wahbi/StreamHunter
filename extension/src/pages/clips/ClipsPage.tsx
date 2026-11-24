@@ -170,7 +170,7 @@ function EditQueue({ jobs, titleOf }: { jobs: EditJob[]; titleOf: (clipId: numbe
             <span className="text-fg">{titleOf(j.clip_id)}</span>
             <span className={j.state === "failed" ? "text-danger" : "text-fg-muted"}>
               {j.state === "failed" ? `Failed: ${j.error ?? "unknown error"}` : j.step}
-              {j.state === "encoding" ? ` ${Math.round(j.progress * 100)}%` : ""}
+              {(j.state === "encoding" || j.state === "rendering") ? ` ${Math.round(j.progress * 100)}%` : ""}
             </span>
             <span className="text-fg-subtle">{j.trigger === "auto" ? `automatic (score ${j.score})` : "you asked"}</span>
           </li>

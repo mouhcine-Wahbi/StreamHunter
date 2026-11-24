@@ -48,6 +48,9 @@ test("start-up clean-up: tmp leftovers, week-old finished jobs with their files,
   assert.equal(q.get("recent").state, "done");
   assert.ok(logs.some(([e, d]) => e === "job_unreadable_removed" && d.file === "broken.json"));
   assert.equal(usedBytes(dir) > 3000, true);
+  // On request (Settings → Companion → Clean up): the same rules, now.
+  writeFileSync(join(dir, "tmp", "z.part"), Buffer.alloc(10));
+  assert.deepEqual(q.housekeeping(), { tmp: 1, jobs: 0, files: 0, bytes: 10 });
 });
 
 test("no job starts when the disk is nearly full; the message says how much is free", async () => {

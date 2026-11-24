@@ -332,3 +332,11 @@ describe("clip content (stored on the clip)", () => {
     await expect(prepareContent(99999, settings())).rejects.toThrow(/no longer exists/);
   });
 });
+
+describe("clips cut from a video file", () => {
+  it("say “video”, not “stream”", () => {
+    const f = { clipTitle: null, creator: "My Channel", platform: "youtube" as const, category: null, reasons: ["Loud reaction"], durationSec: 30, originalUrl: "https://www.youtube.com/watch?v=aaaaaaaaaa1" };
+    expect(templateMetadata({ ...f, fromVideo: true }).youtube.description).toBe("Loud reaction.\nFrom My Channel's video.");
+    expect(templateMetadata(f).youtube.description).toBe("Loud reaction.\nHighlight from My Channel's stream.");
+  });
+});

@@ -133,11 +133,36 @@ export function CompanionSection() {
           </table>
         )}
         {status?.work_dir && (
-          <p className="text-fg-muted">
-            Work folder <code className="text-fg">{status.work_dir}</code> · uses {formatBytes(status.used_bytes ?? 0)} · {formatBytes(status.free_bytes ?? 0)} free on the disk
-          </p>
+          <div className="space-y-1">
+            <p className="text-fg-muted">
+              Work folder <code className="text-fg">{status.work_dir}</code> · uses {formatBytes(status.used_bytes ?? 0)} · {formatBytes(status.free_bytes ?? 0)} free on the disk
+            </p>
+            <WorkFolderCleanup />
+          </div>
         )}
       </div>
     </Section>
+  );
+}
+
+/**
+ * 4.7: the companion cleans its work folder at every start; this runs the same clean-up now
+ * (leftover temporary files, finished jobs older than a week, files no job uses after a day).
+ */
+function WorkFolderCleanup() {
+  const [notice, setNotice] = useState<string | null>(null);
+  const clean = useAction(async () => {
+    const r = await sendRequest({ type: "companion/cleanup" });
+    const n = r.removed.tmp + r.removed.jobs + r.removed.files;
+    setNotice(n ? `Removed ${n} leftover item${n === 1 ? "" : "s"} (${formatBytes(r.removed.bytes)}). The folder now uses ${formatBytes(r.used_bytes)}.` : `Nothing to remove. The folder uses ${formatBytes(r.used_bytes)}.`);
+  });
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button size="sm" variant="ghost" loading={clean.pending} onClick={() => void clean.run()}>
+        Clean up work folder
+      </Button>
+      {notice && <span className="text-fg-muted">{notice}</span>}
+      {clean.error && <span className="text-danger">{clean.error}</span>}
+    </div>
   );
 }

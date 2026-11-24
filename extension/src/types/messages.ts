@@ -33,6 +33,7 @@ export type RuntimeRequest =
   // Local companion (4.0): connect and check tools; the file channel address for this extension's pages.
   | { type: "companion/check" }
   | { type: "companion/endpoint" }
+  | { type: "companion/cleanup" }
   // 4.0 editing (companion)
   | { type: "edit/start"; clipId: number }
   | { type: "edit/cancel"; id: number }
@@ -101,6 +102,7 @@ export interface ResponseMap {
   "ai/status": { onDevice: import("@/metadata/generate").OnDeviceState; where: "worker" | "offscreen" | null };
   "companion/check": import("@/companion/client").CompanionStatus;
   "companion/endpoint": import("@/companion/client").CompanionEndpoint;
+  "companion/cleanup": { removed: { tmp: number; jobs: number; files: number; bytes: number }; used_bytes: number; free_bytes: number };
   "edit/start": import("@/local/edits").EditJob | null;
   "edit/cancel": import("@/local/edits").EditJob | null;
   "edit/retry": import("@/local/edits").EditJob;
@@ -145,6 +147,7 @@ export const REQUEST_TYPES: ReadonlySet<RuntimeRequest["type"]> = new Set([
   "ai/status",
   "companion/check",
   "companion/endpoint",
+  "companion/cleanup",
   "edit/start",
   "edit/cancel",
   "edit/retry",

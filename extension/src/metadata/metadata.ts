@@ -15,6 +15,8 @@ export interface ClipFacts {
   reasons: string[];
   durationSec: number | null;
   originalUrl: string | null;
+  /** Cut from an imported video file (Clipper, Analyze & cut), not from a recorded livestream. */
+  fromVideo?: boolean;
   /** 4.4: exact spoken lines from the transcript (seconds into the clip). */
   quotes?: { at: number; text: string }[];
 }
@@ -55,7 +57,7 @@ export const LIMITS: Record<Destination, { title: number; text: number; hashtags
 };
 const X_LINK = 23;
 
-export function factsOf(clip: LocalClip & { original_url?: string | null }, streamer?: { username?: string; platform?: Platform } | null): ClipFacts {
+export function factsOf(clip: LocalClip & { original_url?: string | null; source_id?: number | null }, streamer?: { username?: string; platform?: Platform } | null): ClipFacts {
   const original =
     clip.original_url ??
     (streamer?.username && clip.platform === "twitch" ? `https://www.twitch.tv/${streamer.username}` : streamer?.username && clip.platform === "kick" ? `https://kick.com/${streamer.username}` : null);
@@ -67,6 +69,7 @@ export function factsOf(clip: LocalClip & { original_url?: string | null }, stre
     reasons: (clip.reasons ?? []).filter((r) => r && !/^Saved by you$/i.test(r)).slice(0, 4),
     durationSec: clip.duration_seconds,
     originalUrl: original,
+    fromVideo: clip.source_id != null,
   };
 }
 
@@ -142,7 +145,7 @@ export function templateMetadata(f: ClipFacts): Record<Destination, DestinationM
   const tags = [f.creator, ...(f.category ? [f.category] : []), ...(f.platform !== "local" ? [PLATFORM_NAME[f.platform]] : [])];
   const line = [what && `${what}.`, f.category && `Playing ${f.category}.`].filter(Boolean).join(" ");
   return {
-    youtube: { title: topic, description: [line, `Highlight from ${f.creator}'s stream.`].filter(Boolean).join("\n"), hashtags: ["Shorts", ...tags] },
+    youtube: { title: topic, description: [line, f.fromVideo ? `From ${f.creator}'s video.` : `Highlight from ${f.creator}'s stream.`].filter(Boolean).join("\n"), hashtags: ["Shorts", ...tags] },
     tiktok: { title: "", description: [topic, line].filter(Boolean).join(" · "), hashtags: tags },
     x: { title: "", description: f.clipTitle ? f.clipTitle : what ? `${f.creator}: ${what}` : `${f.creator}${f.category ? ` in ${f.category}` : ""}`, hashtags: tags.slice(0, 2) },
   };

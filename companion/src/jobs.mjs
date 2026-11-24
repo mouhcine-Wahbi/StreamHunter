@@ -524,6 +524,11 @@ export function createJobQueue({ dir, tools, log = () => undefined, emit = () =>
     resume: () => void pump(),
     /** What the start-up clean-up removed. */
     cleaned,
+    /** The same clean-up on request (Settings → Companion), only while no job runs. */
+    housekeeping() {
+      if (running) throw new Error("A job is running. Clean up when it has finished.");
+      return housekeeping();
+    },
     get busy() {
       return running !== null;
     },

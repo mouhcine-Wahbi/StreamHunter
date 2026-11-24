@@ -5,7 +5,7 @@
  * → clips, edited into Shorts by the usual score rules. Nothing is downloaded from YouTube here.
  */
 import { useEffect, useRef, useState } from "react";
-import { Check, Download, ExternalLink, FileVideo, Link2, Search, ShieldCheck, Scissors, X } from "lucide-react";
+import { Check, Download, ExternalLink, FileVideo, Trash2, Link2, Search, ShieldCheck, Scissors, X } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -22,7 +22,7 @@ import type { Candidate, SourceBasis } from "@/discovery/discovery";
 import type { SourceFile } from "@/local/sources";
 import { DESTINATION_LABEL, DESTINATIONS, RIGHTS_LABEL, type Destination, type RightsStatus } from "@/local/rights";
 import type { Page } from "@/types/api";
-import { formatDateTime } from "@/utils/format";
+import { formatBytes, formatDateTime } from "@/utils/format";
 
 const mmss = (s: number | null) => (s === null ? "—" : `${Math.floor(s / 3600) ? `${Math.floor(s / 3600)}:` : ""}${String(Math.floor((s % 3600) / 60)).padStart(Math.floor(s / 3600) ? 2 : 1, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`);
 
@@ -304,6 +304,38 @@ function ImportCard({ c, onChanged }: { c: Candidate; onChanged: () => void }) {
 }
 
 /**
+ * Delete the imported file (and its segments) to free storage. Clips already cut from it are kept:
+ * they are separate files in the Clip Library. Not while it is being analysed, transcribed or cut.
+ */
+function SourceDelete({ s, onChanged }: { s: SourceFile; onChanged: () => void }) {
+  const client = useApiClient();
+  const [confirming, setConfirming] = useState(false);
+  const del = useAction(async () => {
+    await client.delete(`/api/v1/sources/${s.id}`);
+    onChanged();
+  });
+  const busy = s.analysis === "queued" || s.analysis === "analyzing" || s.transcript_status === "running" || (s.pending_clips ?? []).length > 0;
+  if (!confirming)
+    return (
+      <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} disabled={busy} onClick={() => setConfirming(true)}>
+        Delete source file ({formatBytes(s.size_bytes)})
+      </Button>
+    );
+  return (
+    <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Confirm delete">
+      <span className="text-fg-muted">Delete this file and its segments? Clips already made from it stay in the Clip Library.</span>
+      <Button size="sm" variant="danger" loading={del.pending} onClick={() => void del.run()}>
+        Delete
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+        Keep
+      </Button>
+      {del.error && <p className="text-danger">{del.error}</p>}
+    </div>
+  );
+}
+
+/**
  * 4.6: yt-dlp, only when turned on in Settings, for a video approved as your own or with written
  * permission, confirmed here for this video. Hidden otherwise.
  */
@@ -381,6 +413,7 @@ function SourceCard({ c, s, tick, onChanged }: { c: Candidate; s: SourceFile; ti
         {s.transcript_error && <p className="text-fg-subtle">{s.transcript_error}</p>}
         {match && <p className={match.ok ? "text-fg-muted" : "text-warn"}>{match.message}</p>}
         {find.error && <p className="text-danger">{find.error}</p>}
+        <SourceDelete s={s} onChanged={onChanged} />
         {s.analysis === "analyzed" && (
           <Button size="sm" variant="ghost" loading={find.pending} onClick={() => void find.run()}>
             {list.length ? "Find segments again" : "Find segments"}

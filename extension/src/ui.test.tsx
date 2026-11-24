@@ -873,5 +873,14 @@ describe("4.5 YouTube Video Clipper", () => {
     await waitFor(() => expect(editing.fetchVideo).toHaveBeenCalledWith(expect.any(Number), true, expect.objectContaining({ clipper: { allowDownloadTool: true } })));
     await waitFor(() => expect(processing!.kick).toHaveBeenCalled());
     expect(await screen.findByRole("status", { name: "Source status" })).toHaveTextContent("Waiting to analyse…");
+    // Delete the source file: not while it is busy; then with a confirmation.
+    expect(screen.getByRole("button", { name: /Delete source file/ })).toBeDisabled();
+    const [src] = await db.all<{ id: number }>("sources");
+    await db.put("sources", { ...(await db.get<{ id: number }>("sources", src!.id))!, analysis: "failed", analysis_error: "Damaged" } as { id: number });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Delete source file/ })).toBeEnabled(), { timeout: 6000 });
+    await userEvent.click(screen.getByRole("button", { name: /Delete source file/ }));
+    await userEvent.click(within(screen.getByRole("group", { name: "Confirm delete" })).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Source status" })).toBeNull());
+    expect(await db.all("sources")).toEqual([]);
   }, 20000);
 });

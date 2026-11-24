@@ -73,6 +73,10 @@ export function createCompanion({ dir, caller, write, exit, env = process.env })
         return (await jobsReady()).add({ id: msg.id_job, input: msg.input, plan: msg.plan });
       case "transcribe/start":
         return (await jobsReady()).add({ id: msg.id_job, input: msg.input, kind: "transcribe", options: { language: msg.language ?? null } });
+      case "cleanup": {
+        const removed = (await jobsReady()).housekeeping();
+        return { removed, work_dir: dir, free_bytes: freeBytes(dir), used_bytes: usedBytes(dir) };
+      }
       case "fetch/start":
         if (msg.basis !== "own" && msg.basis !== "permission") throw new Error("yt-dlp is only for your own videos or videos you have written permission to download.");
         return (await jobsReady()).add({ id: msg.id_job, kind: "fetch", options: { video_id: msg.video_id, confirmed: msg.confirmed === true, basis: msg.basis } });

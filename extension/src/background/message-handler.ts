@@ -118,6 +118,16 @@ export async function handleMessage(
       case "companion/endpoint":
         if (!companion) return { ok: false, error: "The companion isn't available here." };
         return { ok: true, data: await companion.endpoint() };
+      case "companion/cleanup":
+        if (!companion) return { ok: false, error: "The companion isn't available here." };
+        try {
+          const r = await companion.request<{ removed: { tmp: number; jobs: number; files: number; bytes: number }; used_bytes: number; free_bytes: number }>("cleanup");
+          void companion.check().catch(() => undefined); // refresh the sizes shown in Settings
+          return { ok: true, data: r };
+        } catch (e) {
+          const m = e instanceof Error ? e.message : String(e);
+          return { ok: false, error: /Unknown request/i.test(m) ? "This companion can't clean up on request. Update it (run the installer from the new StreamHunter folder)." : m };
+        }
       case "edit/start":
       case "edit/cancel":
       case "edit/retry":
